@@ -360,14 +360,18 @@ Content (match gcp-to-aws's `DECISION.md` twin — same shape, Azure wording):
 > marker and stands alone as plain Markdown; the HTML report is a presentation upgrade, not
 > the handoff signal.
 
-After `DECISION.md` is written, run the post-gate feedback checkpoint per `SKILL.md`
-and close with: "Your decision is saved at `DECISION.md`. If you decide to migrate,
-say 'generate the Terraform and migration scripts' — everything is saved and I'll
-pick up from here." The web-handoff summary (`plan.json`) is **not** written here —
-it is deferred to `estimate.md`'s own "Run the phase" step 4, which runs only after
-`_postconditions`/`HANDOFF_OK` has passed (matching Generate's ordering exactly; see
-PR #435 review, databaseId 4240400327). Do not write `plan.json` or present its CTA
-from inside this step.
+After `DECISION.md` is written, run the post-gate feedback checkpoint per
+`SKILL.md`. **Do not emit a close/completion message here.** The single
+close for Option A — authored once, with the `PLAN_OK`/`PLAN_SKIP`
+knowledge needed to pick its wording — belongs to `estimate.md`'s own
+post-`HANDOFF_OK` "Run the phase" step 4, which runs after this step
+returns. Emitting a sentence here would duplicate that step's close on
+every normal Azure Option A run (PR #435 review, databaseId 4242622224).
+The web-handoff summary (`plan.json`) is likewise **not** written here —
+it is deferred to that same step 4, which runs only after
+`_postconditions`/`HANDOFF_OK` has passed (matching Generate's ordering
+exactly; see PR #435 review, databaseId 4240400327). Do not write
+`plan.json` or present any CTA or close text from inside this step.
 
 ### Why C writes `run_mode` before Generate loads
 
@@ -392,10 +396,9 @@ a reason to be more careful, not less.
 ### On A, do not nag
 
 Option A is a complete, successful run, not an abandoned one: the customer got a
-design and a costed decision. The close is the Step 3a sentence (the `DECISION.md`
-wording), followed only by `estimate.md`'s own post-`HANDOFF_OK` web-handoff block
-when the writer there prints `PLAN_OK`. Do not add a second pitch after either, and
-stop there.
+design and a costed decision. The close is `estimate.md`'s own post-`HANDOFF_OK`
+block (step 4), which runs once after Step 3a returns. Step 3a itself emits no
+close. Do not add a second pitch after it, and stop there.
 
 ---
 
