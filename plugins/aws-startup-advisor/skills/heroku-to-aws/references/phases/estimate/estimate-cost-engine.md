@@ -83,20 +83,22 @@ Use the best available source for Heroku monthly baseline (first match wins):
    - Set `current_costs.source: "pricing_cache"`
    - Set `current_costs.accuracy: "±5%"`
    - If any resource plan is not found in cache, mark as `"unpriced_heroku"` and exclude from total; add to warnings
-   - **Heroku Postgres Advanced** (plan/level string matches a `*-Performance`
-     level in the cache's Advanced Tier table rather than a Classic plan name):
-     apply the compute-month + storage-overage formula from that table's Usage
-     Rules (rule 9) instead of the flat-lookup rule above — this resource is
-     priced as `rate[level] × 1` (one instance at the discovered level; see
-     cache rule 9's "Known limitation" note — Discover's `addon` resource has
-     no field for instance pool count or leader/follower role, so a
-     high-availability or multi-pool Advanced cluster will be under-priced by
-     this formula) plus `max(0, data_size_gb - 100) × 0.20`, not a single
-     cache-row lookup. If the level is one of the cache's `unverified` rows,
-     treat it as a cache miss (`"unpriced_heroku"`, falls to rung 4) per the
-     normal rule. When any Advanced-tier resource was priced this way, append
-     its full-month assumption AND multi-pool under-pricing caveat (cache rule
-     9) to `baseline_note`.
+   - **Heroku Postgres Advanced** (`config.tier == "advanced"`, set by live
+     discovery when it captured and parsed `data:pg:info` output): apply the
+     compute-month + storage-overage formula from the cache's Advanced Tier
+     Usage Rules (rule 9) instead of the flat-lookup rule above — this
+     resource is priced as the sum of `rate[pool.level] × pool.instance_count`
+     over every entry in `config.advanced_pools[]` (leader plus every captured
+     follower pool; `instance_count` already includes the HA standby) plus
+     `max(0, data_size_gb - 100) × 0.20` once per addon, not a single
+     cache-row lookup. If **any** pool's level is one of the cache's
+     `unverified` rows, treat the entire resource as a cache miss
+     (`"unpriced_heroku"`, falls to rung 4) per the normal rule. An
+     Advanced-tier addon with no `advanced_pools` (discovered only via
+     Terraform) is also a cache miss (`"unpriced_heroku"`) — Terraform has no
+     equivalent to `data:pg:info`'s pool breakdown. When any Advanced-tier
+     resource was priced this way, append its full-month assumption (cache
+     rule 9) to `baseline_note`.
 
 4. **User-provided** — If neither live prices nor the pricing cache match any resource (unlikely with Terraform or live discovery), ask: "I need your current Heroku monthly spend to produce a meaningful cost comparison. What is your approximate Heroku monthly cost?" Use the answer.
    - Set `current_costs.source: "user_provided"`

@@ -77,7 +77,23 @@ Resource entry: `resource_id: "addon:{app_name}:{addon_service}:{plan}"`,
 **Enrich from info captures** (parse the `Key: Value` text lines; on unparseable
 text, keep the plan-only entry and record a warning):
 
-- `pg-<app>.out` → `pg_version`, `data_size_gb` (convert e.g. `10.5 GB`; MB → GB),
+- `pg-advanced-<app>.out`, parsed only when its manifest capture status is `ok`
+  (Advanced tier — checked first, before the Classic/Essential capture below):
+  parse `pg_version` and `data_size_gb` from the same `Key: Value` / unit-conversion
+  rules as Classic (`PG Version:`, `Data Size:`; convert e.g. `10.5 GB`; MB → GB —
+  these appear once per database, above the pool blocks). Set `tier: "advanced"`.
+  Then, for each `=== Leader pool ...` / `=== Follower pool <name> ...` block:
+  `role` is `"leader"` if the heading starts `Leader pool`, else `"follower"` with
+  `name` set to the token between `Follower pool` and `(attached`; find that
+  block's `<N> instances of <LEVEL>(...):` line and set `instance_count = N`,
+  `level = LEVEL`, `ha = true` iff the line ends `(HA):`, else `ha = false`.
+  Append one entry per pool to `advanced_pools[]`. If any pool-block line inside an
+  `ok` `pg-advanced-<app>.out` doesn't match this shape, keep the plan-only entry
+  (no `tier`/`advanced_pools`), fall through to the `pg-<app>.out` bullet below, and
+  record a warning.
+- `pg-<app>.out`, used when `pg-advanced-<app>.out`'s capture is not `ok` (i.e. this
+  database is Classic/Essential tier, or the Advanced probe itself failed/was
+  skipped) → `pg_version`, `data_size_gb` (convert e.g. `10.5 GB`; MB → GB),
   `table_count`, `connection_pooling` (`true` if a Connection Pooling line is
   present, `false` if absent — never omit the field). The `data_size_gb` value
   feeds downstream database-migration tool selection.

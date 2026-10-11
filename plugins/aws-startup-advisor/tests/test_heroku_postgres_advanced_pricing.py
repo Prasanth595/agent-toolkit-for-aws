@@ -43,6 +43,35 @@ COST_ENGINE = (
     / "estimate-cost-engine.md"
 )
 
+CAPTURE_MD = (
+    PLUGIN_ROOT
+    / "skills"
+    / "heroku-to-aws"
+    / "references"
+    / "phases"
+    / "discover"
+    / "discover-live-capture.md"
+)
+
+DISCOVER_LIVE = (
+    PLUGIN_ROOT
+    / "skills"
+    / "heroku-to-aws"
+    / "references"
+    / "phases"
+    / "discover"
+    / "discover-live.md"
+)
+
+SCHEMA_HEROKU = (
+    PLUGIN_ROOT
+    / "skills"
+    / "heroku-to-aws"
+    / "references"
+    / "shared"
+    / "schema-discover-heroku.md"
+)
+
 ADVANCED_LEVELS = [
     "4G-Performance",
     "8G-Performance",
@@ -126,29 +155,33 @@ def test_pricing_cache_usage_rules_document_advanced_formula() -> None:
 
 
 def test_pricing_cache_advanced_tier_documents_multi_pool_known_limitation() -> None:
-    # The design (§2.3, §3.4) required this gap be either resolved or
-    # explicitly documented as a known limitation. It was not resolved
-    # (Discover's addon schema has no pool-count field), so it must be
-    # documented here, and the formula must not claim to sum leader+follower
-    # pools when Discover cannot supply that data.
+    # Original design (§2.3, §3.4) required this gap be either resolved or
+    # explicitly documented as a known limitation. It was NOT resolved in that
+    # round (Discover's addon schema had no pool-count field at the time), so
+    # the cache documented it as a known limitation and priced one instance
+    # only. This PR's fix resolves the gap for LIVE discovery: Discover now
+    # captures `data:pg:info` and populates `advanced_pools[]` with per-pool
+    # level/instance_count/ha, so the formula sums `rate[level] × instance_count`
+    # across every captured pool. The known-limitation note is now narrowed to
+    # Terraform-only discovery (no live capture → no `advanced_pools` → cache
+    # miss), not "every Advanced addon is under-priced".
     text = PRICING_CACHE.read_text(encoding="utf-8")
     advanced_idx = text.index("### Advanced Tier")
     deprecated_idx = text.index("### Deprecated Plans")
     section = text[advanced_idx:deprecated_idx]
     assert "Known limitation" in section
-    assert "instance pool" in section.lower()
-    assert "under-priced" in section or "under-price" in section
+    assert "advanced_pools" in section
+    assert "Terraform" in section
+    assert "unpriced_heroku" in section
 
     usage_rules_idx = text.index("## Usage Rules")
     rules = text[usage_rules_idx:]
-    assert "summed across" not in rules.lower(), (
-        "Usage Rule 9 must not claim to sum leader+follower pools; "
-        "Discover's addon schema has no field for pool count or role"
+    assert "instance_count" in rules, (
+        "Usage Rule 9 must reference the advanced_pools[].instance_count field "
+        "now that Discover populates it from live data:pg:info captures"
     )
-    assert "instance_count" not in rules, (
-        "Usage Rule 9 must not reference a non-existent instance_count field"
-    )
-    assert "rate[level] × 1" in rules or "rate[level] x 1" in rules
+    assert "advanced_pools" in rules
+    assert "rate[pool.level] × pool.instance_count" in rules or "rate[pool.level] x pool.instance_count" in rules
 
 
 def test_pricing_cache_classic_tier_rows_untouched() -> None:
@@ -168,7 +201,40 @@ def test_cost_engine_rung3_references_advanced_tier_formula() -> None:
     assert "Heroku Postgres Advanced" in rung3
     assert "data_size_gb" in rung3
     assert "baseline_note" in rung3
-    assert "instance_count" not in rung3, (
-        "rung-3 must not reference a non-existent instance_count field"
+    assert "instance_count" in rung3, (
+        "rung-3 must reference advanced_pools[].instance_count now that "
+        "Discover populates it from live data:pg:info captures"
     )
-    assert "under-priced" in rung3
+    assert "advanced_pools" in rung3
+    assert "Terraform" in rung3 and "unpriced_heroku" in rung3
+
+
+def test_discover_live_capture_probes_both_postgres_tiers() -> None:
+    text = CAPTURE_MD.read_text(encoding="utf-8")
+    assert "heroku data:pg:info" in text
+    assert "heroku pg:info" in text
+    assert "pg-advanced-<app>.out" in text
+    assert "pg-<app>.out" in text
+    step3c_idx = text.index("3c. Per-command error handling")
+    step3c = text[step3c_idx:]
+    assert "skipped" in step3c
+    assert "tier" in step3c.lower()
+
+
+def test_discover_live_parses_advanced_pool_blocks() -> None:
+    text = DISCOVER_LIVE.read_text(encoding="utf-8")
+    assert "pg-advanced-<app>.out" in text
+    assert "instances of" in text
+    assert "(HA)" in text
+    assert "advanced_pools" in text
+    assert "tier" in text
+    assert "pg-<app>.out" in text
+
+
+def test_schema_documents_advanced_tier_fields() -> None:
+    text = SCHEMA_HEROKU.read_text(encoding="utf-8")
+    assert "tier" in text
+    assert "advanced_pools" in text
+    assert "instance_count" in text
+    assert "leader" in text
+    assert "follower" in text

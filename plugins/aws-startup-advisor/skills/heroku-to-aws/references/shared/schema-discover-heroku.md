@@ -200,6 +200,38 @@ Deterministic ID format per resource type:
 - Any addon: `monthly_price_usd` (number — from the add-on's plan price)
 - **heroku-postgresql**: `pg_version` (string), `data_size_gb` (number — feeds database migration tool selection), `table_count` (integer)
 - **heroku-redis**: `maxmemory_policy` (string)
+- **heroku-postgresql, Advanced tier only**: `tier` (string, optional, only ever
+  `"advanced"` — present only when live discovery captured `data:pg:info` output
+  for this addon and confirmed `Plan: Advanced`; absent for every Classic/Essential
+  addon and absent for an Advanced addon discovered only via Terraform),
+  `advanced_pools` (array, optional, present iff `tier == "advanced"` — one entry
+  per instance pool captured from `data:pg:info`'s pool sections)
+
+**heroku-postgresql Advanced tier example** (leader pool plus one named follower pool):
+
+```json
+{
+  "addon_service": "heroku-postgresql",
+  "plan": "standard-0",
+  "provider": "heroku",
+  "connection_pooling": true,
+  "tier": "advanced",
+  "advanced_pools": [
+    { "role": "leader", "name": null, "level": "4G-Performance", "instance_count": 2, "ha": true },
+    { "role": "follower", "name": "analytics", "level": "4G-Performance", "instance_count": 2, "ha": true }
+  ]
+}
+```
+
+**`advanced_pools[]` fields** (present only when `tier == "advanced"`):
+
+| Field                             | Type           | Required | Description                                                                                           |
+| ---------------------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `advanced_pools[].role`            | string         | ✅       | `"leader"` or `"follower"`                                                                             |
+| `advanced_pools[].name`            | string \| null | ✅       | Follower pool name (e.g. `"analytics"`), or `null` for the leader pool                                 |
+| `advanced_pools[].level`           | string         | ✅       | The pool's `*-Performance` level string (e.g. `"4G-Performance"`)                                      |
+| `advanced_pools[].instance_count`  | integer        | ✅       | Billable instance count for that pool. Already includes the HA standby when `ha` is `true`             |
+| `advanced_pools[].ha`              | boolean        | ✅       | Whether that pool runs HA (standby instance). Informational only — not a separate pricing multiplier   |
 
 ### `space` config
 
