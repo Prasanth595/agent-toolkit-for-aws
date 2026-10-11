@@ -30,10 +30,8 @@ Check `preferences.json` → `ai_constraints.ai_framework` to determine the migr
 
 **OpenAI SDK users via Mantle (config path for a Responses source; small reshape for a Chat Completions source)** — `ai_framework` = `direct` AND `ai_source` = `openai` AND (`migration_path` **starts with** `mantle` (`mantle`, `mantle_openai_responses`) OR `migration_path` == `"runtime_openai_cris"`):
 
-- Point the client at `https://bedrock-mantle.{region}.api.aws/openai/v1` — note the `openai/v1` segment for proprietary GPT models; a bare `/v1` 404s
-- Swap the credential for a Bedrock API key or the auto-refreshing token provider — **not** the existing OpenAI key
-- Update the model string to the Bedrock model ID (`openai.gpt-*` for a same-model move)
-- Grant the `bedrock-mantle:*` actions; `bedrock:InvokeModel` does not authorize these models
+- `mantle` / `mantle_openai_responses`: point the client at `https://bedrock-mantle.{region}.api.aws/openai/v1` — note the `openai/v1` segment for proprietary GPT models; a bare `/v1` 404s. Swap the credential for a Bedrock API key or the auto-refreshing token provider — **not** the existing OpenAI key. Update the model string to the bare Bedrock model ID (`openai.gpt-*` for a same-model move). Grant the `bedrock-mantle:*` actions; `bedrock:InvokeModel` does not authorize these models.
+- `runtime_openai_cris` (GPT-5.6/GPT-6 via `bedrock-runtime` CRIS): point the client at `https://bedrock-runtime.{region}.amazonaws.com/openai/v1` instead — **not** the mantle URL. Update the model string to the `us.`/`in.`/`global.`-prefixed CRIS inference-profile ID, not the bare ID. Grant standard `bedrock:InvokeModel*` actions against the CRIS inference-profile ARN — **not** `bedrock-mantle:*`.
 - **Config-only ONLY if the source already calls `responses.create`.** A Chat Completions source must reshape to Responses — small and mechanical, but it is a code change, so do not present this path as "no code changes" without checking the detected surface
 - Test in staging, validate responses
 

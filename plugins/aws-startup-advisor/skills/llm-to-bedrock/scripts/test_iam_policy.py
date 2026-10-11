@@ -124,6 +124,25 @@ def test_mantle_model_detection_excludes_gpt_oss():
     assert is_mantle_model("anthropic.claude-sonnet-4-6") is False
 
 
+def test_is_mantle_model_matches_bare_gpt6_ids():
+    assert is_mantle_model("openai.gpt-6-astra") is True
+    assert is_mantle_model("openai.gpt-6-sol") is True
+    assert is_mantle_model("openai.gpt-6-luna") is True
+    assert is_mantle_model("openai.gpt-6.1-sol") is True
+    assert is_mantle_model("us.openai.gpt-6-sol") is False
+    assert is_mantle_model("openai.gpt-oss-120b-1:0") is False
+
+
+def test_generate_policy_grants_mantle_actions_for_bare_gpt6():
+    # A bare GPT-6 id must get the same mantle-only treatment as bare GPT-5.x —
+    # no InvokeModel statement (there is no foundation-model ARN for it) and a
+    # BedrockMantleInference statement granting bedrock-mantle:* actions.
+    pol = generate_policy(["openai.gpt-6-sol"], "us-east-1", "123456789012")
+    sids = {s["Sid"] for s in pol["Statement"]}
+    assert "BedrockMantleInference" in sids
+    assert "BedrockInvokeModelScoped" not in sids
+
+
 def test_mantle_target_gets_mantle_actions_not_invoke_model():
     # Regression: the generated policy emitted only bedrock:InvokeModel against a
     # foundation-model ARN, which cannot authorize a mantle call — the migrated app

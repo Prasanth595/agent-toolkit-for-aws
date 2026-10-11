@@ -88,7 +88,7 @@ Generate `ai-migration/migrate_to_mantle.sh` — a shell script that configures 
   MAX_TOKENS=1024 # Starting point — see table above
   ```
 
-Skip Step 1 (provider adapter) when this step runs — the OpenAI SDK is the adapter.
+Skip Step 1 (provider adapter) when this step runs — the OpenAI SDK is the adapter. Step 2's test harness unconditionally imports `from provider_adapter import get_provider`, so when Step 1 is skipped (every `mantle`/`runtime_openai_cris` run), also emit a minimal `ai-migration/provider_adapter.py` stub here that exposes `get_provider()` returning a thin wrapper around the Mantle/CRIS OpenAI-SDK client configured by this script — this keeps Step 2 shared and path-agnostic without rewriting its import.
 
 ---
 

@@ -12,7 +12,7 @@ In the `detect_grep` recipes below, `<REPO>` is the repository path supplied in 
 
 ## Same-model (mantle) deltas
 
-**Read this section INSTEAD of the parameter-surface sections below when the resolved target is a proprietary GPT model on `bedrock-mantle`** (`openai.gpt-5.6-sol` / `-terra` / `-luna`, `openai.gpt-5.5`, `openai.gpt-5.4`). The model is unchanged, so temperature ranges, penalty parameters, and stop-sequence limits are unchanged — do not raise those as deltas. The deltas here are about the API surface and the endpoint, not about model behavior.
+**Read this section INSTEAD of the parameter-surface sections below when the resolved target is a proprietary GPT model on `bedrock-mantle`** (`openai.gpt-5.6-sol` / `-terra` / `-luna`, `openai.gpt-5.5`, `openai.gpt-5.4`, `openai.gpt-6-astra`, `openai.gpt-6-sol`, `openai.gpt-6-luna`, `openai.gpt-6.1-sol`). The model is unchanged, so temperature ranges, penalty parameters, and stop-sequence limits are unchanged — do not raise those as deltas. The deltas here are about the API surface and the endpoint, not about model behavior.
 
 ## chat-completions-to-responses
 
@@ -54,7 +54,7 @@ grep -rEn 'function_call_output|tool_call' <REPO> --include="*.py" --include="*.
 ## prompt-caching-availability
 
 - `resolution_kind`: `impl_path`
-- Prompt caching is listed as supported on GPT-5.6 only. Do not emit caching configuration for `openai.gpt-5.5` or `openai.gpt-5.4`.
+- Prompt caching is listed as supported on GPT-5.6 and GPT-6 only. Do not emit caching configuration for `openai.gpt-5.5` or `openai.gpt-5.4`.
 
 ---
 

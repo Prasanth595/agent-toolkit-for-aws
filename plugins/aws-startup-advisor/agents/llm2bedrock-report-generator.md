@@ -113,6 +113,10 @@ The pricing script only covers Bedrock models. For the source provider (OpenAI, 
 
 | Model                      | Input (USD/1M) | Output (USD/1M) |
 | -------------------------- | -------------- | --------------- |
+| gpt-6-astra                | 10.00          | 50.00           |
+| gpt-6.1-sol                | 2.00           | 10.00           |
+| gpt-6-sol                  | 2.00           | 10.00           |
+| gpt-6-luna                 | 0.10           | 0.50            |
 | gpt-5.6-luna               | 0.20           | 1.20            |
 | gpt-5.6-terra              | 2.00           | 12.00           |
 | gpt-5.6-sol                | 5.00           | 30.00           |
@@ -185,6 +189,10 @@ If the golden dataset records which source model each prompt used (e.g., a `sour
 
 **Breakpoint pairs (GPT-6/5.6/5.5/5.4 source models) — do not compare a flat short-context source rate against a long-context Bedrock rate, or vice versa.** When a pair's source model has a documented 272K-token breakpoint (see `pricing-cache.md`'s GPT-6/5.6/5.5/5.4 breakpoint notes) AND you know (from `ai_workload_profile.json` → `workloads[].typical_request_tokens` or measured per-request usage-profile stats) that its typical single request exceeds 272,000 input tokens, populate `cost_compare.py`'s `PER_REQUEST_TOKENS` entry for that source model, add the pair's 7th/8th `MODEL_PAIRS` elements (`source_input_long`, `source_output_long`, from the source's long-context rate), and add a `BEDROCK_LONG_CONTEXT` entry (from the target's long-context rate). The script then prices that pair's ENTIRE volume at the long-context rate on BOTH sides, matching `estimate-ai.md`'s long-context-parity rule. Leave a pair's `PER_REQUEST_TOKENS` entry out entirely when the per-request size is unknown or ≤272K — it then keeps the flat short-context rate on both sides, unchanged.
 
+**Per-request tier distribution, when known, takes precedence over the single-breakpoint-decision above.** `PER_REQUEST_TOKENS` records only ONE "typical" request size per source model, so when the pair's actual traffic mixes short and long requests, applying that single breakpoint decision to the whole aggregated volume either overstates or understates the true cost. When a per-request tier BREAKDOWN is known (not just one typical size) — e.g. `ai_workload_profile.json`'s per-request token distribution, or a usage-baseline that buckets requests by tier — populate `cost_compare.py`'s `TIER_DISTRIBUTION_BY_SOURCE` entry for that source model instead of (not in addition to) `PER_REQUEST_TOKENS`/`BASELINE_TOKENS_BY_SOURCE`; the script partitions that pair's requests into their true tiers and prices each tier independently before summing, rather than blending all requests into one average and applying one all-or-nothing breakpoint decision to the blended total. **When only an aggregate total is known** (no `TIER_DISTRIBUTION_BY_SOURCE` entry) for a source model whose requests plausibly span the 272,000-token breakpoint (e.g. `ai_workload_profile.json` shows high variance in `typical_request_tokens`, or the workload type suggests mixed short/long usage), disclose this in the report as an unresolved context-tier distribution rather than presenting the single-breakpoint-decision total as exact — render a note in the Cost Comparison section: "Context-tier distribution unknown for `<model>` — this estimate applies a single breakpoint decision to the full aggregate volume and may overstate or understate cost versus the workload's actual mix of short/long requests."
+
+**Source-side and target-side long-context decisions are independent of each other.** A flat-priced Bedrock target with no long-context tier (absent from `BEDROCK_LONG_CONTEXT`) must stay flat on its own side regardless of the source-side decision — it must never suppress a known, independently-applicable source-side breakpoint. Likewise a target that DOES have a long-context tier only applies it when the SOURCE side's own breakpoint fired; the two sides are never coupled through a single combined condition.
+
 Bedrock per-1M rates are `input_per_1k_usd * 1000` and `output_per_1k_usd * 1000` from §6.1; source per-1M rates come from §6.2. Run the cost computation through the pinned toolchain (Write the script with the `Write` tool, then run it):
 
 ```bash
@@ -235,6 +243,22 @@ PER_REQUEST_TOKENS = {
     # "openai.gpt-6-sol": {"input": 300_000, "output": 10_000},
 }
 
+# Populate ONLY when a per-request tier BREAKDOWN is known (not just one "typical"
+# size) -- e.g. from ai_workload_profile.json's per-request token distribution, or a
+# usage-baseline that buckets requests by tier. Key = source_model_id; value = a list
+# of {"count": N, "input": per_request_input, "output": per_request_output} dicts, one
+# per observed tier. When present for a source model, this takes precedence over BOTH
+# BASELINE_TOKENS_BY_SOURCE and PER_REQUEST_TOKENS for that model -- each tier bucket is
+# priced independently (short rate below 272,001 input tokens, long rate at/above it)
+# and the per-tier costs are summed, instead of blending all requests into one average
+# and applying a single all-or-nothing breakpoint decision to the blended total.
+TIER_DISTRIBUTION_BY_SOURCE = {
+    # "openai.gpt-6-sol": [
+    #     {"count": 51, "input": 300_000, "output": 10_000},
+    #     {"count": 49, "input": 200_000, "output": 10_000},
+    # ],
+}
+
 # Parallel to BASELINE_TOKENS_BY_SOURCE in structure, but keyed by BEDROCK model id and
 # carrying that model's long-context {"input": $/1M, "output": $/1M} rate. Populate only
 # for a Bedrock model that actually has a long-context tier (see pricing-cache.md's
@@ -272,33 +296,74 @@ for pair in MODEL_PAIRS:
     src, tgt, s_in, s_out, b_in, b_out = pair[:6]
     s_in_long, s_out_long = (pair[6], pair[7]) if len(pair) > 6 else (None, None)
 
-    if src in BASELINE_TOKENS_BY_SOURCE:
-        bucket = BASELINE_TOKENS_BY_SOURCE[src]
-        basis = "baseline"
+    if src in TIER_DISTRIBUTION_BY_SOURCE:
+        # A known per-request tier BREAKDOWN takes precedence over both the baseline
+        # scalar and the golden-dataset sample -- partition requests into their true
+        # tiers BEFORE aggregating, instead of blending them into one average and
+        # applying a single breakpoint decision to the blended total.
+        buckets = TIER_DISTRIBUTION_BY_SOURCE[src]
+        basis = "tier-distribution"
+        in_tok = sum(b["count"] * b["input"] for b in buckets)
+        out_tok = sum(b["count"] * b["output"] for b in buckets)
+        source_cost = 0.0
+        bedrock_cost = 0.0
+        for b in buckets:
+            count, b_in_tok, b_out_tok = b["count"], b["input"], b["output"]
+            # Source-side breakpoint: independent per bucket.
+            if b_in_tok > 272_000 and s_in_long is not None:
+                bucket_source_cost = (b_in_tok * s_in_long + b_out_tok * s_out_long) / 1_000_000
+                bucket_source_is_long = True
+            else:
+                bucket_source_cost = (b_in_tok * s_in + b_out_tok * s_out) / 1_000_000
+                bucket_source_is_long = False
+            # Target-side breakpoint: independent decision. A flat-priced target with
+            # no long-context tier ALWAYS stays flat, regardless of the source side.
+            if bucket_source_is_long and tgt in BEDROCK_LONG_CONTEXT:
+                long_rates = BEDROCK_LONG_CONTEXT[tgt]
+                bucket_bedrock_cost = (b_in_tok * long_rates["input"] + b_out_tok * long_rates["output"]) / 1_000_000
+            else:
+                bucket_bedrock_cost = (b_in_tok * b_in + b_out_tok * b_out) / 1_000_000
+            source_cost += count * bucket_source_cost
+            bedrock_cost += count * bucket_bedrock_cost
     else:
-        bucket = tokens_by_source.get(src, {"input": 0, "output": 0})
-        basis = "sample"
-    in_tok, out_tok = bucket["input"], bucket["output"]
+        if src in BASELINE_TOKENS_BY_SOURCE:
+            bucket = BASELINE_TOKENS_BY_SOURCE[src]
+            basis = "baseline"
+        else:
+            bucket = tokens_by_source.get(src, {"input": 0, "output": 0})
+            basis = "sample"
+        in_tok, out_tok = bucket["input"], bucket["output"]
 
-    # Breakpoint check: a pair is priced at the long-context rate on BOTH sides only when
-    # its source model has a known typical per-request size (PER_REQUEST_TOKENS) that
-    # exceeds 272,000 input tokens — matching estimate-ai.md's long-context-parity rule.
-    # The ENTIRE volume (whichever basis won above) reprices, not just the excess, per
-    # OpenAI's own breakpoint contract. A pair absent from PER_REQUEST_TOKENS, or whose
-    # typical request is <=272,000 input tokens, is UNCHANGED by this check and keeps the
-    # flat short-context rate on both sides exactly as before.
-    per_request = PER_REQUEST_TOKENS.get(src)
-    if per_request and per_request["input"] > 272_000 and s_in_long is not None and tgt in BEDROCK_LONG_CONTEXT:
-        long_rates = BEDROCK_LONG_CONTEXT[tgt]
-        source_cost = (in_tok * s_in_long + out_tok * s_out_long) / 1_000_000
-        bedrock_cost = (in_tok * long_rates["input"] + out_tok * long_rates["output"]) / 1_000_000
-        basis = f"{basis}-long-context"
-    else:
-        # Both costs below are computed from `in_tok`/`out_tok` — the SAME volume for this
-        # pair, whichever source it came from. Never price one side from the baseline and
-        # the other from the golden-dataset sample for the same pair.
-        source_cost = (in_tok * s_in + out_tok * s_out) / 1_000_000
-        bedrock_cost = (in_tok * b_in + out_tok * b_out) / 1_000_000
+        # Breakpoint check: a pair's source side is priced at the long-context rate only
+        # when its source model has a known typical per-request size (PER_REQUEST_TOKENS)
+        # that exceeds 272,000 input tokens — matching estimate-ai.md's
+        # long-context-parity rule. The ENTIRE volume (whichever basis won above)
+        # reprices, not just the excess, per OpenAI's own breakpoint contract. A pair
+        # absent from PER_REQUEST_TOKENS, or whose typical request is <=272,000 input
+        # tokens, is UNCHANGED by this check and keeps the flat short-context rate.
+        per_request = PER_REQUEST_TOKENS.get(src)
+        source_is_long = bool(per_request and per_request["input"] > 272_000 and s_in_long is not None)
+        if source_is_long:
+            source_cost = (in_tok * s_in_long + out_tok * s_out_long) / 1_000_000
+        else:
+            source_cost = (in_tok * s_in + out_tok * s_out) / 1_000_000
+
+        # Target-side breakpoint: independent decision. A flat-priced target with no
+        # long-context tier (tgt not in BEDROCK_LONG_CONTEXT) ALWAYS stays flat,
+        # regardless of the source-side decision above -- it must never be suppressed
+        # by, nor suppress, the source-side breakpoint.
+        if source_is_long and tgt in BEDROCK_LONG_CONTEXT:
+            long_rates = BEDROCK_LONG_CONTEXT[tgt]
+            bedrock_cost = (in_tok * long_rates["input"] + out_tok * long_rates["output"]) / 1_000_000
+        else:
+            bedrock_cost = (in_tok * b_in + out_tok * b_out) / 1_000_000
+
+        if source_is_long and tgt in BEDROCK_LONG_CONTEXT:
+            basis = f"{basis}-long-context"
+        elif source_is_long:
+            # Source-side breakpoint fired but the target has no long-context tier
+            # (stays flat) -- distinguish this from the both-sides case above.
+            basis = f"{basis}-source-long-context"
     total_source_cost += source_cost
     total_bedrock_cost += bedrock_cost
     rows.append((src, tgt, basis, in_tok, out_tok, source_cost, bedrock_cost))

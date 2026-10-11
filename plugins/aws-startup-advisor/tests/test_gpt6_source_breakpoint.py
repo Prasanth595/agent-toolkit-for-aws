@@ -68,8 +68,9 @@ def _run_script(
     baseline_src: str,
     per_request_src: str,
     long_context_src: str,
+    tier_distribution_src: str | None = None,
 ) -> str:
-    """Substitute the markdown placeholders and the four tunable dict/list
+    """Substitute the markdown placeholders and the tunable dict/list
     literals, write the script to a temp file, and run it with the plugin's
     own interpreter. Returns combined stdout."""
     body = script_body.replace("<repo>", str(repo))
@@ -91,6 +92,13 @@ def _run_script(
         body,
         count=1,
     )
+    if tier_distribution_src is not None:
+        body = re.sub(
+            r"TIER_DISTRIBUTION_BY_SOURCE = \{\n(?:.*?\n)*?\}",
+            tier_distribution_src,
+            body,
+            count=1,
+        )
     body = re.sub(
         r"BEDROCK_LONG_CONTEXT = \{\n(?:.*?\n)*?\}",
         long_context_src,
@@ -307,3 +315,155 @@ def test_exact_boundary_272001_input_tokens_reprices_whole_request(tmp_path: Pat
     expected_bedrock_cost = (27_200_100 * 4.40 + 1_000_000 * 16.50) / 1_000_000
     assert f"source=${expected_source_cost:.4f}" in stdout, stdout
     assert f"bedrock=${expected_bedrock_cost:.4f}" in stdout, stdout
+
+
+def test_mixed_tier_distribution_partitions_before_pricing(tmp_path: Path) -> None:
+    """Finding 2 (PR #433 round 4): PER_REQUEST_TOKENS records only ONE typical
+    request size, so a pair whose real traffic mixes short and long requests gets
+    the single breakpoint decision applied to the WHOLE blended volume. Reviewer's
+    reproduction: 51 requests @ 300K input / 10K output + 49 requests @ 200K input /
+    10K output, GPT-6 Sol pricing. The pre-fix all-or-nothing logic (treating a
+    recorded "typical" 300K request as triggering long-context pricing for the
+    entire blended 25.1M-input/1M-output pool) produces $115.40 source / $126.94
+    Geo-Bedrock. Partitioning into true tiers BEFORE pricing produces the correct
+    $93.35 source / $102.685 Geo-Bedrock."""
+    script_body = _extract_cost_compare_script()
+    repo = _write_fixture(tmp_path, golden_rows=[])
+
+    model_pairs_src = (
+        'MODEL_PAIRS = [\n'
+        '    ("openai.gpt-6-sol", "openai.gpt-6-sol", 2.00, 10.00, 2.20, 11.00, 4.00, 15.00),\n'
+        ']'
+    )
+    baseline_src = "BASELINE_TOKENS_BY_SOURCE = {}"
+    per_request_src = "PER_REQUEST_TOKENS = {}"
+    tier_distribution_src = (
+        'TIER_DISTRIBUTION_BY_SOURCE = {\n'
+        '    "openai.gpt-6-sol": [\n'
+        '        {"count": 51, "input": 300_000, "output": 10_000},\n'
+        '        {"count": 49, "input": 200_000, "output": 10_000},\n'
+        '    ],\n'
+        '}'
+    )
+    long_context_src = (
+        'BEDROCK_LONG_CONTEXT = {\n'
+        '    "openai.gpt-6-sol": {"input": 4.40, "output": 16.50},\n'
+        '}'
+    )
+
+    stdout = _run_script(
+        script_body,
+        repo=repo,
+        model_pairs_src=model_pairs_src,
+        baseline_src=baseline_src,
+        per_request_src=per_request_src,
+        long_context_src=long_context_src,
+        tier_distribution_src=tier_distribution_src,
+    )
+
+    assert "tier-distribution" in stdout, stdout
+    assert "source=$93.3500" in stdout, stdout
+    assert "bedrock=$102.6850" in stdout, stdout
+    # Must NOT be the buggy all-or-nothing figures.
+    assert "source=$115.4000" not in stdout, stdout
+    assert "bedrock=$126.9400" not in stdout, stdout
+
+
+def test_tier_distribution_absent_falls_back_to_existing_behavior(tmp_path: Path) -> None:
+    """Regression guard: an empty TIER_DISTRIBUTION_BY_SOURCE must leave the
+    pre-existing PER_REQUEST_TOKENS + BASELINE_TOKENS_BY_SOURCE scalar logic
+    completely unchanged (same as test_gpt6_sol_300k_input_crosses_breakpoint_on_both_sides)."""
+    script_body = _extract_cost_compare_script()
+    repo = _write_fixture(tmp_path, golden_rows=[])
+
+    model_pairs_src = (
+        'MODEL_PAIRS = [\n'
+        '    ("openai.gpt-6-sol", "openai.gpt-6-sol", 2.00, 10.00, 2.20, 11.00, 4.00, 15.00),\n'
+        ']'
+    )
+    baseline_src = (
+        'BASELINE_TOKENS_BY_SOURCE = {\n'
+        '    "openai.gpt-6-sol": {"input": 30_000_000, "output": 1_000_000},\n'
+        '}'
+    )
+    per_request_src = (
+        'PER_REQUEST_TOKENS = {\n'
+        '    "openai.gpt-6-sol": {"input": 300_000, "output": 10_000},\n'
+        '}'
+    )
+    tier_distribution_src = "TIER_DISTRIBUTION_BY_SOURCE = {}"
+    long_context_src = (
+        'BEDROCK_LONG_CONTEXT = {\n'
+        '    "openai.gpt-6-sol": {"input": 4.40, "output": 16.50},\n'
+        '}'
+    )
+
+    stdout = _run_script(
+        script_body,
+        repo=repo,
+        model_pairs_src=model_pairs_src,
+        baseline_src=baseline_src,
+        per_request_src=per_request_src,
+        long_context_src=long_context_src,
+        tier_distribution_src=tier_distribution_src,
+    )
+
+    assert "source=$135.0000" in stdout, stdout
+    assert "bedrock=$148.5000" in stdout, stdout
+
+
+def test_source_breakpoint_independent_of_flat_target(tmp_path: Path) -> None:
+    """Finding 3 (PR #433 round 4): the source-side long-context decision must not
+    be coupled to whether the TARGET also has a long-context tier. Reviewer's
+    reproduction: 100 Sol requests @ 300K input / 10K output, a flat-priced target
+    (no BEDROCK_LONG_CONTEXT entry at all). The pre-fix combined condition
+    (`... and tgt in BEDROCK_LONG_CONTEXT`) made the source-side reprice contingent
+    on the target also being tiered -- with an empty BEDROCK_LONG_CONTEXT, BOTH
+    sides fell back to the flat short-context rate, producing a buggy $70 source
+    figure and a 25.4% savings line instead of the correct $135 source and 61.3%
+    savings. The flat target's own cost ($52.25) is unaffected by the fix -- the
+    synthetic flat rate pair below is chosen so 100 requests of 300K in / 10K out
+    costs exactly $52.25 on the target side, independent of this test."""
+    script_body = _extract_cost_compare_script()
+    repo = _write_fixture(tmp_path, golden_rows=[])
+
+    # Solve for a flat (per-1M) target rate pair that produces exactly $52.25 for
+    # 100 * (300_000 in, 10_000 out): 100 * (300_000*b_in + 10_000*b_out) / 1e6 = 52.25.
+    # Pick b_out = 2.00 (arbitrary) and solve b_in: 30*b_in + 1*b_out = 52.25 -> b_in = 1.675.
+    b_in, b_out = 1.675, 2.00
+    assert round(100 * (300_000 * b_in + 10_000 * b_out) / 1_000_000, 4) == 52.25
+
+    model_pairs_src = (
+        'MODEL_PAIRS = [\n'
+        f'    ("openai.gpt-6-sol", "flat-target", 2.00, 10.00, {b_in}, {b_out}, 4.00, 15.00),\n'
+        ']'
+    )
+    baseline_src = (
+        'BASELINE_TOKENS_BY_SOURCE = {\n'
+        '    "openai.gpt-6-sol": {"input": 30_000_000, "output": 1_000_000},\n'
+        '}'
+    )
+    per_request_src = (
+        'PER_REQUEST_TOKENS = {\n'
+        '    "openai.gpt-6-sol": {"input": 300_000, "output": 10_000},\n'
+        '}'
+    )
+    # Empty -- the flat target has no long-context tier at all.
+    long_context_src = "BEDROCK_LONG_CONTEXT = {}"
+
+    stdout = _run_script(
+        script_body,
+        repo=repo,
+        model_pairs_src=model_pairs_src,
+        baseline_src=baseline_src,
+        per_request_src=per_request_src,
+        long_context_src=long_context_src,
+    )
+
+    assert "source=$135.0000" in stdout, stdout
+    assert "bedrock=$52.2500" in stdout, stdout
+    assert "Estimated savings: +61.3%" in stdout, stdout
+    # Must NOT be the buggy figures where the flat target suppressed the source breakpoint.
+    assert "source=$70.0000" not in stdout, stdout
+    assert "+25.4%" not in stdout, stdout
+    assert "-112.1%" not in stdout, stdout

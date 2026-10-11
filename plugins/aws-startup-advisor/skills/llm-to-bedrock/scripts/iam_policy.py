@@ -17,13 +17,14 @@ def is_inference_profile(model_id: str) -> bool:
 
 
 def is_mantle_model(model_id: str) -> bool:
-    """True for OpenAI's proprietary GPT models, which are served only on the
-    bedrock-mantle endpoint. They need `bedrock-mantle:*` actions — a policy
+    """True for OpenAI's proprietary GPT models (GPT-5.5/5.4/5.6 and GPT-6
+    Astra/Sol/Luna/6.1 Sol), which are served only on the bedrock-mantle endpoint
+    in their bare id form. They need `bedrock-mantle:*` actions — a policy
     granting only `bedrock:InvokeModel` against a foundation-model ARN cannot
     authorize them, and they have no inference profile to scope to either.
     The open-weight gpt-oss models DO use bedrock-runtime and must not match."""
     mid = model_id.lower()
-    return mid.startswith("openai.gpt-5") and "oss" not in mid
+    return (mid.startswith("openai.gpt-5") or mid.startswith("openai.gpt-6")) and "oss" not in mid
 
 
 def mantle_project_arn(region: str, account_id: str) -> str:

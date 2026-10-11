@@ -138,7 +138,7 @@ Do **not** repeat these as "costs" in the user-facing summary.
 
 Present the monthly and annual cost difference between current GCP AI spend and projected Bedrock cost:
 
-- **If the model is unchanged** (`model_change: false`): projected cost is **about 10% higher**, not the same — Bedrock in-region is priced at OpenAI's data-residency tier, which is 1.10x OpenAI standard. Quote the increase plainly and make the case on non-cost grounds. If any workload exceeds 272K context, price it at the long-context tier (2.0x input / 1.5x output) and show that separately; it can dominate the comparison.
+- **If the model is unchanged** (`model_change: false`): projected cost is **about 10% higher**, not the same, UNLESS the chosen path is Global CRIS (`migration_path: "runtime_openai_cris"` with a `global.`-prefixed model ID) — Global CRIS is priced at OpenAI's standard list price, i.e. cost PARITY with the source, not a premium. In-Region and Geo CRIS (and any GPT-5.5/GPT-5.4 move, which has no CRIS at all) remain at the 1.10x data-residency-tier premium over OpenAI standard. Quote whichever applies plainly and make the case on non-cost grounds. If any workload exceeds 272K context, price it at the long-context tier (2.0x input / 1.5x output) and show that separately; it can dominate the comparison.
 - **If Bedrock is cheaper**: present monthly and annual savings clearly
 - **If Bedrock is more expensive**: state clearly, justify with non-cost benefits or note "not justified if cost is the only priority"
 

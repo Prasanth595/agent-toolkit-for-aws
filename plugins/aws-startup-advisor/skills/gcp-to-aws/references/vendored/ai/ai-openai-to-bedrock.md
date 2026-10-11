@@ -79,6 +79,13 @@ Report the assessment honestly: `strong_migrate` here means "low-risk, well-supp
 
 The gate differs by family (see `shared/openai-on-bedrock.md` § Regional Availability):
 
+**GPT-6 Astra / Sol / Luna / 6.1 Sol:** same shape as GPT-5.6 — if the target region is in the mantle in-region
+matrix (narrower than GPT-5.6's: us-east-1 + us-west-2 for Astra only, us-east-1 only for Sol/Luna/6.1 Sol — see
+`openai-on-bedrock.md` § Regional Availability), either endpoint works; otherwise the `bedrock-runtime` CRIS path
+(`us.`/`global.` prefixed) covers broad commercial regions. GPT-6 Astra's CRIS path additionally lacks `Invoke`
+support (Responses/Chat Completions/Converse only) — verify per-feature before assuming parity with Sol/Luna/6.1
+Sol.
+
 **GPT-5.6 Sol / Terra / Luna:** rarely blocked. If the target region is in the mantle in-region matrix, either
 endpoint works. If not, the `bedrock-runtime` CRIS path (Geo `us.`/`in.`, Global `global.`) covers most commercial
 regions — offer it, stating the data-residency implication of cross-region routing (Geo stays within the geography;

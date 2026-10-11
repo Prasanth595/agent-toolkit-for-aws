@@ -250,10 +250,12 @@ A workload above 272K context must be priced at the long-context tier.
 > Separately, the **AWS Price List API still carries no GPT-5.x rows** (checked 2026-08-04):
 > a missing or empty price-list result must not be read as "model unavailable."
 
-### Prompt caching — GPT-5.6 only
+### Prompt caching — GPT-5.6 and GPT-6 only
 
-Listed as a supported feature on the Sol, Terra, and Luna model cards. The GPT-5.5 and GPT-5.4 cards list
-client-side tool calling in that slot instead and do **not** list prompt caching. Do not assume caching on 5.5/5.4.
+Listed as a supported feature on the GPT-5.6 Sol/Terra/Luna model cards and on all four GPT-6 model cards (Astra,
+Sol, Luna, 6.1 Sol — confirmed by the cache-write/cache-read columns in the GPT-6 pricing tables above). The
+GPT-5.5 and GPT-5.4 cards list client-side tool calling in that slot instead and do **not** list prompt caching.
+Do not assume caching on 5.5/5.4.
 
 | Property          | Value                                                        |
 | ----------------- | ------------------------------------------------------------ |
