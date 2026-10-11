@@ -85,6 +85,14 @@ the OpenAI source row the same way it does on the Bedrock row (see `pricing-cach
 breakpoint note). Measured source spend (Part 1's `current_costs`/usage-profile dollar figures)
 always takes precedence over this list-rate comparison when it exists.
 
+**Worked example:** 100 requests of GPT-6 Sol at 300,000 input / 10,000 output tokens each (30M
+input / 1M output total) is ABOVE the 272,000-token breakpoint on every request. Source cost at
+the flat ≤272K rate ($2.00/$10.00) is $70 — wrong, because it ignores the breakpoint. Source cost
+at the correct long-context rate ($4.00 input / $15.00 output, per `pricing-cache.md`'s GPT-6
+family — long context table, Global column) is $135. Bedrock Global CRIS long-context is $135
+(parity); Bedrock In-Region/Geo-CRIS long-context ($4.40 input / $16.50 output) is $148.50 — a
+~10% premium, not the 112% a flat-rate comparison would produce.
+
 **Comparison table columns:** Model, Bedrock Monthly, vs Source Provider ($ and %), vs Current GCP, Quality, Capabilities Match (checked against `ai_capabilities_required`).
 
 Include source provider pricing from `aws-design-ai.json` → `bedrock_models[].source_provider_price`.

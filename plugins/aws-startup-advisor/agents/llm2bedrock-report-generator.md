@@ -183,6 +183,8 @@ The migration plan may map multiple source models to multiple Bedrock models (e.
 
 If the golden dataset records which source model each prompt used (e.g., a `source_model` field), aggregate tokens per source model. If it does not, fall back to attributing all tokens to the primary pair and flag the approximation in the Risk Assessment section.
 
+**Breakpoint pairs (GPT-6/5.6/5.5/5.4 source models) — do not compare a flat short-context source rate against a long-context Bedrock rate, or vice versa.** When a pair's source model has a documented 272K-token breakpoint (see `pricing-cache.md`'s GPT-6/5.6/5.5/5.4 breakpoint notes) AND you know (from `ai_workload_profile.json` → `workloads[].typical_request_tokens` or measured per-request usage-profile stats) that its typical single request exceeds 272,000 input tokens, populate `cost_compare.py`'s `PER_REQUEST_TOKENS` entry for that source model, add the pair's 7th/8th `MODEL_PAIRS` elements (`source_input_long`, `source_output_long`, from the source's long-context rate), and add a `BEDROCK_LONG_CONTEXT` entry (from the target's long-context rate). The script then prices that pair's ENTIRE volume at the long-context rate on BOTH sides, matching `estimate-ai.md`'s long-context-parity rule. Leave a pair's `PER_REQUEST_TOKENS` entry out entirely when the per-request size is unknown or ≤272K — it then keeps the flat short-context rate on both sides, unchanged.
+
 Bedrock per-1M rates are `input_per_1k_usd * 1000` and `output_per_1k_usd * 1000` from §6.1; source per-1M rates come from §6.2. Run the cost computation through the pinned toolchain (Write the script with the `Write` tool, then run it):
 
 ```bash
@@ -197,10 +199,16 @@ from collections import defaultdict
 
 # One tuple per source → bedrock mapping from the migration plan.
 # Fill in pricing from §6.1 (Bedrock, per-1M = per-1k * 1000) and §6.2 (source).
+# The 7th/8th elements (source_input_long, source_output_long) are OPTIONAL and only
+# needed for a pair whose source model has a 272K-token breakpoint (GPT-6/5.6/5.5/5.4)
+# AND whose per-request size is known to exceed it (see PER_REQUEST_TOKENS below) —
+# omit them (5-tuple... err, 6-tuple) for every other pair; they are never consulted
+# unless the pair also has a PER_REQUEST_TOKENS entry.
 MODEL_PAIRS = [
-    # (source_model_id, bedrock_model_id, source_input, source_output, bedrock_input, bedrock_output)
+    # (source_model_id, bedrock_model_id, source_input, source_output, bedrock_input, bedrock_output, source_input_long, source_output_long)
     # ("gpt-4o",      "anthropic.claude-sonnet-4-6", 2.50, 10.00, 3.00, 15.00),
     # ("gpt-4o-mini", "amazon.nova-lite-v1:0",                    0.15,  0.60, 0.06,  0.24),
+    # ("openai.gpt-6-sol", "openai.gpt-6-sol", 2.00, 10.00, 2.20, 11.00, 4.00, 15.00),
 ]
 
 # Populate ONLY when the §6.3 precedence check found a `Usage baseline path:` AND the pair's
@@ -213,6 +221,26 @@ MODEL_PAIRS = [
 # both sides of a pair always share the SAME volume source, never mixed.
 BASELINE_TOKENS_BY_SOURCE = {
     # "gpt-4o": {"input": 42_000_000, "output": 9_000_000},
+}
+
+# Populate ONLY for a source model with a documented 272K-token breakpoint
+# (GPT-6/5.6/5.5/5.4) whose TYPICAL single-request token size is known (from
+# ai_workload_profile.json -> workloads[].typical_request_tokens, or measured
+# per-request usage-profile stats) to exceed 272,000 input tokens. Key = source_model_id
+# (matching MODEL_PAIRS[i][0]); value = {"input": N, "output": N} for ONE typical request.
+# A source model absent here is treated as short-context (or unknown) and keeps the flat
+# rate — this is the deliberate "unknown request-size distribution" fallback estimate-ai.md
+# calls out; never guess a tier silently.
+PER_REQUEST_TOKENS = {
+    # "openai.gpt-6-sol": {"input": 300_000, "output": 10_000},
+}
+
+# Parallel to BASELINE_TOKENS_BY_SOURCE in structure, but keyed by BEDROCK model id and
+# carrying that model's long-context {"input": $/1M, "output": $/1M} rate. Populate only
+# for a Bedrock model that actually has a long-context tier (see pricing-cache.md's
+# "GPT-6 family -- long context" / GPT-5.6/5.5/5.4 long-context tables).
+BEDROCK_LONG_CONTEXT = {
+    # "openai.gpt-6-sol": {"input": 4.40, "output": 16.50},
 }
 
 # Aggregate golden-dataset tokens per source model (used ONLY for pairs absent from
@@ -239,7 +267,11 @@ if unattributed and MODEL_PAIRS and MODEL_PAIRS[0][0] not in BASELINE_TOKENS_BY_
 total_source_cost = 0.0
 total_bedrock_cost = 0.0
 rows = []
-for src, tgt, s_in, s_out, b_in, b_out in MODEL_PAIRS:
+for pair in MODEL_PAIRS:
+    # The breakpoint elements are optional — a 6-tuple pair has no long-context rate.
+    src, tgt, s_in, s_out, b_in, b_out = pair[:6]
+    s_in_long, s_out_long = (pair[6], pair[7]) if len(pair) > 6 else (None, None)
+
     if src in BASELINE_TOKENS_BY_SOURCE:
         bucket = BASELINE_TOKENS_BY_SOURCE[src]
         basis = "baseline"
@@ -247,11 +279,26 @@ for src, tgt, s_in, s_out, b_in, b_out in MODEL_PAIRS:
         bucket = tokens_by_source.get(src, {"input": 0, "output": 0})
         basis = "sample"
     in_tok, out_tok = bucket["input"], bucket["output"]
-    # Both costs below are computed from `in_tok`/`out_tok` — the SAME volume for this pair,
-    # whichever source it came from. Never price one side from the baseline and the other
-    # from the golden-dataset sample for the same pair.
-    source_cost = (in_tok * s_in + out_tok * s_out) / 1_000_000
-    bedrock_cost = (in_tok * b_in + out_tok * b_out) / 1_000_000
+
+    # Breakpoint check: a pair is priced at the long-context rate on BOTH sides only when
+    # its source model has a known typical per-request size (PER_REQUEST_TOKENS) that
+    # exceeds 272,000 input tokens — matching estimate-ai.md's long-context-parity rule.
+    # The ENTIRE volume (whichever basis won above) reprices, not just the excess, per
+    # OpenAI's own breakpoint contract. A pair absent from PER_REQUEST_TOKENS, or whose
+    # typical request is <=272,000 input tokens, is UNCHANGED by this check and keeps the
+    # flat short-context rate on both sides exactly as before.
+    per_request = PER_REQUEST_TOKENS.get(src)
+    if per_request and per_request["input"] > 272_000 and s_in_long is not None and tgt in BEDROCK_LONG_CONTEXT:
+        long_rates = BEDROCK_LONG_CONTEXT[tgt]
+        source_cost = (in_tok * s_in_long + out_tok * s_out_long) / 1_000_000
+        bedrock_cost = (in_tok * long_rates["input"] + out_tok * long_rates["output"]) / 1_000_000
+        basis = f"{basis}-long-context"
+    else:
+        # Both costs below are computed from `in_tok`/`out_tok` — the SAME volume for this
+        # pair, whichever source it came from. Never price one side from the baseline and
+        # the other from the golden-dataset sample for the same pair.
+        source_cost = (in_tok * s_in + out_tok * s_out) / 1_000_000
+        bedrock_cost = (in_tok * b_in + out_tok * b_out) / 1_000_000
     total_source_cost += source_cost
     total_bedrock_cost += bedrock_cost
     rows.append((src, tgt, basis, in_tok, out_tok, source_cost, bedrock_cost))

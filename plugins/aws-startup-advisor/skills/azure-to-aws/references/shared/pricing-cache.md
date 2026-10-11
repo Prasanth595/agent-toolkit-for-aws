@@ -210,10 +210,10 @@ the resulting rates).
 
 | Model         | Input $/1M   | Output $/1M  | Context | Tier      |
 | ------------- | ------------ | ------------ | ------- | --------- |
-| GPT-6 Astra   | 10.00        | 50.00        | 1.05M   | frontier  |
-| GPT-6.1 Sol   | 2.00         | 10.00        | 1.05M   | flagship  |
-| GPT-6 Sol     | 2.00         | 10.00        | 1.05M   | flagship  |
-| GPT-6 Luna    | 0.10         | 0.50         | 1.05M   | fast      |
+| GPT-6 Astra   | 10.00        | 50.00        | ≤272K*  | frontier  |
+| GPT-6.1 Sol   | 2.00         | 10.00        | ≤272K*  | flagship  |
+| GPT-6 Sol     | 2.00         | 10.00        | ≤272K*  | flagship  |
+| GPT-6 Luna    | 0.10         | 0.50         | ≤272K*  | fast      |
 | GPT-5.6 Sol   | _unverified_ | _unverified_ | 1M      | frontier  |
 | GPT-5.6 Terra | _unverified_ | _unverified_ | 1M      | flagship  |
 | GPT-5.6 Luna  | 0.20         | 1.20         | 1M      | fast      |
@@ -233,6 +233,8 @@ the resulting rates).
 | GPT-4o        | 2.50         | 10.00        | 128K    | flagship  |
 | o3            | 2.00         | 8.00         | 200K    | reasoning |
 | o4-mini       | 1.10         | 4.40         | 200K    | reasoning |
+
+*GPT-6 rows: 1.05M is the model's max window, not this rate's valid range. Requests >272,000 input tokens reprice input/cache 2x and output 1.5x — see the breakpoint note above and pricing-cache.md's long-context tables.
 
 > **Azure OpenAI note.** Azure lists the same models under Azure-specific deployment names
 > (e.g. `gpt-4o`, `gpt-4.1`) and bills per 1M tokens at rates that track the table above. Azure
