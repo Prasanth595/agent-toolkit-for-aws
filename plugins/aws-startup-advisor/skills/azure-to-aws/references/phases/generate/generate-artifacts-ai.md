@@ -28,6 +28,7 @@ Read `aws-design-ai.json → ai_architecture.code_migration.migration_path` and
 | `migration_path` / framework                                      | Emits (in addition to the always-on set)                                  |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `mantle_openai_responses`                                         | `ai-migration/migrate_to_mantle.sh` — **skip the provider adapter**       |
+| `runtime_openai_cris`                                              | `ai-migration/migrate_to_mantle.sh` (CRIS variant — `bedrock-runtime` base URL + CRIS id) — skip the provider adapter |
 | `direct` (or absent)                                              | `ai-migration/provider_adapter.{py,js,go}`                                |
 | `gpt-oss`                                                         | `ai-migration/provider_adapter.{py,js,go}` targeting gpt-oss via Converse |
 | gateway (`llm_router`/`api_gateway`/`voice_platform`/`framework`) | `ai-migration/gateway_config.{yaml,py,json}` — skip the adapter           |
@@ -137,8 +138,9 @@ is AWS-only and ports from gcp unchanged.
       path emitted the adapter and NO mantle script.
 - [ ] `bedrock_monitoring.tf` present on every path; budget is a computed integer ≥ 10.
 - [ ] No secret VALUE in any emitted file; credentials are env-var references.
-- [ ] No proprietary `openai.gpt-*` model ID paired with a Converse/`bedrock-runtime` path
-      (mantle-only).
+- [ ] No **GPT-5.5 or GPT-5.4** model ID paired with a Converse/`bedrock-runtime` path (those two
+      models only — mantle-only, no CRIS). GPT-5.6 and GPT-6 models MAY use
+      `migration_path: "runtime_openai_cris"` on `bedrock-runtime` — this is NOT a violation.
 - [ ] Plugin attribution strings say "Azure-to-AWS".
 - [ ] `generation-ai.json` validates; `rollback_plan.mechanism == "feature_flag"`.
 

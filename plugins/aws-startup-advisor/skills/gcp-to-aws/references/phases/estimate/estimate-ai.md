@@ -71,6 +71,20 @@ If design or discover phase has more specific token estimates, use those instead
 
 **Long-context surcharge:** If `ai_critical_feature = "ultra_long_context"` in `preferences.json`, Claude models charge 2x the standard input rate for tokens beyond 200K context. Apply the surcharge to the portion of input tokens that exceeds 200K per request. If per-request token counts are unknown, assume 50% of input tokens fall in the long-context tier as a conservative estimate.
 
+**OpenAI/GPT source-side long-context parity:** When comparing a GPT-5.x/GPT-6 source cost against
+its Bedrock target, both sides MUST use the same context tier. If `usage_by_model[]` or
+`ai-workload-profile.json` carries no per-request token-size data (so it is unknown whether any
+requests exceed 272K input), do NOT assume the short-context rate for the source side while the
+Bedrock side may be priced long-context (or vice versa) — flag the comparison
+`pricing_tier: "approximate — request-size distribution unknown"` and present both a short-context
+and a long-context scenario row rather than a single blended number. When request-size data IS
+available (e.g., `ai_workload_profile.json` → `workloads[].typical_request_tokens` or measured
+usage profile per-request stats), apply the GPT breakpoint at 272,000 input tokens on BOTH sides
+consistently: a request above the threshold reprices input, cache, and output 2x/2x/1.5x on
+the OpenAI source row the same way it does on the Bedrock row (see `pricing-cache.md`'s GPT-6
+breakpoint note). Measured source spend (Part 1's `current_costs`/usage-profile dollar figures)
+always takes precedence over this list-rate comparison when it exists.
+
 **Comparison table columns:** Model, Bedrock Monthly, vs Source Provider ($ and %), vs Current GCP, Quality, Capabilities Match (checked against `ai_capabilities_required`).
 
 Include source provider pricing from `aws-design-ai.json` → `bedrock_models[].source_provider_price`.

@@ -97,8 +97,15 @@ forward.
 GPT-6 Astra's `bedrock-mantle` endpoint is available in **both us-east-1 and us-west-2** (Standard in both;
 Ultrafast in us-east-1 only). GPT-6 Sol, GPT-6 Luna, and GPT-6.1 Sol's `bedrock-mantle` is **us-east-1 only**. All
 four additionally reach a broad set of commercial regions via `bedrock-runtime` CRIS (`us.` / `global.` prefixes),
-matching the GPT-5.6 CRIS-breadth pattern. All four support `Responses`, `Chat Completions`, `Invoke`, and
-`Converse` — no SDK-capability-map change needed.
+matching the GPT-5.6 CRIS-breadth pattern. API support is NOT uniform across the four: GPT-6 Sol,
+GPT-6 Luna, and GPT-6.1 Sol support `Responses`, `Chat Completions`, `Converse`, AND `Invoke` on
+`bedrock-runtime` (Invoke is NOT available on `bedrock-mantle` for any of the four — mantle supports
+only `Responses` and `Chat Completions` across the whole GPT-6/5.6 family). **GPT-6 Astra does NOT
+support `Invoke` on either endpoint** — Astra's `bedrock-runtime` surface is `Responses`, `Chat
+Completions`, and `Converse` only, and its `bedrock-mantle` surface is `Responses` and `Chat
+Completions` only (no `Converse`, no `Invoke`). Do not assume uniform API support across the GPT-6
+family — verify per-model, per-endpoint on the model card before approving an `InvokeModel` call
+path for any GPT-6 model.
 
 ### Client setup
 

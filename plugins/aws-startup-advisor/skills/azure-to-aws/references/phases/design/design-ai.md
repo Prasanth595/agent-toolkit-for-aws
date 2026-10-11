@@ -186,9 +186,16 @@ primary path (`migration_path: "mantle_openai_responses"`, `model_change: false`
 keeps the OpenAI SDK; only the base URL (`.../openai/v1/responses`), credential (a Bedrock API
 key/token provider), model ID, and IAM (`bedrock-mantle:*`) change. Read
 `references/shared/openai-on-bedrock.md` for exact values. If the source uses Chat Completions,
-plan a reshape to `responses.create`. No Converse fallback exists for proprietary GPT models
-(mantle-only, in-region only): needing Guardrails/Knowledge Bases/logging/an unsupported region
-forces a `converse` path with `model_change: true` to a Bedrock-native model (or `gpt-oss`).
+plan a reshape to `responses.create`. **No Converse fallback for GPT-5.5/GPT-5.4 — GPT-5.6 and
+GPT-6 differ.** GPT-5.5 and GPT-5.4 are mantle-only, in-region only: needing Guardrails/Knowledge
+Bases/logging/an unsupported region forces a `converse` path with `model_change: true` to a
+Bedrock-native model (or `gpt-oss`). GPT-5.6 Sol/Terra/Luna and all four GPT-6 models (Astra, Sol,
+Luna, 6.1 Sol) DO have a `bedrock-runtime` CRIS path (`us.`/`global.` prefixed IDs) — for these
+models the same need is satisfied by switching endpoint, not model: record
+`migration_path: "runtime_openai_cris"` with `model_change: false`. Note: `runtime_openai_cris`
+for GPT-6 Astra is valid only via Responses/Chat Completions/Converse — Astra does not support
+`Invoke`, so verify per-feature against Astra's model card before assuming parity with
+Sol/Luna/6.1 Sol.
 Anthropic-SDK sources → boto3 Converse client swap. Record `code_migration.openrouter_path`
 when a router was detected (`same_model_mantle|direct|litellm|keep_openrouter`).
 

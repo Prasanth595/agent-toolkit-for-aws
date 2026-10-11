@@ -28,7 +28,7 @@ Check `preferences.json` → `ai_constraints.ai_framework` to determine the migr
 | Voice Platform (Vapi, Bland.ai)   | Check native Bedrock support, update dashboard                | Dashboard config  |
 | Framework (LangChain, LlamaIndex) | Swap provider import (e.g., `ChatBedrock` for `ChatVertexAI`) | 1-5 lines of code |
 
-**OpenAI SDK users via Mantle (config path for a Responses source; small reshape for a Chat Completions source)** — `ai_framework` = `direct` AND `ai_source` = `openai` AND `migration_path` **starts with** `mantle` (`mantle`, `mantle_openai_responses`):
+**OpenAI SDK users via Mantle (config path for a Responses source; small reshape for a Chat Completions source)** — `ai_framework` = `direct` AND `ai_source` = `openai` AND (`migration_path` **starts with** `mantle` (`mantle`, `mantle_openai_responses`) OR `migration_path` == `"runtime_openai_cris"`):
 
 - Point the client at `https://bedrock-mantle.{region}.api.aws/openai/v1` — note the `openai/v1` segment for proprietary GPT models; a bare `/v1` 404s
 - Swap the credential for a Bedrock API key or the auto-refreshing token provider — **not** the existing OpenAI key
@@ -37,9 +37,9 @@ Check `preferences.json` → `ai_constraints.ai_framework` to determine the migr
 - **Config-only ONLY if the source already calls `responses.create`.** A Chat Completions source must reshape to Responses — small and mechanical, but it is a code change, so do not present this path as "no code changes" without checking the detected surface
 - Test in staging, validate responses
 
-Match the `migration_path` prefix, not the exact string: Design writes the more specific `mantle_openai_responses` for a same-model OpenAI migration, and an equality test against `mantle` would misroute those runs into the adapter path below.
+Match the `migration_path` prefix, not the exact string: Design writes the more specific `mantle_openai_responses` for a same-model OpenAI migration, and an equality test against `mantle` would misroute those runs into the adapter path below. `runtime_openai_cris` (GPT-5.6/GPT-6 served via `bedrock-runtime` CRIS instead of `bedrock-mantle`) is matched explicitly alongside the `mantle*` prefix — it does not start with `mantle`, so it needs its own check to avoid falling through to the adapter path below.
 
-**Direct SDK users (adapter path — the long pole)** — `ai_framework` = `direct` AND (`ai_source` != `openai` OR `migration_path` = `converse`):
+**Direct SDK users (adapter path — the long pole)** — `ai_framework` = `direct` AND (`ai_source` != `openai` OR `migration_path` = `converse`) AND `migration_path` != `"runtime_openai_cris"`:
 
 - **Phase 1:** Enable Bedrock access, create IAM role, develop provider adapter with feature flag, unit test
 - **Phase 2:** Deploy to staging, run A/B comparison, measure latency/quality/cost, tune prompts

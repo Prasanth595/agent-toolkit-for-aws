@@ -374,7 +374,20 @@ For each detected `integration.pattern` and `ai_source`, generate before/after m
 
 **This is not a zero-code change if the source uses Chat Completions.** Chat Completions support is unverified for the proprietary GPT models — every AWS sample uses Responses. If `integration` evidence shows `chat.completions.create`, plan a reshape to `responses.create` and probe the target account before committing. Only a source already on `responses.create` is close to a drop-in.
 
-**No Converse fallback for proprietary GPT models.** The GPT-5.x models are `bedrock-mantle` only and in-region only — there is no `bedrock-runtime` path and no cross-region inference profile. If the workload needs Bedrock Guardrails, Knowledge Bases, invocation logging, or a region these models do not serve, that requires a **model change** to a Bedrock-native model (or gpt-oss), not an endpoint change. Record `migration_path: "converse"` with `model_change: true` in that case.
+**No Converse fallback for GPT-5.5/GPT-5.4 — GPT-5.6 and GPT-6 differ.** GPT-5.5 and GPT-5.4 are
+`bedrock-mantle` only and in-region only — there is no `bedrock-runtime` path and no cross-region
+inference profile for these two models. GPT-5.6 Sol/Terra/Luna and all four GPT-6 models (Astra,
+Sol, Luna, 6.1 Sol) DO have a `bedrock-runtime` CRIS path (`us.`/`global.` prefixed IDs, per
+`openai-on-bedrock.md` § Access Paths) — for these models, a region or feature need (Guardrails,
+Knowledge Bases, invocation logging, or a region outside the mantle matrix) is satisfied by
+**switching endpoint, not model**: record `migration_path: "runtime_openai_cris"` with
+`model_change: false`. Reserve `migration_path: "converse"` with `model_change: true` for
+GPT-5.5/GPT-5.4 only, or when the GPT-6/5.6 CRIS path itself cannot serve the need (e.g. a feature
+CRIS does not support — see the runtime-side feature splits in `openai-on-bedrock.md`). Note:
+`runtime_openai_cris` for GPT-6 Astra is valid only via Responses/Chat Completions/Converse —
+Astra does not support `Invoke`, so a design that needs Guardrails or Application Inference
+Profiles (Converse-only features that also require Invoke-adjacent plumbing on some other models)
+must verify against Astra's model card per-feature, not assume parity with Sol/Luna/6.1 Sol.
 
 **Mantle throughput (medium/high volume):** quotas on `bedrock-mantle` are **per-model, per-region input TPM and output TPM — there is no RPM quota**. For `ai_token_volume = "medium"` or `"high"`, note: "Mantle enforces per-model input/output TPM quotas per region; 429s indicate a TPM ceiling, not a request-rate cap. Mitigate with exponential backoff, spreading load across minutes, and prompt caching (cached input is exempt from the input-TPM quota). There is no `bedrock-runtime` fallback for these models, so sustained growth needs a quota increase." See `references/vendored/ai/ai-migration-guardrails.md`.
 
@@ -437,7 +450,9 @@ Write `aws-design-ai.json` to `$MIGRATION_DIR/`.
 - [ ] `honest_assessment` logic is consistent (weakest model drives overall)
 - [ ] If `ai_source` includes `"openai"`: every model that `shared/openai-on-bedrock.md` lists as available on Bedrock, and whose target region carries it, is mapped to **itself** with `model_change: false` — not to a Claude/Nova substitute
 - [ ] If `honest_assessment == "recommend_stay"`: `honest_assessment_reason` names a non-cost blocker (cost parity alone is never sufficient for an OpenAI source)
-- [ ] No `bedrock_models[]` entry pairs a proprietary `openai.gpt-*` model ID with a Converse/`bedrock-runtime` migration path (those models are mantle-only)
+- [ ] No `bedrock_models[]` entry pairs **GPT-5.5 or GPT-5.4** with a Converse/`bedrock-runtime`
+      migration path (those two models only — mantle-only, no CRIS). GPT-5.6 and GPT-6 models MAY
+      use `migration_path: "runtime_openai_cris"` on `bedrock-runtime` — this is NOT a violation.
 - [ ] `regional_warnings` is present (empty array `[]` if no issues; populated if any service unavailable in target region)
 - [ ] `multi_model_warnings` is present (empty array `[]` if single model or no coordination issues)
 - [ ] If `agentic_profile.is_agentic == true`: `agentic_design` object is present with `migration_approach` matching `preferences.json`

@@ -188,8 +188,19 @@ fallback when no measured spend exists, and the source side of the per-model "vs
 
 ### OpenAI / Azure OpenAI (Standard Tier)
 
-Prices per 1M tokens.
+Prices per 1M tokens. GPT-5.5 and GPT-5.5 Pro use the same breakpoint pricing structure as GPT-5.4
+at 272K input tokens. GPT-5.4 and GPT-5.4 Pro use **breakpoint pricing** at 272K input tokens:
+rates below are for <272K context; above 272K, input is 2x and output is 1.5x.
 
+GPT-6 Astra, GPT-6 Sol, GPT-6 Luna, and GPT-6.1 Sol use the same breakpoint shape at 272,000 input
+tokens: rows below are the short-context (≤272K) rate; above 272,000 input tokens, the entire
+request — input, cache, and output — is repriced at 2x input/cache and 1.5x output (see the
+"OpenAI on Bedrock — the same-model path" section above, or OpenAI's own GPT-6 pricing page, for
+the resulting rates).
+
+> GPT-6 rows below show the ≤272K short-context rate (the Standard-tier default range); 1.05M is
+> the model's maximum context window, not the rate's valid range — see the breakpoint note above.
+>
 > **Tier note — these are OpenAI STANDARD-tier rates.** Bedrock in-region for the same models is
 > the OpenAI _data-residency_ tier, exactly 1.10x these figures (see the OpenAI-on-Bedrock note
 > above). So a same-model move for GPT-5.6 Sol/Terra/Luna, GPT-5.5, GPT-5.4 is a ~10% increase,

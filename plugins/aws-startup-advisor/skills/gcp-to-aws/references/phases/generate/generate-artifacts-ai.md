@@ -46,6 +46,10 @@ If any required file is missing: **STOP**. Output: "Missing required artifact: [
 Check `preferences.json` → `ai_constraints.ai_framework.value` and `aws-design-ai.json` → `ai_architecture.code_migration.migration_path`:
 
 - `migration_path` = `"mantle"` → Generate Mantle setup (Step 1M) + setup (Step 3) + test harness (Step 2). Skip provider adapter (Step 1).
+- `migration_path` = `"runtime_openai_cris"` → Generate the CRIS-aware Mantle-equivalent script
+  (Step 1M, using the `us.`/`global.`-prefixed inference-profile ID and the `bedrock-runtime`
+  base URL instead of `bedrock-mantle`) + setup (Step 3) + test harness (Step 2). Skip provider
+  adapter (Step 1) — same as `"mantle"`, just a different endpoint and model-id form.
 - `migration_path` = `"gpt-oss"` → Generate provider adapter (Step 1) targeting the gpt-oss model on Bedrock via the Converse API + setup (Step 3) + test harness (Step 2). Use the Bedrock model ID from `aws-design-ai.json` → `ai_architecture.bedrock_models[].aws_model_id` (the gpt-oss model ID). Do NOT generate a Mantle script — gpt-oss uses the Converse API directly.
 - `"direct"` or absent → Generate provider adapter (Step 1) + setup (Step 3) + test harness (Step 2)
 - `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or `"framework"` → Skip Step 1, generate gateway config (Step 3B) instead
