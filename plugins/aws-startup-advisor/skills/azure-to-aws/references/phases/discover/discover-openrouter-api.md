@@ -202,8 +202,15 @@ key:
 - Sends `Authorization: Bearer <key>` on every request. Never prints the key or
   the header; on HTTP errors it prints ONLY the status code and the response
   `error.message`.
-- For `/activity`, requests the last 30 days (the endpoint returns daily rows;
-  filter/keep rows whose `date` is within the window).
+- For `/activity`, requests the last 30 **completed UTC days** (the endpoint's own documented
+  window — see https://openrouter.ai/docs/api/api-reference/analytics/get-user-activity.md).
+  Compute `window_end` = today's UTC midnight (`<UTC today>T00:00:00Z` — i.e. the boundary
+  between the current, not-yet-completed UTC day and the last completed one) and
+  `window_start` = `window_end` minus 30 days, ONCE, before either `/activity` or
+  `/analytics/query` runs; filter/keep `/activity` rows whose `date` falls in
+  `[window_start, window_end)`. Record both as `window_start_utc`/`window_end_utc` in the
+  manifest (ISO 8601 UTC, see 2d) so a retry reuses the SAME bounds instead of recomputing them
+  from a later `now`.
 - A non-200 on one endpoint records `failed` for that row and continues — a
   missing endpoint or zero usage is normal, never a halt. **Exception: a 401 OR
   403 on the FIRST (probe) call** means the key is not a management/provisioning
@@ -262,13 +269,20 @@ GET https://openrouter.ai/api/v1/credits  →  credits.json
   (seconds required — the API rejects minute-precision values like
   `2026-05-01T00:00Z` with 400). **On the FIRST attempt (no retry — the
   manifest does not yet have an `/activity` entry with `status: "ok"`):**
-  `end` = now (UTC), `start` = now minus 30 days. **On a retry of this row
+  `end` = `window_end_utc`, `start` = `window_start_utc` — the SAME UTC-midnight-aligned
+  bounds computed once in Step 2a (never `now` directly; `now` is only used to DERIVE
+  `window_end_utc`'s midnight boundary, not as the window's own end timestamp — this keeps
+  Analytics aligned with `/activity`'s "last 30 completed UTC days" convention regardless of
+  what time of day capture runs). **On a retry of this row
   alone** (the manifest already has an `/activity` entry with `status:
   "ok"` — Step 2d's resume rule retries only the failed Analytics row and
   reuses the already-captured `activity.json`): reuse the ORIGINAL capture's
-  window instead of rebuilding from the current `now` — `end` = the
-  manifest's existing top-level `captured_at` timestamp, `start` = that same
-  `captured_at` minus 30 days. This keeps row 4's window aligned with the
+  window instead of rebuilding from the current `now` or re-deriving a fresh UTC midnight —
+  `end` = the manifest's recorded `window_end_utc`, `start` = the manifest's recorded
+  `window_start_utc` (NOT a fresh midnight computed at retry time, and NOT `captured_at`
+  itself — `captured_at` is the capture TIMESTAMP, which is not necessarily UTC-midnight-
+  aligned; `window_end_utc` is the aligned boundary derived from it once, in Step 2a, on the
+  first attempt). This keeps row 4's window aligned with the
   `/activity.json` data already on disk (captured at `captured_at`, not
   re-captured on this retry) — rebuilding from a fresh `now` on a delayed
   retry would shift the Analytics window forward relative to `/activity`'s
@@ -323,6 +337,8 @@ GET https://openrouter.ai/api/v1/credits  →  credits.json
 {
   "captured_at": "<ISO 8601 UTC>",
   "window_days": 30,
+  "window_start_utc": "<ISO 8601 UTC, UTC-midnight-aligned>",
+  "window_end_utc": "<ISO 8601 UTC, UTC-midnight-aligned>",
   "provisioning_key_sha256": "<sha256 of .openrouter-key-env contents — fingerprint only>",
   "captures": [
     { "endpoint": "<row endpoint>", "file": "<file>", "status": "ok|failed|skipped", "note": null }
@@ -377,9 +393,9 @@ resumed run can have `/activity: ok` and `analytics: failed` simultaneously,
 and must retry only the failed row, never both:
 
 - `/analytics/query` entry's `status` is `failed` → retry ONLY that row on the
-  next invocation, reusing the manifest's original `captured_at` for the
-  retry's `time_range` (per Step 2c row 4's retry rule above), not a fresh
-  `now`-based timestamp.
+  next invocation, reusing the manifest's recorded `window_start_utc`/`window_end_utc`
+  for the retry's `time_range` (per Step 2c row 4's retry rule above), not a fresh
+  `now`-based timestamp and not a freshly re-derived UTC midnight.
 - `/analytics/query` entry's `status` is `skipped` → leave
   `cost_provenance: "unknown"` permanently for this run; do not re-ask, do not
   retry.
@@ -494,10 +510,20 @@ that still (wrongly) passes the `monthly_cost_usd == sum of rows` self-check.
   model id has BOTH BYOK-overlapping and non-overlapping spend, same reasoning
   as a single-row `"mixed"`); all permaslug-rows `"no_byok"` → `"no_byok"`;
   all permaslug-rows `"unknown"` → `"unknown"`; a mix including `"unknown"`
-  alongside a classified value → the classified value wins (do not let one
-  unclassifiable permaslug drag a model back to `"unknown"` when another of
-  its permaslugs DID classify) — do not just take the last-seen permaslug's
-  classification.
+  alongside a classified value (`"byok_passthrough"`, `"no_byok"`, or `"mixed"`) →
+  `"uncertain"` — a NEW classification distinct from both the classified values and
+  from plain `"unknown"`. Do NOT let the classified value silently win: an `unknown`
+  permaslug carries real `/activity` token/dollar volume with NO verified BYOK signal,
+  and letting a classified sibling permaslug's label stand for the whole model either
+  double-counts that volume (if the model is then treated as `no_byok` and summed as if
+  fully confirmed) or silently drops it (if a consumer treats `unknown` rows as
+  zero-weight). **Still sum every contributing permaslug's tokens/dollars into the
+  combined row — classification never excludes a permaslug's usage from the sum, only
+  labels its provenance confidence.** Append a `metadata.capture_warnings` entry for
+  every model that resolves to `"uncertain"`: `"<model>: cost_provenance uncertain — at
+  least one contributing permaslug has no Analytics signal; token/dollar totals include
+  its usage but its BYOK-vs-credits split is unverified"`. Do not just take the last-seen
+  permaslug's classification.
 
   Write this as `usage_by_model[].cost_provenance` (per model, see schema
   below). Then roll it up to `metadata.cost_provenance` (profile-level, kept
@@ -512,6 +538,9 @@ that still (wrongly) passes the `monthly_cost_usd == sum of rows` self-check.
     bullet) → profile-level `"mixed"` — the profile has at least one model
     carrying a real BYOK-overlap risk, so `"unknown"` would understate it. Do
     NOT use `"unknown"` just because one model's row couldn't be classified.
+  - any model `"uncertain"` → profile-level `"mixed"` (same reasoning as the existing
+    "some classified + at least one unknown" bullet above — an uncertain model still
+    carries unresolved BYOK-overlap risk that a blanket "unknown" would understate).
   - the Analytics query itself failed (Step 2c row 4 `status: "failed"` or
     `"skipped"` in the manifest), or every classifiable model is `"unknown"`
     → profile-level `"unknown"`, AND set every model's
@@ -575,9 +604,12 @@ into the join logic above.
 
 `cost_provenance` enum (both `metadata.cost_provenance` and
 `usage_by_model[].cost_provenance`): `"byok_passthrough" | "mixed" | "no_byok" |
-"unknown"`. `no_byok` is a positive-signal classification distinct from
+"uncertain" | "unknown"`. `no_byok` is a positive-signal classification distinct from
 `unknown` (no-signal) — the `llm-to-bedrock/SKILL.md` consumer treats them
-differently (see that file's Step 1.5).
+differently (see that file's Step 1.5). `uncertain` is distinct from both: it means
+at least one contributing permaslug classified AND at least one other had no
+Analytics signal — the model's tokens/dollars are fully included in the totals, but
+its BYOK-vs-credits split is only partially verified.
 
 `usage_by_model` sorted descending by `prompt_tokens + completion_tokens`.
 Include only models with non-zero usage. `metadata.capture_warnings` carries every
@@ -668,8 +700,16 @@ If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read
 (resource inventory, AI workload profile, or live-capture manifest) to pass the
 Discover handoff gate.
 
-**Clean up (default, not optional):** delete
-`$MIGRATION_DIR/.openrouter-key-env` now — the key is no longer needed. (This is
+**Clean up (default, not optional, but gated on BOTH rows being terminal):** before
+deleting anything, confirm the manifest's `/activity` entry is `ok` or `skipped` AND
+the `/analytics/query` entry is `ok` or `skipped` (per Step 2d's resume rules above —
+restated here because this is the one place that actually performs the deletion). If
+`/analytics/query` is still `failed` (a retry is pending), do **NOT** delete the key
+file here — leave it in place, do not proceed with the rest of this Step 4 merge
+either (there is nothing wrong with the merge waiting; `/activity`'s data does not
+go stale), and tell the user: "OpenRouter Analytics classification is still pending a
+retry — keeping the key file until that resolves." Only once both rows are terminal:
+delete `$MIGRATION_DIR/.openrouter-key-env` now — the key is no longer needed. (This is
 the happy-path cleanup point; a 401/403 on the probe deletes it immediately at
 that point instead, per Step 2b, since a rejected key has nothing left to
 retry.) Tell the

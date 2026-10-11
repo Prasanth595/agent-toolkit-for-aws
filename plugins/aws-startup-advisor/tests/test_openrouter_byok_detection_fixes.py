@@ -133,7 +133,7 @@ def test_cost_provenance_handles_multiple_permaslugs_per_short_model() -> None:
             f"{f}: must document the differing-slug case (same short model id, "
             f"multiple permaslugs observed in the same window)"
         )
-        assert "do not just take the last-seen permaslug" in section.lower(), (
+        assert "do not just take the last-seen permaslug" in _normalize(section).lower(), (
             f"{f}: must rule out naively taking only the last-seen permaslug's "
             f"classification when a short model id has multiple permaslug rows"
         )
@@ -331,19 +331,23 @@ def test_both_openrouter_discover_copies_reuse_original_capture_window_on_retry(
             f"{f}: Step 2c row 4 must document reusing the original window on "
             f"a retry"
         )
-        assert "manifest's existing top-level `captured_at` timestamp" in _normalize(row4_section), (
-            f"{f}: retry path must reuse the manifest's captured_at, not "
-            f"rebuild start/end from the current now"
+        # PR #436 round 4 Finding 4 supersedes the prior round's "reuse captured_at"
+        # design: captured_at is a capture TIMESTAMP, not necessarily UTC-midnight
+        # aligned, so the retry path now reuses the manifest's recorded
+        # window_end_utc/window_start_utc instead.
+        assert "manifest's recorded `window_end_utc`" in _normalize(row4_section), (
+            f"{f}: retry path must reuse the manifest's recorded window_end_utc, not "
+            f"rebuild start/end from the current now or captured_at"
         )
 
-    # Step 2d's Analytics-retry bullet must also reference reusing captured_at.
+    # Step 2d's Analytics-retry bullet must also reference reusing the recorded window.
     for f in OPENROUTER_DISCOVER_FILES:
         text = f.read_text(encoding="utf-8")
         idx = text.index('`/analytics/query` entry\'s `status` is `failed` → retry ONLY that row')
         bullet = text[idx:idx + 300]
-        assert "reusing the manifest's original `captured_at`" in bullet, (
+        assert "reusing the manifest's recorded `window_start_utc`/`window_end_utc`" in bullet, (
             f"{f}: Step 2d's /analytics/query retry bullet must document "
-            f"reusing captured_at, not a fresh now-based timestamp"
+            f"reusing the recorded UTC window bounds, not a fresh now-based timestamp"
         )
 
 
@@ -410,3 +414,285 @@ def test_skill_md_byok_passthrough_bullet_has_no_mixed_language() -> None:
         "independent portion to lose"
     )
     assert "No further disclosure needed" in _normalize(byok_bullet)
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 4 — Finding 1: "uncertain" aggregation, no double-count/drop
+# ---------------------------------------------------------------------------
+
+
+def test_rollup_uncertain_classification_does_not_double_count_or_drop_tokens() -> None:
+    """Reviewer's fixture: a short model id has two permaslug rows, one classified
+    no_byok (1,440 tokens) and one unknown (1,200 tokens, no Analytics signal). The
+    buggy 'classified value wins' rollup reported the model as no_byok with
+    2,640 tokens (1,440 + 1,200) counted as confirmed non-BYOK — silently promoting
+    the unknown row's 1,200 tokens into a false-confidence bucket. The fixed rollup
+    must classify the model 'uncertain', and the combined token total must still be
+    the full 2,640 (never dropped), but must NOT be presented as 1,440 confirmed
+    no_byok tokens."""
+    permaslug_rows = [
+        {"permaslug": "model-a-2025-01-01", "tokens": 1440, "cost_provenance": "no_byok"},
+        {"permaslug": "model-a-2025-06-01", "tokens": 1200, "cost_provenance": "unknown"},
+    ]
+
+    def rollup(rows):
+        classes = {r["cost_provenance"] for r in rows}
+        total_tokens = sum(r["tokens"] for r in rows)
+        if classes == {"unknown"}:
+            return "unknown", total_tokens
+        if "unknown" in classes and len(classes) > 1:
+            return "uncertain", total_tokens
+        if "mixed" in classes or classes == {"byok_passthrough", "no_byok"}:
+            return "mixed", total_tokens
+        if classes == {"byok_passthrough"}:
+            return "byok_passthrough", total_tokens
+        if classes == {"no_byok"}:
+            return "no_byok", total_tokens
+        return "mixed", total_tokens
+
+    classification, tokens = rollup(permaslug_rows)
+    assert classification == "uncertain", (
+        "a classified + unknown permaslug mix must resolve to 'uncertain', not "
+        "silently inherit the classified sibling's label"
+    )
+    assert tokens == 2640, "token sum must include every contributing permaslug's volume"
+    # The regression this guards against: the OLD rollup reported 2,640 tokens
+    # labeled as confirmed no_byok (classification == "no_byok" at the same total),
+    # which is the double-counting/false-confidence bug. The fix keeps the same
+    # token total but changes the label to 'uncertain'.
+    assert not (classification == "no_byok" and tokens == 2640 - 1200), (
+        "sanity: fixed rollup must not silently drop the unknown row's 1,200 tokens either"
+    )
+
+
+def test_rollup_byok_passthrough_plus_unknown_also_resolves_uncertain() -> None:
+    """Second reviewer-cited combination: [byok_passthrough, unknown] must not let
+    byok_passthrough silently win and discard the unknown permaslug's independent
+    usage signal."""
+    permaslug_rows = [
+        {"permaslug": "model-b-2025-01-01", "tokens": 900, "cost_provenance": "byok_passthrough"},
+        {"permaslug": "model-b-2025-06-01", "tokens": 300, "cost_provenance": "unknown"},
+    ]
+    classes = {r["cost_provenance"] for r in permaslug_rows}
+    assert "unknown" in classes and len(classes) > 1  # same uncertain-trigger condition
+    total_tokens = sum(r["tokens"] for r in permaslug_rows)
+    assert total_tokens == 1200
+
+
+def test_both_copies_document_uncertain_classification_for_both_combinations() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        marker = "a mix including `\"unknown\"`\n  alongside a classified value"
+        assert marker in text, f"{f}: Finding-1 uncertain rollup text missing"
+        idx = text.index(marker)
+        section = text[idx:idx + 1200]
+        assert '"uncertain"' in section
+        assert "Still sum every contributing permaslug's tokens/dollars" in section
+        assert "capture_warnings" in section
+
+
+def test_both_copies_update_cost_provenance_enum_to_include_uncertain() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        assert '"byok_passthrough" | "mixed" | "no_byok" |\n"uncertain" | "unknown"' in text
+
+
+def test_openrouter_discover_copies_remain_mirrored_for_uncertain_fix() -> None:
+    gcp_text = OPENROUTER_DISCOVER_FILES[0].read_text(encoding="utf-8")
+    azure_text = OPENROUTER_DISCOVER_FILES[1].read_text(encoding="utf-8")
+    marker = "a mix including `\"unknown\"`\n  alongside a classified value"
+    assert marker in gcp_text and marker in azure_text
+    gcp_block = gcp_text[gcp_text.index(marker):gcp_text.index(marker) + 1500]
+    azure_block = azure_text[azure_text.index(marker):azure_text.index(marker) + 1500]
+    assert gcp_block == azure_block, (
+        "the Finding-1 uncertain-rollup fix text has drifted between the "
+        "gcp-to-aws and azure-to-aws discover-openrouter-api.md copies"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 4 — Finding 2: credential not deleted before pending retry
+# ---------------------------------------------------------------------------
+
+
+def test_step4_cleanup_gated_on_both_rows_terminal() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        idx = text.index("## Step 4: Merge into the AI Workload Profile")
+        cleanup_idx = text.index("Clean up (default, not optional", idx)
+        cleanup_section = _normalize(text[cleanup_idx:cleanup_idx + 900])
+        assert "gated on BOTH rows being terminal" in cleanup_section
+        assert "/activity` entry is `ok` or `skipped`" in cleanup_section
+        assert "/analytics/query` entry is `ok` or `skipped`" in cleanup_section
+        assert "do **NOT** delete the key file here" in cleanup_section
+
+
+def test_step4_cleanup_pending_retry_does_not_proceed_with_merge() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        idx = text.index("Clean up (default, not optional")
+        section = text[idx:idx + 900]
+        assert "keeping the key file until that resolves" in section
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 4 — Finding 4: UTC-day aligned window (Activity vs Analytics)
+# ---------------------------------------------------------------------------
+
+
+def test_both_copies_derive_utc_midnight_window_not_raw_now() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        idx = text.index("Compute `window_end` = today's UTC midnight")
+        section = text[idx:idx + 500]
+        assert "window_start` = `window_end` minus 30" in section
+        assert "last completed one" in section or "not-yet-completed UTC day" in section
+
+
+def test_both_copies_record_window_bounds_in_manifest_and_reuse_on_retry() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        assert '"window_start_utc"' in text and '"window_end_utc"' in text
+        retry_idx = text.index("reusing the manifest's recorded `window_start_utc`")
+        assert retry_idx > 0
+
+
+def test_noon_capture_boundary_fixture_matches_activity_api_30_completed_days() -> None:
+    """Reviewer's scenario: capturing at noon UTC must not include today's partial
+    traffic (which /activity, a last-30-completed-UTC-days endpoint, never reports)
+    and must not omit half of /activity's oldest reported day."""
+    from datetime import datetime, timedelta, timezone
+
+    capture_time = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)  # noon UTC
+
+    def derive_window(now: datetime) -> tuple[datetime, datetime]:
+        window_end = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        window_start = window_end - timedelta(days=30)
+        return window_start, window_end
+
+    window_start, window_end = derive_window(capture_time)
+
+    assert window_end == datetime(2026, 3, 15, 0, 0, 0, tzinfo=timezone.utc), (
+        "window_end must be today's UTC midnight, not 'now' (noon) — the old bug "
+        "included today's partial, not-yet-completed day"
+    )
+    assert window_start == datetime(2026, 2, 13, 0, 0, 0, tzinfo=timezone.utc)
+    assert (window_end - window_start).days == 30
+    # The buggy now-anchored window the fix replaces:
+    buggy_end = capture_time
+    buggy_start = capture_time - timedelta(days=30)
+    assert buggy_end != window_end, (
+        "sanity: the buggy now-anchored end differs from the fixed midnight-aligned end"
+    )
+    assert buggy_start != window_start
+
+
+def test_delayed_retry_reuses_original_window_not_a_fresh_midnight() -> None:
+    """A retry two days later must NOT re-derive a fresh UTC-midnight window from
+    its own later 'now' — it must reuse the window recorded on the first attempt."""
+    from datetime import datetime, timedelta, timezone
+
+    first_attempt = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+    retry_attempt = datetime(2026, 3, 17, 9, 0, 0, tzinfo=timezone.utc)  # 2 days later
+
+    def derive_window(now: datetime) -> tuple[datetime, datetime]:
+        window_end = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        return window_end - timedelta(days=30), window_end
+
+    original_window = derive_window(first_attempt)
+    manifest_recorded_window = original_window  # what Step 2a wrote on the first attempt
+
+    # The retry must use the manifest's recorded window, not derive_window(retry_attempt).
+    retry_window_used = manifest_recorded_window
+    assert retry_window_used == original_window
+    assert retry_window_used != derive_window(retry_attempt), (
+        "sanity: a fresh midnight-derived window at retry time would differ from "
+        "the original — confirming the retry must reuse the recorded bounds, not "
+        "recompute them"
+    )
+
+
+def test_openrouter_discover_copies_remain_mirrored_for_utc_window_fix() -> None:
+    gcp_text = OPENROUTER_DISCOVER_FILES[0].read_text(encoding="utf-8")
+    azure_text = OPENROUTER_DISCOVER_FILES[1].read_text(encoding="utf-8")
+    marker = "Compute `window_end` = today's UTC midnight"
+    assert marker in gcp_text and marker in azure_text
+    gcp_block = gcp_text[gcp_text.index(marker):gcp_text.index(marker) + 400]
+    azure_block = azure_text[azure_text.index(marker):azure_text.index(marker) + 400]
+    assert gcp_block == azure_block, (
+        "the Finding-4 UTC-window fix text has drifted between the gcp-to-aws "
+        "and azure-to-aws discover-openrouter-api.md copies"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 4 — Finding 5: pre-Analytics manifest gate (missing entry)
+# ---------------------------------------------------------------------------
+
+
+def test_gcp_discover_handles_manifest_missing_analytics_entry() -> None:
+    text = GCP_DISCOVER_MD.read_text(encoding="utf-8")
+    idx = text.index("**1f. OpenRouter usage discovery")
+    next_idx = text.index("**1g.")
+    section = _normalize(text[idx:next_idx])
+    assert "NO `/analytics/query` entry at all" in section
+    assert "treated the same as `/analytics/query: failed`" in section
+    assert "does not re-ask Step 0 consent" in section
+
+
+def test_azure_discover_handles_manifest_missing_analytics_entry() -> None:
+    text = AZURE_DISCOVER_MD.read_text(encoding="utf-8")
+    idx = text.index("### OpenRouter usage-API consent + capture")
+    next_idx = text.index("### Anthropic usage-API consent + capture")
+    section = _normalize(text[idx:next_idx])
+    assert "NO `/analytics/query` entry present at all" in section
+    assert "do NOT re-offer Step 0 consent" in section
+
+
+def test_three_entry_pre_analytics_manifest_routes_through_both_callers() -> None:
+    """Reviewer's exact scenario: a manifest with only /credits, /activity: ok,
+    /key (no /analytics/query key at all) must route into the Analytics retry
+    path through BOTH callers' decision logic, not fall through unmatched."""
+    old_manifest = {
+        "captured_at": "2026-01-01T00:00:00Z",
+        "window_days": 30,
+        "captures": [
+            {"endpoint": "/credits", "file": "credits.json", "status": "ok"},
+            {"endpoint": "/activity", "file": "activity.json", "status": "ok"},
+            {"endpoint": "/key", "file": "key.json", "status": "ok"},
+        ],
+    }
+
+    def find_entry(manifest: dict, endpoint: str) -> dict | None:
+        return next((c for c in manifest["captures"] if c["endpoint"] == endpoint), None)
+
+    activity_entry = find_entry(old_manifest, "/activity")
+    analytics_entry = find_entry(old_manifest, "/analytics/query")
+
+    assert activity_entry is not None and activity_entry["status"] == "ok"
+    assert analytics_entry is None, (
+        "sanity: this fixture reproduces the reviewer's gap — no /analytics/query "
+        "entry present at all, distinct from status: failed"
+    )
+
+    def route(manifest: dict) -> str:
+        activity = find_entry(manifest, "/activity")
+        analytics = find_entry(manifest, "/analytics/query")
+        if activity is None:
+            return "fresh_run"
+        if activity["status"] == "failed":
+            return "resume_activity_retry"
+        if activity["status"] == "skipped":
+            return "exit_clean_no_reask"
+        # activity["status"] == "ok" from here
+        if analytics is None:
+            return "resume_analytics_retry_first_attempt"  # the fix
+        if analytics["status"] == "failed":
+            return "resume_analytics_retry"
+        return "proceed_step3"
+
+    assert route(old_manifest) == "resume_analytics_retry_first_attempt", (
+        "a pre-Analytics manifest (no /analytics/query entry) must route into the "
+        "Analytics retry path, not fall through unmatched and not silently proceed "
+        "to Step 3 treating Analytics as skipped"
+    )

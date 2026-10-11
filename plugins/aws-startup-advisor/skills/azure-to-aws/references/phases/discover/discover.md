@@ -253,6 +253,14 @@ reading an archive the customer already handed over is not interactive.
 
    - **No manifest** → fresh run; offer `discover-openrouter-api.md`'s Step 0 consent gate as
      today.
+   - **Manifest exists, `/activity` entry `"ok"`, NO `/analytics/query` entry present at all**
+     (an old three-entry manifest from before the Analytics row existed: `/credits`, `/activity:
+     ok`, `/key`) → treat identically to the next case below (`/analytics/query: "failed"`) for
+     routing purposes — do NOT re-offer Step 0 consent (the manifest already proves this run
+     passed it, and Step 0's text already discloses the POST); resume
+     `discover-openrouter-api.md` from its Step 2 Analytics-only retry path (its "FIRST attempt"
+     branch, since there is no prior Analytics attempt to retry), then proceed to Step 3 once
+     Analytics reaches a terminal state.
    - **Manifest exists, `/activity` entry `"ok"`, `/analytics/query` entry `"failed"`** → a
      pending Analytics-only retry — do NOT re-offer consent; resume
      `discover-openrouter-api.md` from its Step 2 Analytics-only retry path (reusing the

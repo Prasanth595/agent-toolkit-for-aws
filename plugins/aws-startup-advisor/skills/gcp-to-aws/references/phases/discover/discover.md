@@ -199,7 +199,18 @@ Step 2d): if `/analytics/query` entry's `status` is `"failed"`, there is a
 pending Analytics-only retry — load `discover-openrouter-api.md` and resume
 from its Step 2 retry path for the Analytics row only (reusing the
 already-good `/activity.json`, per that file's own rule), then proceed to
-Step 3 once Analytics reaches a terminal state (`ok` or `skipped`). Only when
+Step 3 once Analytics reaches a terminal state (`ok` or `skipped`). **A manifest
+with an `/activity` entry but NO `/analytics/query` entry at all** (an old
+manifest captured before this skill added the Analytics row — three entries:
+`/credits`, `/activity: ok`, `/key`) is treated the same as `/analytics/query:
+failed` for routing purposes: load `discover-openrouter-api.md` and resume from
+its Step 2 retry path for the Analytics row only (the file's own Step 2c row 4
+"FIRST attempt" branch applies, since there is no manifest entry yet to mark
+this a retry) — reusing the existing `/activity.json`, same as a genuine
+`/analytics/query: failed` resume. This does not re-ask Step 0 consent: the
+manifest's existence already proves this run passed Step 0, and the current
+Step 0 text already discloses the POST as part of the single combined consent
+gate. Only when
 the `/analytics/query` entry is already `"ok"` or `"skipped"` does `/activity:
 ok` mean execute straight from Step 3 (parse the existing captures) as
 before. The merge SUMS OpenRouter spend with a genuinely
