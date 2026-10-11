@@ -77,26 +77,36 @@ Resource entry: `resource_id: "addon:{app_name}:{addon_service}:{plan}"`,
 **Enrich from info captures** (parse the `Key: Value` text lines; on unparseable
 text, keep the plan-only entry and record a warning):
 
-- `pg-advanced-<app>.out`, parsed only when its manifest capture status is `ok`
-  (Advanced tier — checked first, before the Classic/Essential capture below):
-  parse `pg_version` and `data_size_gb` from the same `Key: Value` / unit-conversion
-  rules as Classic (`PG Version:`, `Data Size:`; convert e.g. `10.5 GB`; MB → GB —
-  these appear once per database, above the pool blocks). Set `tier: "advanced"`.
-  Then, for each `=== Leader pool ...` / `=== Follower pool <name> ...` block:
-  `role` is `"leader"` if the heading starts `Leader pool`, else `"follower"` with
-  `name` set to the token between `Follower pool` and `(attached`; find that
-  block's `<N> instances of <LEVEL>(...):` line and set `instance_count = N`,
+- `pg-advanced-<app>-<addon_name>.out`, one file per heroku-postgresql add-on
+  attached to `<app>` (`<addon_name>` matches that add-on's `name` from
+  `addons.json`, the same join used to build row 7b's capture commands) — parsed
+  only when that specific file's manifest capture status is `ok` (Advanced tier —
+  checked first, before the Classic/Essential capture below), and associated ONLY
+  with the resource entry for the add-on named `<addon_name>`. An app with
+  multiple Postgres add-ons has multiple such files; never fan out one add-on's
+  pool data across the app's other add-ons. Parse `pg_version` and `data_size_gb`
+  from the same `Key: Value` / unit-conversion rules as Classic (`PG Version:`,
+  `Data Size:`; convert e.g. `10.5 GB`; MB → GB — these appear once per database,
+  above the pool blocks). Set `tier: "advanced"`. Then, for each
+  `=== Leader pool ...` / `=== Follower pool <name> ...` block: `role` is
+  `"leader"` if the heading starts `Leader pool`, else `"follower"` with `name`
+  set to the token between `Follower pool` and `(attached`; find that block's
+  `<N> instances of <LEVEL>(...):` line and set `instance_count = N`,
   `level = LEVEL`, `ha = true` iff the line ends `(HA):`, else `ha = false`.
-  Append one entry per pool to `advanced_pools[]`. If any pool-block line inside an
-  `ok` `pg-advanced-<app>.out` doesn't match this shape, keep the plan-only entry
-  (no `tier`/`advanced_pools`), fall through to the `pg-<app>.out` bullet below, and
-  record a warning.
-- `pg-<app>.out`, used when `pg-advanced-<app>.out`'s capture is not `ok` (i.e. this
-  database is Classic/Essential tier, or the Advanced probe itself failed/was
-  skipped) → `pg_version`, `data_size_gb` (convert e.g. `10.5 GB`; MB → GB),
-  `table_count`, `connection_pooling` (`true` if a Connection Pooling line is
-  present, `false` if absent — never omit the field). The `data_size_gb` value
-  feeds downstream database-migration tool selection.
+  Append one entry per pool to that add-on's `advanced_pools[]`. If any pool-block
+  line inside an `ok` `pg-advanced-<app>-<addon_name>.out` doesn't match this
+  shape, keep the plan-only entry for that add-on (no `tier`/`advanced_pools`),
+  fall through to the `pg-<app>.out` bullet below for that same add-on, and record
+  a warning.
+- `pg-<app>.out`, used per add-on when its `pg-advanced-<app>-<addon_name>.out`
+  capture is not `ok` (i.e. that database is Classic/Essential tier, or its
+  Advanced probe itself failed/was skipped) → `pg_version`, `data_size_gb`
+  (convert e.g. `10.5 GB`; MB → GB), `table_count`, `connection_pooling` (`true` if
+  a Connection Pooling line is present, `false` if absent — never omit the field).
+  `pg-<app>.out` captures `pg:info`'s default-attachment/multi-block output and may
+  describe more than one database for apps with several Postgres add-ons — match
+  each block to its resource entry by the add-on name it names, not by app alone.
+  The `data_size_gb` value feeds downstream database-migration tool selection.
 - `redis-<app>.out` → `redis_version`, `maxmemory_policy`; set `ha_enabled: true`
   when the plan tier starts with `premium` or `private`, and
   `encryption_in_transit: true` for those tiers.

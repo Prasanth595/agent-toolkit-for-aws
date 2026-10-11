@@ -62,15 +62,29 @@ Use the best available source for Heroku monthly baseline (first match wins):
    baseline honestly.
    - **Add-ons:** sum `config.monthly_price_usd` across add-on resources — these
      are exact, and they price plans the cache has never heard of (no
-     `"unpriced_heroku"` holes for priced add-ons)
+     `"unpriced_heroku"` holes for priced add-ons). **Exception — check
+     `config.tier == "advanced"` BEFORE this flat sum, for every add-on, even
+     when `monthly_price_usd` is present:** Heroku Postgres Advanced's Platform
+     API `plan.price` reports a flat `cents` figure (frequently `0`) that does
+     NOT reflect compute-month billing — never sum it, regardless of its value.
+     Instead route that resource to the same pool-pricing formula rung 3 uses:
+     sum `rate[pool.level] × pool.instance_count` over every entry in
+     `config.advanced_pools[]` (using the Advanced Tier cache rates) plus
+     `max(0, data_size_gb - 100) × 0.20` once per addon. If
+     `config.advanced_pools[]` is missing or empty (failed/skipped capture) or
+     any pool's level is an `unverified` cache row, mark that resource
+     `"unpriced_heroku"` and add a warning — do NOT contribute $0. When any
+     Advanced-tier resource was priced this way, append its full-month
+     assumption (cache rule 9) to `baseline_note`.
    - **Dynos:** the API does not price formations; look up each formation's
      `dyno_type` in `references/shared/heroku-pricing-cache.md` (±5% published
      flat rates) × `quantity`
    - Set `current_costs.source: "live_prices_plus_cache"`
    - Set `current_costs.accuracy: "exact for add-ons, ±5% for dynos"`
-   - An add-on WITHOUT `monthly_price_usd` (e.g. a Terraform-only entry) falls
-     through to the rung-3 cache lookup for that resource only; if neither
-     prices it, mark `"unpriced_heroku"` and add to warnings
+   - An add-on WITHOUT `monthly_price_usd` and WITHOUT `tier == "advanced"` (e.g.
+     a Terraform-only entry) falls through to the rung-3 cache lookup for that
+     resource only; if neither prices it, mark `"unpriced_heroku"` and add to
+     warnings
    - `baseline_note` (mandatory): "Derived from your account's actual add-on
      prices plus published dyno rates — not an invoice. Excludes usage-based
      charges (bandwidth, build minutes), team seats, credits, and discounts;

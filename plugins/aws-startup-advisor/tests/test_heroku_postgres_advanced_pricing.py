@@ -251,7 +251,7 @@ def test_discover_live_capture_probes_both_postgres_tiers() -> None:
     text = CAPTURE_MD.read_text(encoding="utf-8")
     assert "heroku data:pg:info" in text
     assert "heroku pg:info" in text
-    assert "pg-advanced-<app>.out" in text
+    assert "pg-advanced-<app>-<addon_name>.out" in text
     assert "pg-<app>.out" in text
     step3c_idx = text.index("3c. Per-command error handling")
     step3c = text[step3c_idx:]
@@ -261,12 +261,75 @@ def test_discover_live_capture_probes_both_postgres_tiers() -> None:
 
 def test_discover_live_parses_advanced_pool_blocks() -> None:
     text = DISCOVER_LIVE.read_text(encoding="utf-8")
-    assert "pg-advanced-<app>.out" in text
+    assert "pg-advanced-<app>-<addon_name>.out" in text
     assert "instances of" in text
     assert "(HA)" in text
     assert "advanced_pools" in text
     assert "tier" in text
     assert "pg-<app>.out" in text
+
+
+def test_discover_live_associates_each_database_by_addon_name_not_just_app() -> None:
+    # Round 4 Finding A: an app can have multiple heroku-postgresql add-ons; each
+    # one's capture file and pool data must attach to that add-on's own resource
+    # entry, not fan out across every Postgres add-on on the app.
+    text = DISCOVER_LIVE.read_text(encoding="utf-8")
+    assert "pg-advanced-<app>-<addon_name>.out" in text
+    assert "multiple Postgres add-ons" in text
+    assert "never fan out one add-on's" in text or "never fan out" in text
+
+
+def test_discover_live_capture_row_7b_passes_explicit_database_identifier() -> None:
+    # Round 4 Finding A: data:pg:info declares `database` REQUIRED and resolves
+    # exactly one add-on via AddonResolver — `-a <app>` alone (no identifier) is
+    # invalid Heroku CLI usage. Row 7b must pass each add-on's name explicitly
+    # and the output filename must encode that add-on's identity so apps with
+    # multiple Postgres add-ons don't collide on one file.
+    text = CAPTURE_MD.read_text(encoding="utf-8")
+    assert "heroku data:pg:info -a <app>" not in text, (
+        "Row 7b must not call data:pg:info with only -a <app> — the database "
+        "argument is required"
+    )
+    assert "heroku data:pg:info <addon_name> -a <app>" in text
+    assert "pg-advanced-<app>-<addon_name>.out" in text
+    row7b_note_idx = text.index("**Row 7b note:**")
+    row7b_note = text[row7b_note_idx:]
+    assert "not confirmed against a live Advanced account" not in row7b_note
+    assert "REQUIRED" in row7b_note
+    assert "AddonResolver" in row7b_note
+
+
+def test_cost_engine_rung2_prices_advanced_tier_via_pool_sum_not_flat_price() -> None:
+    # Round 4 Finding B: an Advanced-tier add-on with plan.price.cents == 0 must
+    # never flow into the flat monthly_price_usd sum at rung 2 — it must be
+    # routed to the pool-pricing formula (worked example: four 4G-Performance
+    # instances × $150 = $600), matching rung 3's existing Advanced-tier
+    # handling.
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung2_idx = text.index("2. **Live-captured prices")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung2 = text[rung2_idx:rung3_idx]
+    assert 'tier == "advanced"' in rung2
+    assert "advanced_pools" in rung2
+    assert "rate[pool.level]" in rung2
+    assert "instance_count" in rung2
+
+
+def test_cost_engine_marks_advanced_tier_unpriced_when_pool_data_missing() -> None:
+    # Both rung 2 and rung 3 must mark an Advanced-tier add-on with no/empty
+    # advanced_pools (failed/skipped capture) as "unpriced_heroku" rather than
+    # silently contributing $0.
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung2_idx = text.index("2. **Live-captured prices")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung4_idx = text.index("4. **User-provided**")
+    rung2 = text[rung2_idx:rung3_idx]
+    rung3 = text[rung3_idx:rung4_idx]
+    assert "unpriced_heroku" in rung2, (
+        "rung 2 must mark Advanced-tier add-ons with missing pool data "
+        "unpriced_heroku, not $0"
+    )
+    assert "unpriced_heroku" in rung3
 
 
 def test_schema_documents_advanced_tier_fields() -> None:
