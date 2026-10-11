@@ -45,10 +45,10 @@ If any required file is missing: **STOP**. Output: "Missing required artifact: [
 
 Check `preferences.json` → `ai_constraints.ai_framework.value` and `aws-design-ai.json` → `ai_architecture.code_migration.migration_path`:
 
-- `migration_path` = `"mantle"` → Generate Mantle setup (Step 1M) + setup (Step 3) + test harness (Step 2). Skip provider adapter (Step 1).
+- `migration_path` = `"mantle"` or `"mantle_openai_responses"` → Generate Mantle setup (Step 1M) + setup (Step 3) + test harness (Step 2). Skip provider adapter (Step 1). Design records `"mantle_openai_responses"`; treat that spelling as this same Mantle path.
 - `migration_path` = `"gpt-oss"` → Generate provider adapter (Step 1) targeting the gpt-oss model on Bedrock via the Converse API + setup (Step 3) + test harness (Step 2). Use the Bedrock model ID from `aws-design-ai.json` → `ai_architecture.bedrock_models[].aws_model_id` (the gpt-oss model ID). Do NOT generate a Mantle script — gpt-oss uses the Converse API directly.
-- `"direct"` or absent → Generate provider adapter (Step 1) + setup (Step 3) + test harness (Step 2)
-- `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or `"framework"` → Skip Step 1, generate gateway config (Step 3B) instead
+- `"converse"`, `"direct"`, or absent → Generate provider adapter (Step 1) + setup (Step 3) + test harness (Step 2). `"converse"` is a Converse client swap (Design records it when a proprietary model cannot stay on Mantle); do NOT generate a Mantle script for it.
+- `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or `"framework"` → Skip Step 1, generate gateway config (Step 3B) instead. Step 3B's OpenRouter subroute can still replace that gateway config with Step 1M (`same_model_mantle`) or the provider adapter (`direct`); do not decide those two from `migration_path` alone.
 
 **Step 3F runs for ALL paths** (direct, mantle, gpt-oss, gateway, harness, strands) — generate `bedrock_monitoring.tf` regardless of migration path.
 

@@ -310,19 +310,28 @@ For AI-only / billing-only runs (no infra inventory), present the gate without
 option B and set `phases.workshop` → `"completed"`. Prefix the presented gate
 with the same breadcrumb line: "Phase 4 of 6 complete (Estimate). Remaining:
 Generate (+ optional Feedback)." For an AI-only run, also replace option C's
-label to match the selected migration route — read `aws-design-ai.json` →
-`ai_architecture.code_migration.migration_path` (see
-`generate-artifacts-ai.md`'s Step 0 table for the full mapping):
+label with the artifact route Generate will actually emit. Resolve that route
+in this order — the OpenRouter subroute wins over `migration_path`, because
+`generate-artifacts-ai.md` Step 3B does — and then show only the matching label:
 
-- `"mantle"` → `[C] Generate the Mantle migration script and A/B test harness`
-  (no provider adapter on this path — the OpenAI SDK stays, only base
-  URL/credential/model ID change).
-- `migration_path` is `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or
-  `"framework"` → `[C] Generate the gateway config, Bedrock setup script, and
-  A/B test harness` (no provider adapter on this path either — the gateway
-  config is the adapter).
-- `"direct"`, `"gpt-oss"`, or absent → `[C] Generate the Bedrock setup script,
-  provider adapter, and A/B test harness`.
+1. **OpenRouter subroute**, when `aws-design-ai.json` →
+   `code_migration.openrouter_path` is set, or `ai-workload-profile.json` has a
+   `base_url` containing `openrouter.ai`:
+   - `"same_model_mantle"` → `[C] Generate the Mantle migration script and A/B test harness`
+     (Step 3B skips gateway config and runs Step 1M; no provider adapter).
+   - `"direct"` → `[C] Generate the Bedrock setup script, provider adapter, and A/B test harness`
+     (Step 3B skips gateway config and emits the adapter).
+   - `"litellm"`, `"keep_openrouter"`, or absent → `[C] Generate the gateway config, Bedrock setup script, and A/B test harness`
+     (absent defaults to litellm). Do not promise a provider adapter on these three.
+2. **Otherwise** read `ai_architecture.code_migration.migration_path`. Design
+   records `"mantle_openai_responses"` (not `"mantle"`) and `"converse"`; accept
+   both Mantle spellings:
+   - `"mantle"` or `"mantle_openai_responses"` → the Mantle label above.
+   - `"converse"`, `"direct"`, `"gpt-oss"`, or absent → the adapter label above.
+     `"converse"` is a Converse client swap, not a Mantle script and not gateway config.
+   - `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or `"framework"` → the
+     gateway label above. This bullet does not apply when step 1 already matched
+     an OpenRouter subroute.
 
 Whichever label is shown, add a line to the presented gate stating that this
 does not deploy any servers and does not rewrite the existing application
