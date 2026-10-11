@@ -261,12 +261,31 @@ short-circuit it.
 
    - For each OpenRouter `usage_by_model[]` row whose model name-matches a model on the direct
      profile:
-     - row's `cost_provenance` is `"byok_passthrough"` or `"mixed"` → EXCLUDE this row's
-       dollar AND token figures from this SUM entirely (not dollars alone — the direct profile
-       already counts that traffic's tokens, so including OpenRouter's figures too would
-       double-count both; the same underlying provider spend would otherwise be counted twice —
-       once via the direct provider's own usage API, once via OpenRouter routing the same
-       traffic). Prefer the direct provider's own figure for this model as ground truth.
+     - row's `cost_provenance` is `"byok_passthrough"` → EXCLUDE this row's dollar AND token
+       figures from this SUM entirely (not dollars alone — the direct profile already counts
+       that traffic's tokens, so including OpenRouter's figures too would double-count both;
+       the same underlying provider spend would otherwise be counted twice — once via the
+       direct provider's own usage API, once via OpenRouter routing the same traffic). Prefer
+       the direct provider's own figure for this model as ground truth. No further disclosure
+       needed — the entire row is BYOK-passthrough traffic already counted via the direct
+       profile.
+     - row's `cost_provenance` is `"mixed"` → EXCLUDE this row's dollar AND token figures from
+       this SUM entirely, for the same double-counting reason as `byok_passthrough` above.
+       **UNLIKE `byok_passthrough`, do NOT silently drop the independent portion:** a `"mixed"`
+       row has BOTH BYOK-passthrough traffic (already counted via the direct profile) AND
+       genuinely independent, OpenRouter-credit-funded traffic that this exclusion also removes
+       with no other home — that independent portion is real spend missing from the baseline,
+       not spend double-counted elsewhere. Carry an explicit undercount disclosure for every
+       excluded `"mixed"` row into both the computed baseline's warnings (append to
+       `capture_warnings` — see below) and the user-facing summary: `"<model> classified mixed
+       (BYOK + independent OpenRouter usage) — excluded entirely to avoid double-counting the
+       BYOK portion, but this also drops its independent OpenRouter-funded usage from the
+       baseline, which is NOT reflected in the figure above."` Do NOT attempt to estimate or
+       back out the independent portion's dollar/token split from the enum alone — the enum has
+       no signal for how much of the row's usage is which; only disclose that it is missing. Do
+       NOT make any unsupported "complete cost" or "savings" claim when this warning fires —
+       match the honest-disclosure pattern already used for `cost_unavailable`/
+       `partial_window` above.
      - row's `cost_provenance` is `"no_byok"` → do **NOT** exclude; this is a confirmed
        non-overlapping-provider case, so OpenRouter's own figures for this model are the
        correct spend to sum (more precise than the blanket-unknown fallback below).

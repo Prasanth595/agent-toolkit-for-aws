@@ -243,10 +243,30 @@ reading an archive the customer already handed over is not interactive.
    fragment ever sees (the SAME reasoning the live-`az` offer step above already states for
    itself).
 
-   **Re-entry check (do this FIRST, before offering consent), same rule as live `az`:** if
-   `$MIGRATION_DIR/openrouter-usage-profile.json` already exists from a prior attempt in THIS run
-   directory, do NOT silently trust it — re-offer `discover-openrouter-api.md`'s Step 0 consent
-   gate for THIS attempt; on decline, delete/rename the existing profile file before continuing.
+   **Re-entry check (do this FIRST, before offering consent), same rule as live `az`:** check
+   `$MIGRATION_DIR/openrouter-capture/manifest.json` FIRST — do NOT key this check off bare
+   `openrouter-usage-profile.json` existence alone (a run that stopped mid-retry, e.g.
+   `/activity: ok` with `/analytics/query: failed`, has no profile written yet since Step 3
+   never ran, so a profile-existence-only check would wrongly treat it as a fresh run and
+   re-offer Step 0 consent, discarding the already-good `/activity` capture and re-prompting
+   for a key the user already provided):
+
+   - **No manifest** → fresh run; offer `discover-openrouter-api.md`'s Step 0 consent gate as
+     today.
+   - **Manifest exists, `/activity` entry `"ok"`, `/analytics/query` entry `"failed"`** → a
+     pending Analytics-only retry — do NOT re-offer consent; resume
+     `discover-openrouter-api.md` from its Step 2 Analytics-only retry path (reusing the
+     already-good `/activity.json`, per that file's own independent-resume rule for
+     `/analytics/query`), then proceed to Step 3 once Analytics reaches a terminal state.
+   - **Manifest exists, `/activity` entry `"ok"`, `/analytics/query` entry `"ok"` or
+     `"skipped"`, and `openrouter-usage-profile.json` exists** → a prior attempt fully
+     completed; keep today's behavior for this case — re-offer `discover-openrouter-api.md`'s
+     Step 0 consent gate for THIS attempt, and on decline, delete/rename the existing profile
+     file before continuing (reusing a fully-completed prior attempt silently for a NEW
+     attempt is still wrong, per the existing re-entry philosophy).
+   - **Manifest exists, `/activity` entry `"failed"` or `"skipped"`** → route into
+     `discover-openrouter-api.md`'s own documented resume rules for that row (retry, or
+     exit-cleanly-no-reask respectively) — do not re-offer Step 0 either.
 
    The file's own Step 0 consent gate is the single consent point for this source — do not
    pre-ask here; loading the file only presents the gate. If `discover-openrouter-api.md`'s

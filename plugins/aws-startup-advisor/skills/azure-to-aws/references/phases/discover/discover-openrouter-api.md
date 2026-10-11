@@ -260,10 +260,26 @@ GET https://openrouter.ai/api/v1/credits  →  credits.json
   whose `date` falls in the last 30 days, it never constructs a timestamp
   pair. Build `start`/`end` directly as UTC `YYYY-MM-DDTHH:MM:SSZ` strings
   (seconds required — the API rejects minute-precision values like
-  `2026-05-01T00:00Z` with 400): `end` = now (UTC), `start` = now minus 30
-  days. The span MUST stay at or under 30 days — `openrouter_usage` is capped
-  at 31 days by the API, and widening the window risks a 400 on this row only
-  (not on `/activity`, which has its own independent 30-day filter). When
+  `2026-05-01T00:00Z` with 400). **On the FIRST attempt (no retry — the
+  manifest does not yet have an `/activity` entry with `status: "ok"`):**
+  `end` = now (UTC), `start` = now minus 30 days. **On a retry of this row
+  alone** (the manifest already has an `/activity` entry with `status:
+  "ok"` — Step 2d's resume rule retries only the failed Analytics row and
+  reuses the already-captured `activity.json`): reuse the ORIGINAL capture's
+  window instead of rebuilding from the current `now` — `end` = the
+  manifest's existing top-level `captured_at` timestamp, `start` = that same
+  `captured_at` minus 30 days. This keeps row 4's window aligned with the
+  `/activity.json` data already on disk (captured at `captured_at`, not
+  re-captured on this retry) — rebuilding from a fresh `now` on a delayed
+  retry would shift the Analytics window forward relative to `/activity`'s
+  frozen rows, silently dropping early days `/activity` still has data for
+  and gaining trailing days `/activity` has none for, which can flip a
+  model's classification (e.g. a `mixed` model's early BYOK-only days drop
+  out of the Analytics window, leaving only its later non-BYOK days visible,
+  misclassifying it `no_byok`). The span MUST stay at or under 30 days —
+  `openrouter_usage` is capped at 31 days by the API, and widening the window
+  risks a 400 on this row only (not on `/activity`, which has its own
+  independent 30-day filter). When
   `$WORKSPACE_ID` is set (Step 1.5), add a `filters` array scoping to that
   workspace — same rule as row 2's `&workspace_id=$WORKSPACE_ID`, so this
   row's classification matches the same workspace scope `/activity` already
@@ -361,7 +377,9 @@ resumed run can have `/activity: ok` and `analytics: failed` simultaneously,
 and must retry only the failed row, never both:
 
 - `/analytics/query` entry's `status` is `failed` → retry ONLY that row on the
-  next invocation.
+  next invocation, reusing the manifest's original `captured_at` for the
+  retry's `time_range` (per Step 2c row 4's retry rule above), not a fresh
+  `now`-based timestamp.
 - `/analytics/query` entry's `status` is `skipped` → leave
   `cost_provenance: "unknown"` permanently for this run; do not re-ask, do not
   retry.
@@ -431,9 +449,19 @@ that still (wrongly) passes the `monthly_cost_usd == sum of rows` self-check.
   (credits-billed) inference cost in USD, both keyed by `model` over the SAME
   30-day window as `/activity`.
 
-  Build a `model → { byok_usage, openrouter_usage }` map from `analytics.json`.
-  For each model present in BOTH that map and the `/activity` group-by-model
-  result, classify using a $0.005 (half-cent) threshold — chosen to absorb
+  Build a `model → { byok_usage, openrouter_usage }` map from `analytics.json`
+  keyed by the Analytics response's own `model` field — Analytics returns this
+  in PERMASLUG form (e.g. `openai/gpt-4.1-2025-04-14`), not the short public
+  id. **The join key is `/activity`'s `model_permaslug` field, not its `model`
+  field** — `/activity` rows carry both (Step 2c row 2: `model`, the short
+  public id, and `model_permaslug`, the versioned/pinned id Analytics' `model`
+  dimension actually returns). Joining on `/activity`'s `model` field instead
+  silently fails to match for any model whose permaslug differs from its short
+  id — i.e. most actively-used models, which get re-dated releases — leaving
+  them wrongly classified `"unknown"` with their real BYOK/non-BYOK split lost.
+
+  For each `/activity` row, look up its `model_permaslug` in the Analytics map
+  and classify using a $0.005 (half-cent) threshold — chosen to absorb
   float/display rounding noise without swallowing genuine low-but-real BYOK
   spend:
 
@@ -443,10 +471,33 @@ that still (wrongly) passes the `monthly_cost_usd == sum of rows` self-check.
     confirmation of no BYOK overlap — NOT the same as "no signal")
   - both `<= 0.005` → `"unknown"` (no signal either way)
 
-  A model present in `/activity` but ABSENT from the Analytics response also
-  gets `"unknown"` (nothing to classify it with). A model present only in
+  A `/activity` row whose `model_permaslug` is ABSENT from the Analytics map
+  also gets `"unknown"` (nothing to classify it with). A model present only in
   Analytics but not `/activity` is dropped silently — it has no `/activity` row
   to attach `cost_provenance` to.
+
+  **Roll the per-permaslug classification back up to the short `model` id —
+  `usage_by_model[].model` stays in whatever short form it already uses;
+  `model_permaslug` is a join key only and never leaks into the output.** If
+  the SAME short `model` id has multiple `model_permaslug` values across
+  different `/activity` rows (differing dated releases observed in the same
+  30-day window), classify and sum each permaslug's `byok_usage`/
+  `openrouter_usage` independently (per the thresholds above), then combine
+  into ONE `usage_by_model[]` row per short `model` id: sum
+  `monthly_cost_usd`/token figures across the permaslug rows as already
+  specified (never double-count a short model id's dollars by summing the
+  same permaslug twice), and compute that row's single `cost_provenance` with
+  the same precedence the profile-level rollup below already uses — any
+  permaslug `"mixed"` → `"mixed"`; all permaslug-rows `"byok_passthrough"` and
+  none `"no_byok"`/`"mixed"` → `"byok_passthrough"`; a mix of
+  `"byok_passthrough"` and `"no_byok"` permaslug-rows → `"mixed"` (the short
+  model id has BOTH BYOK-overlapping and non-overlapping spend, same reasoning
+  as a single-row `"mixed"`); all permaslug-rows `"no_byok"` → `"no_byok"`;
+  all permaslug-rows `"unknown"` → `"unknown"`; a mix including `"unknown"`
+  alongside a classified value → the classified value wins (do not let one
+  unclassifiable permaslug drag a model back to `"unknown"` when another of
+  its permaslugs DID classify) — do not just take the last-seen permaslug's
+  classification.
 
   Write this as `usage_by_model[].cost_provenance` (per model, see schema
   below). Then roll it up to `metadata.cost_provenance` (profile-level, kept
@@ -470,7 +521,12 @@ that still (wrongly) passes the `monthly_cost_usd == sum of rows` self-check.
     writing the profile in this case — `/activity` data is still valid and
     must still be written.
 
-Write `$MIGRATION_DIR/openrouter-usage-profile.json`:
+Write `$MIGRATION_DIR/openrouter-usage-profile.json`. **Note on the example
+below:** `usage_by_model[].model` is the short public id (e.g.
+`"openai/gpt-4.1"`) — the join to Analytics that produced each row's
+`cost_provenance` happened on `/activity`'s `model_permaslug` field, not on
+this `model` field; do not copy this example's apparent `model`-keyed shape
+into the join logic above.
 
 ```json
 {
@@ -645,7 +701,9 @@ FORBIDDEN — Do NOT include ANY of:
 
 - AWS service names, recommendations, or Bedrock equivalents
 - Migration strategies, phases, timelines, cost estimates, or effort estimates
-- Any chat/completion/`/generation` call, any non-GET method, or any key printing
+- Any chat/completion/`/generation` call, any HTTP method other than `GET`
+  EXCEPT the one read-only `POST /analytics/query` aggregate query, or any key
+  printing
 - Prompt or completion CONTENT anywhere
 
 **Your ONLY job: capture aggregate OpenRouter usage. Nothing else.**
