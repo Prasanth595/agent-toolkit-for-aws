@@ -129,6 +129,36 @@ Whenever a baseline was determined (any source except `"unavailable"`), present 
 
 ---
 
+## Part 1b: Flag Deferred-Resource Cost (apples-to-apples check)
+
+Design defers any resource it cannot map to an AWS service (`aws-design.json
+→ deferred[]`) — most commonly a Heroku Postgres Advanced add-on, whose
+`plan: "advanced"` has no row in `postgres-rds-sizing.json`. Part 1 above
+still prices that resource's Heroku-side cost (via the pool-sum formula, e.g.
+4× `4G-Performance` = $600/mo) and includes it in the Heroku baseline total
+— correctly, since it is a real Heroku charge. But Part 2 below only prices
+services Design actually produced, which is nothing for a deferred resource.
+Left unflagged, that Heroku-side cost reads as pure AWS savings with no
+corresponding AWS line.
+
+After the Heroku baseline total is computed (any rung except
+`"unavailable"`), read `aws-design.json → deferred[]`. For every deferred
+entry carrying a `resource_id`, check whether that `resource_id` was included
+in the baseline sum (i.e. it was priced, not marked `"unpriced_heroku"`).
+
+- Sum those contributions into `current_costs.deferred_resource_cost` (number,
+  default `0`).
+- List the matching add-on names into
+  `current_costs.deferred_resource_services[]` (array of strings, default
+  `[]`), each formatted like
+  `"heroku-postgresql (postgresql-cubed-12345, Advanced tier)"`.
+- When `deferred_resource_cost > 0`, append to `baseline_note`: "Includes
+  $`{N}`/mo for `{service}` which has no AWS-side equivalent in this estimate
+  (deferred — see Design phase warnings); the AWS comparison below is not a
+  full apples-to-apples total until that is resolved."
+
+---
+
 ## Part 2: Calculate Projected AWS Costs
 
 For each service in `aws-design.json → services[]`, calculate monthly cost by applying the formula from the Per-Service Calculation Formulas table below, looking up its rates from `references/vendored/pricing/aws-infra-pricing.json`. Track `pricing_source` per service. (`hours_per_month` = 730, from `_meta`.)
@@ -321,9 +351,27 @@ Include in `estimation-infra.json`:
     "monthly_difference": "<optimized - heroku>",
     "annual_difference": "<(optimized - heroku) × 12>",
     "percent_change": "<+/-X%>"
-  }
+  },
+  "comparison_status": "complete" | "incomplete_unmatched_services",
+  "unmatched_deferred_cost": "<current_costs.deferred_resource_cost>",
+  "unmatched_deferred_services": "<current_costs.deferred_resource_services[]>"
 }
 ```
+
+Set `comparison_status` to `"incomplete_unmatched_services"` whenever
+`current_costs.deferred_resource_cost > 0` (from Part 1b); else `"complete"`.
+This mirrors the existing `found`/`available`-style status flag convention
+already used in `billing_profile` / `terraform_metadata` / `live_metadata`.
+
+**Keep the full baseline — do not subtract or hide the deferred resource's
+cost.** When `comparison_status == "incomplete_unmatched_services"`, every
+presentation of the savings/difference figures (chat summary,
+`financial_summary`, `migration-report.html`/`decision-report.html`
+`exec-costs`) MUST render a caveat naming the unmatched service and its
+monthly cost next to the figure — the same mandatory-caveat-beside-the-figure
+rule already required for `baseline_note` in `generate-report.md`. Never
+present the dollar delta as decision-grade savings without that caveat
+alongside it.
 
 ### When NO Baseline Was Determined (`current_costs.source == "unavailable"`)
 
@@ -638,6 +686,7 @@ Include migrate/stay decision factors:
 | 3 | `database_ha` or availability posture resolved by default/plan-tier, never user-confirmed        | "Confirm the availability requirement — Multi-AZ roughly doubles the database line" |
 | 4 | `migration_approach` defaulted while the stack has Postgres over ~100GB or zero-downtime signals | "Confirm cutover approach — pg_dump default may not fit this database"              |
 | 5 | Pricing staleness beyond the vendored rate card's accuracy band                                  | "Refresh pricing before treating the dollar delta as decision-grade"                |
+| 6 | `cost_comparison.comparison_status == "incomplete_unmatched_services"`                           | "Account for $[unmatched_deferred_cost]/mo in [unmatched_deferred_services] before treating this AWS estimate as a full replacement of your current Heroku spend." |
 
 **Outcome derivation:**
 

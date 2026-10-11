@@ -52,6 +52,10 @@ From `estimation-infra.json`:
   derived baseline's approximation caveat (e.g. the full-month assumption on a
   Postgres Advanced per-pool estimate) and MUST be rendered, not just gathered
   — see `exec-costs` below.
+- `cost_comparison.comparison_status` / `unmatched_deferred_cost` /
+  `unmatched_deferred_services` — when `comparison_status ==
+  "incomplete_unmatched_services"`, these MUST be rendered as a caveat beside
+  the savings/difference figure, not just gathered — see `exec-costs` below.
 
 From design + preferences: region, primary compute (EB / Fargate / EKS),
 service count.
@@ -66,7 +70,7 @@ Write a **self-contained** HTML file to `$MIGRATION_DIR/migration-report.html`
 | Section ID          | Content                                                                                                                                                                                                                                                                                      |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decision-summary`  | Typography-first verdict (see below), cost one-liner, next action                                                                                                                                                                                                                            |
-| `exec-costs`        | Heroku-vs-AWS side-by-side when a Heroku baseline exists (`current_costs.source != "unavailable"`); otherwise the AWS three-tier table with a one-line note that no Heroku baseline was available. Estimated monthly; Balanced primary. **When `current_costs.baseline_note` is present (any derived — not invoiced — source, including the Postgres Advanced per-pool formula), render it as a visible caveat line directly beside the Heroku current-monthly figure — never only in the accuracy band.** This is mandatory, not conditional on which derived source produced the note. |
+| `exec-costs`        | Heroku-vs-AWS side-by-side when a Heroku baseline exists (`current_costs.source != "unavailable"`); otherwise the AWS three-tier table with a one-line note that no Heroku baseline was available. Estimated monthly; Balanced primary. **When `current_costs.baseline_note` is present (any derived — not invoiced — source, including the Postgres Advanced per-pool formula), render it as a visible caveat line directly beside the Heroku current-monthly figure — never only in the accuracy band.** This is mandatory, not conditional on which derived source produced the note. **When `cost_comparison.comparison_status == "incomplete_unmatched_services"`, render the same mandatory caveat-beside-the-figure treatment, naming `cost_comparison.unmatched_deferred_services` and `unmatched_deferred_cost` directly beside the savings/difference figure — never present that dollar delta as decision-grade savings without it.** This file is the single source of truth for `exec-costs` content rules, so `report-decision-core.md`'s reuse of these rules picks this up automatically. |
 | `cost-optimization` | Reserved Instance / Savings Plan opportunities table, or the explicit no-eligible-commitment statement — see below. Always present, never omitted                                                                                                                                            |
 | `next-steps`        | Ordered list pointing to `MIGRATION_GUIDE.md` phases (not a procedure dump). Include one bullet noting the Terraform ships with `baseline.tf` (account security baseline — GuardDuty, CloudTrail, budget alerts) and that three contact emails must be set in tfvars before `terraform plan` |
 
@@ -258,6 +262,9 @@ the report is edited — a stub is never acceptable):
    figure in `<span data-cost-key="aws_monthly_balanced">$NNN/mo</span>` (the
    validator FAILs on a missing anchor — it is how the rendered figure is confirmed
    against the estimate). The attribute is not reader-visible text.
+10. If `cost_comparison.comparison_status == 'incomplete_unmatched_services'`,
+    confirm the unmatched-service caveat is visible text next to the
+    Heroku-vs-AWS figure, not only inside `baseline_note`.
 
 A report failure must not delete the Terraform/docs — repair the HTML in this fragment. Fixing
 the report is **only** done here, before control returns; the completion gate never edits it.

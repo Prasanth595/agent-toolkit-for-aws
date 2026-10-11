@@ -69,10 +69,13 @@ For each add-on attached to a selected app:
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plan.name` (e.g. `heroku-postgresql:standard-0`) | split into `addon_service` and `plan` (same rule as Terraform discovery)                                                                                                        |
 | `addon_service.name`                              | `provider` — `"heroku"` when the service name starts with `heroku-` (first-party data add-ons), otherwise the service name itself (matches the Terraform fragment's convention) |
+| `name`                                             | `addon_name` — the add-on's actual Heroku-assigned name                                                                                                                         |
 | `plan.price` (`cents`, `unit`)                    | `monthly_price_usd` = `cents / 100` when `unit == "month"` (optional field)                                                                                                     |
 
-Resource entry: `resource_id: "addon:{app_name}:{addon_service}:{plan}"`,
-`resource_type: "addon"`, `source: "live"`.
+Resource entry: `resource_id: "addon:{app_name}:{addon_service}:{plan}:{addon_name}"`,
+`resource_type: "addon"`, `source: "live"`. `addon_name` is that add-on's `name`
+field from `addons.json` — the same identifier already used to build this app's
+`pg-advanced-<app>-<addon_name>.out` capture filename.
 
 **Enrich from info captures** (parse the `Key: Value` text lines; on unparseable
 text, keep the plan-only entry and record a warning):
