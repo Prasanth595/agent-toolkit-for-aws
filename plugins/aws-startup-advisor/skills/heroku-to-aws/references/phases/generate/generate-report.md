@@ -47,6 +47,11 @@ From `estimation-infra.json`:
 - `projected_costs.aws_monthly_premium` / `_balanced` / `_optimized`
 - `complexity_tier`
 - `pricing_source.status` (for a one-line pricing confidence note)
+- `current_costs.accuracy` and `current_costs.baseline_note` — required
+  whenever `current_costs.source != "unavailable"`; `baseline_note` carries a
+  derived baseline's approximation caveat (e.g. the full-month assumption on a
+  Postgres Advanced per-pool estimate) and MUST be rendered, not just gathered
+  — see `exec-costs` below.
 
 From design + preferences: region, primary compute (EB / Fargate / EKS),
 service count.
@@ -61,7 +66,7 @@ Write a **self-contained** HTML file to `$MIGRATION_DIR/migration-report.html`
 | Section ID          | Content                                                                                                                                                                                                                                                                                      |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `decision-summary`  | Typography-first verdict (see below), cost one-liner, next action                                                                                                                                                                                                                            |
-| `exec-costs`        | Heroku-vs-AWS side-by-side when a Heroku baseline exists (`current_costs.source != "unavailable"`); otherwise the AWS three-tier table with a one-line note that no Heroku baseline was available. Estimated monthly; Balanced primary                                                       |
+| `exec-costs`        | Heroku-vs-AWS side-by-side when a Heroku baseline exists (`current_costs.source != "unavailable"`); otherwise the AWS three-tier table with a one-line note that no Heroku baseline was available. Estimated monthly; Balanced primary. **When `current_costs.baseline_note` is present (any derived — not invoiced — source, including the Postgres Advanced per-pool formula), render it as a visible caveat line directly beside the Heroku current-monthly figure — never only in the accuracy band.** This is mandatory, not conditional on which derived source produced the note. |
 | `cost-optimization` | Reserved Instance / Savings Plan opportunities table, or the explicit no-eligible-commitment statement — see below. Always present, never omitted                                                                                                                                            |
 | `next-steps`        | Ordered list pointing to `MIGRATION_GUIDE.md` phases (not a procedure dump). Include one bullet noting the Terraform ships with `baseline.tf` (account security baseline — GuardDuty, CloudTrail, budget alerts) and that three contact emails must be set in tfvars before `terraform plan` |
 

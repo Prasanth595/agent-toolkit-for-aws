@@ -43,6 +43,16 @@ COST_ENGINE = (
     / "estimate-cost-engine.md"
 )
 
+GENERATE_REPORT = (
+    PLUGIN_ROOT
+    / "skills"
+    / "heroku-to-aws"
+    / "references"
+    / "phases"
+    / "generate"
+    / "generate-report.md"
+)
+
 CAPTURE_MD = (
     PLUGIN_ROOT
     / "skills"
@@ -191,6 +201,34 @@ def test_pricing_cache_classic_tier_rows_untouched() -> None:
     assert "| premium-0 | 200     | 4 GB   | 64 GB   | 200         |" in text
     assert "| private-0 | 200     | 4 GB   | 64 GB   | 200         |" in text
     assert "| shield-0 | 200     | 4 GB   | 64 GB   | 200         |" in text
+
+
+def test_generate_report_requires_rendering_baseline_note() -> None:
+    # Review finding (leon1418, PR #434, P2): appending baseline_note at
+    # capture time does nothing if the saved-report generator never reads or
+    # renders it. generate-report.md's Step 1 figure-gathering list and its
+    # exec-costs section definition must both name baseline_note explicitly
+    # — report-decision-core.md reuses these same exec-costs rules for the
+    # decision HTML / DECISION.md twin, so fixing it here covers both modes.
+    text = GENERATE_REPORT.read_text(encoding="utf-8")
+    step1_idx = text.index("## Step 1: Gather figures")
+    step2_idx = text.index("## Step 2:")
+    step1 = text[step1_idx:step2_idx]
+    assert "baseline_note" in step1, (
+        "Step 1 must gather current_costs.baseline_note so it is available "
+        "to render in exec-costs — a derived-baseline caveat (e.g. the "
+        "Postgres Advanced full-month assumption) that is never gathered "
+        "can never reach the saved report."
+    )
+
+    exec_costs_idx = text.index("| `exec-costs`")
+    exec_costs_row_end = text.index("\n", exec_costs_idx)
+    exec_costs_row = text[exec_costs_idx:exec_costs_row_end]
+    assert "baseline_note" in exec_costs_row, (
+        "exec-costs's own section definition must require rendering "
+        "baseline_note next to the Heroku current-monthly figure, not just "
+        "list it as a gathered field"
+    )
 
 
 def test_cost_engine_rung3_references_advanced_tier_formula() -> None:
