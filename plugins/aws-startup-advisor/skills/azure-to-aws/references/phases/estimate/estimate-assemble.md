@@ -112,11 +112,19 @@ Step 3B does — and then show only the matching label:
      (absent defaults to litellm). Do not promise a provider adapter on these three.
 2. **Otherwise** read `ai_architecture.code_migration.migration_path`:
    - `mantle_openai_responses` (Design's spelling) or `mantle` → the Mantle label above.
-   - `converse`, `direct`, `gpt-oss`, or absent → the adapter label above.
+   - `converse`, `direct`, or `gpt-oss` → the adapter label above.
      `converse` is a Converse client swap, not a Mantle script and not gateway config.
    - `llm_router` / `api_gateway` / `voice_platform` / `framework` → the gateway
      label above. This bullet does not apply when step 1 already matched an
      OpenRouter subroute.
+   - **absent/missing `migration_path`** → consult the confirmed framework in
+     `preferences.json` → `ai_constraints.ai_framework.value` (an ARRAY) BEFORE
+     defaulting: if that array includes any of `llm_router` / `api_gateway` /
+     `voice_platform` / `framework`, show the gateway label above; otherwise show
+     the adapter label. This mirrors `generate-artifacts-ai.md` Step 0's
+     framework-based dispatch (a gateway framework routes to Step 3B gateway
+     config, not the adapter), so the menu label matches the artifact Generate
+     emits when `migration_path` was never recorded.
 
 Whichever label is shown, add a line to the presented gate stating that this
 does not deploy any servers and does not rewrite the existing application

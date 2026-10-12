@@ -63,7 +63,7 @@ Generate `ai-migration/migrate_to_mantle.sh` — a shell script that configures 
 **Requirements:**
 
 - Dry-run by default (`--execute` flag to apply)
-- Print the environment variables to set: `OPENAI_BASE_URL=https://bedrock-mantle.{region}.api.aws/v1`, `OPENAI_API_KEY=<bedrock-api-key>`
+- Print the environment variables to set: `OPENAI_BASE_URL=https://bedrock-mantle.{region}.api.aws/openai/v1` (the `/openai/v1` segment is load-bearing — a bare `/v1` 404s for the proprietary GPT models that route through this path; see `references/shared/openai-on-bedrock.md` for the per-model base paths), `OPENAI_API_KEY=<bedrock-api-key>`
 - Print the model string change: current model ID → Bedrock model ID from `aws-design-ai.json`
 - Include a quick verification call using the OpenAI SDK against the Mantle endpoint
 - **Add a warning comment** about `max_tokens`: OpenAI SDK users migrating via Mantle carry over their existing `max_tokens` value unchanged. If the existing value is 4096 (OpenAI default), this reduces Bedrock concurrency by 5–8x on TPM quota. Instruct users to audit `max_tokens` before production and include the workload-type lookup table (see Step 1M max_tokens guidance above).
@@ -131,7 +131,9 @@ Generate `ai-migration/test_comparison.py` — always Python regardless of adapt
 - Pass criteria: Bedrock latency ≤ 2x source latency, mean quality score ≥ 0.9
 - Output structured JSON to `--output` (default: `comparison_results.json`)
 - Built-in test prompts: include 3-5 prompts based on `ai-workload-profile.json` → `models[].usage_context` covering the primary use case
-- Import the provider adapter via `from provider_adapter import get_provider`
+- **Source/target client setup — conditional on the migration path (Step 0):**
+  - **Non-Mantle paths** (`direct`, `gpt-oss`, `converse`, and gateway paths that emit the adapter): import the provider adapter via `from provider_adapter import get_provider` — those paths generate `provider_adapter.{py,js,go}` in Step 1, so the import resolves.
+  - **Mantle path** (`migration_path` = `"mantle"` / `"mantle_openai_responses"`, or the Step 3B `same_model_mantle` OpenRouter subroute): do NOT import `provider_adapter` — the Mantle path skips Step 1 and emits no adapter module, so that import would break. Instead set up the OpenAI SDK pointed at the Mantle `/openai/v1` base URL with a Bedrock token provider and call `client.responses.create(...)` (the client-setup pattern in `references/shared/openai-on-bedrock.md` § Client setup) for the Bedrock side, and the source provider's existing OpenAI SDK client for the source side. The harness stays self-contained and does not depend on the omitted adapter.
 
 ---
 
@@ -143,11 +145,15 @@ Generate `ai-migration/setup_bedrock.sh`.
 
 - Dry-run by default (`--execute` flag to run for real)
 - Step 1 — Request model access: List each model from `aws-design-ai.json` → `bedrock_models[].aws_model_id` and the embedding model
-- Step 2 — Create IAM role: Trust policy for the compute platform (Lambda, ECS, or EC2 based on `aws-design.json` if present). Bedrock policy: `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` scoped to `arn:aws:bedrock:*::foundation-model/*`
+- Step 2 — Create IAM role: Trust policy for the compute platform (Lambda, ECS, or EC2 based on `aws-design.json` if present). Bedrock policy — **conditional on the migration path (Step 0):**
+  - **Non-Mantle paths** (`direct`, `gpt-oss`, `converse`, gateway): grant `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` scoped to `arn:aws:bedrock:*::foundation-model/*`. These are correct for Converse/`bedrock-runtime` traffic.
+  - **Mantle path** (`migration_path` = `"mantle"` / `"mantle_openai_responses"`, or the `same_model_mantle` OpenRouter subroute): `bedrock:InvokeModel` does NOT authorize Mantle calls. Grant the Mantle inference actions `bedrock-mantle:CreateInference` (plus `bedrock-mantle:CallWithBearerToken` for bearer-token auth), or attach the managed policy `AmazonBedrockMantleInferenceAccess`. See `references/shared/openai-on-bedrock.md` § Client setup (IAM) for the authoritative action/policy names.
 - Compliance carry-through: if `preferences.json` → `design_constraints.compliance` is set and not `none`/`unknown` (full-flow Q2 / AI-only Q1.5), the script and its printed notes MUST reflect the design's Step 0.7 constraints — `AWS_REGION` from the compliance-constrained region (GovCloud for fedramp, EU for gdpr), `eu.` inference-profile model IDs for gdpr, and for hipaa a printed warning that Bedrock invocation logs retain original content (KMS-encrypt + restrict IAM on the log group before enabling)
 - Step 3 — Print required environment variables: `AWS_REGION`, `AI_PROVIDER=bedrock`, model IDs
 - Step 4 — Check quota: Query current TPM quota for the primary model via `aws service-quotas get-service-quota`. If `aws-design-ai.json` → `ai_architecture.quota_risk` is `"high"` or `"medium"`, print warning: "⚠️ Your token volume may exceed default Bedrock quotas. Request a quota increase via Service Quotas console (allow 1–5 business days)." Include the `aws service-quotas request-service-quota-increase` command template.
-- Step 5 — Verification: Test Bedrock access with a simple `converse` call using the primary model
+- Step 5 — Verification — **conditional on the migration path (Step 0):**
+  - **Non-Mantle paths** (`direct`, `gpt-oss`, `converse`, gateway): test Bedrock access with a simple `converse` call using the primary model. `converse` is a `bedrock-runtime` surface and is correct for these paths.
+  - **Mantle path** (`migration_path` = `"mantle"` / `"mantle_openai_responses"`, or the `same_model_mantle` OpenRouter subroute): the proprietary GPT models on Mantle are not reached via `converse`. Verify against the Mantle `/openai/v1` endpoint using an API the model supports — Responses (`client.responses.create(...)`) or Chat Completions — with the OpenAI SDK and a Bedrock token provider (the pattern in `references/shared/openai-on-bedrock.md` § Client setup). Do NOT use a `converse` call on this path.
 - If `$MIGRATION_DIR/terraform/` exists, print coordination note: "Ensure the IAM role is referenced in compute.tf task definitions"
 - Use region from `preferences.json` → `design_constraints.target_region`
 
