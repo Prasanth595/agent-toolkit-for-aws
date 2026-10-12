@@ -40,10 +40,17 @@ any single cost-engine Part; the schema leaves its shape open):
     "monthly_savings_balanced": "<heroku - balanced, negative = AWS more expensive>",
     "monthly_savings_optimized": "<heroku - optimized>",
     "annual_savings_optimized": "<× 12>",
+    "comparison_status": "<copy of cost_comparison.comparison_status>",
     "recommendation": "<summary sentence>"
   }
 }
 ```
+
+When `comparison_status == "incomplete_unmatched_services"`, the
+`recommendation` sentence MUST name the unmatched service and cost rather
+than stating a bare savings number (e.g. "AWS Balanced is $X/mo cheaper, not
+counting $600/mo for your Advanced-tier database which has no AWS line in
+this estimate yet").
 
 Sign convention: savings = Heroku minus AWS (positive = you save by migrating).
 This is deliberately the OPPOSITE sign of
