@@ -1,6 +1,6 @@
 [tasks.ci]
 description = "Run startup advisor CI checks"
-depends = ["lint:model-id", "lint:artifacts", "lint:vendored-parity", "lint:skill-refs", "test"]
+depends = ["lint:model-id", "lint:artifacts", "lint:vendored-parity", "lint:skill-refs", "test", "test:heroku-source-review"]
 
 [tasks."lint:model-id"]
 description = "Check model references against the lifecycle registry"
@@ -21,3 +21,10 @@ run = "python3 tools/check-skill-refs.py --check"
 [tasks.test]
 description = "Run plugin contract tests"
 run = "uv run --no-project --with pytest python -m pytest tests -q"
+
+[tasks."test:heroku-source-review"]
+description = "Run Heroku application-source contract and validator tests"
+run = [
+  "node --test tests/tools/application-source-contract.test.ts",
+  "node --test tests/tools/application-source-review.test.ts",
+]
