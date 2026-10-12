@@ -97,23 +97,37 @@ _TABLE_PRESENT_RE = re.compile(r"^\s*\|[\s:-]+\|[\s:-]+\|", re.MULTILINE)
 
 _STEP_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
 
+# An optional inline-code wrapper around a bare method word — "`GET`" — that
+# these discovery documents already use when naming a method in prose. Let
+# each blanket-claim pattern below match "GET requests" and "`GET` requests"
+# identically, rather than requiring the backtick-free spelling only.
+_CODE = r"`?"
+
+
 # Phrasings that make a BLANKET (unqualified unless the same line carries an
 # exception) claim that this flow calls GET only / never calls non-GET. Each
 # is checked line-by-line so the exact offending line can be reported.
 _BLANKET_CLAIM_PATTERNS = [
-    re.compile(r"get requests? only", re.IGNORECASE),
+    re.compile(rf"{_CODE}get{_CODE} requests? only", re.IGNORECASE),
     re.compile(r"\bget-only\b", re.IGNORECASE),
-    re.compile(r"\bget only\b", re.IGNORECASE),
-    re.compile(r"only call(?:s|ed)? get\b", re.IGNORECASE),
-    re.compile(r"i only call get\b", re.IGNORECASE),
+    re.compile(rf"\b{_CODE}get{_CODE} only\b", re.IGNORECASE),
+    re.compile(rf"only call(?:s|ed)? {_CODE}get{_CODE}\b", re.IGNORECASE),
+    re.compile(rf"i only call {_CODE}get{_CODE}\b", re.IGNORECASE),
     re.compile(r"non-get (?:method|request)", re.IGNORECASE),
-    re.compile(r"every row is `?get`?\b", re.IGNORECASE),
+    re.compile(rf"every row is {_CODE}get{_CODE}\b", re.IGNORECASE),
     re.compile(r"any other http method\b", re.IGNORECASE),
 ]
 
-# A claim line is QUALIFIED (not a failure) when it names its own exception
-# inline — the fix pattern PR #436 converged on in every location.
-_EXCEPTION_MARKERS = ("except", "plus one", "plus a")
+# A claim's own block is QUALIFIED (not a failure) when it names its own
+# exception inline — the fix pattern PR #436 converged on in every location.
+# Word-boundary matched so the noun "exception" (e.g. "without exception",
+# "no exception") never counts as the preposition "except" granting one —
+# the two are unrelated English words that happen to share a prefix.
+_EXCEPTION_MARKER_RES = [
+    re.compile(r"\bexcept\b"),
+    re.compile(r"\bplus one\b"),
+    re.compile(r"\bplus a\b"),
+]
 
 
 def _methods_in_capture_section(text: str) -> tuple[set[str], bool]:
@@ -137,10 +151,19 @@ def _methods_in_capture_section(text: str) -> tuple[set[str], bool]:
     methods: set[str] = set()
 
     # Per-row calls, e.g. `` `GET /credits` `` or `` `POST /analytics/query` ``.
+    # Scoped to actual markdown TABLE ROWS (the line itself starts with "|")
+    # — never free-form Step 2 prose. Step 2 carries authoring guidance
+    # alongside the table (bucket-limit notes, "Never call X" prohibitions,
+    # confirm-before-capture prompts, ...), and a prohibited example given
+    # as a counter-example — `` Never call `POST /v1/messages` `` — contains
+    # the exact same METHOD-backtick-path shape as a real call site. Reading
+    # every backtick/pipe-bearing line in the section, not just table rows,
+    # misreads that counter-example as something this file actually calls.
     for line in section.splitlines():
-        if "|" not in line and "`" not in line:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
             continue
-        for m in _METHOD_CALL_RE.finditer(line):
+        for m in _METHOD_CALL_RE.finditer(stripped):
             methods.add(m.group(1))
 
     # The table's own "Endpoint (METHOD, ...)" header-column convention,
@@ -235,17 +258,21 @@ def _unqualified_claims(text: str, non_get_methods: set[str]) -> list[tuple[int,
     Markdown soft-wraps across two lines ("This runs GET requests" / "only.")
     is read as the single sentence it renders as. A block is QUALIFIED only
     when it names an exception marker AND every actual non-GET method the
-    file calls — naming just one of several undisclosed methods does not
-    excuse the others."""
+    file calls, each as a complete token (`\\bPOST\\b`, not a substring match
+    that "dispatch" or "output" would also satisfy) — naming just one of
+    several undisclosed methods does not excuse the others, and a method
+    name hiding inside an unrelated word excuses nothing."""
     if not non_get_methods:
         return []
     failures: list[tuple[int, str]] = []
     for para_start, para in _paragraphs_with_line_numbers(text):
         lines = para.splitlines()
         normalized = " ".join(line.strip() for line in lines)
-        lowered_norm = normalized.lower()
-        has_exception = any(marker in lowered_norm for marker in _EXCEPTION_MARKERS) and all(
-            method.lower() in lowered_norm for method in non_get_methods
+        has_exception = any(
+            marker_re.search(normalized) for marker_re in _EXCEPTION_MARKER_RES
+        ) and all(
+            re.search(rf"\b{re.escape(method)}\b", normalized, re.IGNORECASE)
+            for method in non_get_methods
         )
         if has_exception:
             continue

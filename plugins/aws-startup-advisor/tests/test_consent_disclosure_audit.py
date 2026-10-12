@@ -487,6 +487,161 @@ def test_unreadable_file_fails_closed_instead_of_being_skipped(tmp_path: Path) -
     assert "OK (1 discovery sub-file(s) checked)" not in result.stdout
 
 
+def test_prohibited_example_in_prose_is_not_read_as_a_real_call(tmp_path: Path) -> None:
+    """Regression for the prohibited-example finding: a 'Never call `POST
+    /v1/messages`' counter-example sitting right before a GET-only table
+    must not be read as a real non-GET call. The GET-only claim must still
+    pass, since the table itself declares only GET."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, against a fixed list of usage endpoints.
+
+## Step 2: Capture
+
+- Never call `POST /v1/messages`; only the usage-report endpoints below are
+  allowed.
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint (GET) | Purpose | Output file |
+| - | --------------- | ------- | ------------ |
+| 1 | `/usage`        | usage   | usage.json   |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_prohibited_example_outside_step_2_is_also_ignored(tmp_path: Path) -> None:
+    """The same prohibition note, stated outside Step 2 entirely (e.g. a
+    Security Contract bullet), must likewise never be read as a call."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Security Contract (applies to every step)
+
+- Never call `POST /v1/messages`; only the usage-report endpoints below are
+  allowed.
+
+## Step 0: Consent Gate
+
+This runs GET requests only, against a fixed list of usage endpoints.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint (GET) | Purpose | Output file |
+| - | --------------- | ------- | ------------ |
+| 1 | `/usage`        | usage   | usage.json   |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_real_post_row_is_still_caught_despite_prose_scoping(tmp_path: Path) -> None:
+    """The table-row scoping fix must not blind the script to a REAL non-GET
+    row — only free-form Step 2 prose (lead-in sentences, notes, prohibited
+    examples) is excluded from method extraction, not the table itself."""
+    root = _write_fixture(tmp_path, _UNQUALIFIED_POST_FILE)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "POST" in result.stderr
+
+
+def test_inline_code_wrapped_method_in_existing_claim_is_still_caught(tmp_path: Path) -> None:
+    """Regression for the inline-code-formatting finding: 'This runs `GET`
+    requests only.' (method wrapped in backticks, as this plugin's prose
+    already does) must be read the same as the unwrapped phrasing."""
+    text = _UNQUALIFIED_POST_FILE.replace(
+        "This runs GET requests only, against a fixed list of usage endpoints.",
+        "This runs `GET` requests only, against a fixed list of usage endpoints.",
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "GET` requests only" in result.stderr or "GET requests only" in result.stderr
+
+
+def test_inline_code_wrapped_claim_variants_are_all_caught(tmp_path: Path) -> None:
+    """The other blanket-claim phrasings must also recognize an inline-code
+    wrapped GET: '`GET` only' and 'every row is `GET`'."""
+    for claim in ("This flow calls `GET` only.", "Every row is `GET` against the base URL."):
+        text = _UNQUALIFIED_POST_FILE.replace(
+            "This runs GET requests only, against a fixed list of usage endpoints.",
+            claim,
+        )
+        root = _write_fixture(tmp_path, text)
+        result = _run(root)
+        assert result.returncode == 1, (claim, result.stdout)
+
+
+def test_plain_unwrapped_claim_variants_still_pass_when_qualified(tmp_path: Path) -> None:
+    """Sanity check the inline-code pattern change didn't break the
+    unwrapped spelling: a properly qualified unwrapped claim still passes."""
+    root = _write_fixture(tmp_path, _QUALIFIED_POST_FILE)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_negated_exception_marker_does_not_falsely_qualify_the_claim(tmp_path: Path) -> None:
+    """Regression for the negated-marker finding: 'without exception; POST
+    and PATCH are forbidden' contains the word 'exception' but grants none —
+    it must not satisfy the exception check and silence a real gap."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, without exception; POST and PATCH are
+forbidden.
+""" + _GET_POST_PATCH_TABLE
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+
+
+def test_method_name_hiding_inside_an_unrelated_word_does_not_qualify(tmp_path: Path) -> None:
+    """Regression for the substring finding: 'except POST /analytics/dispatch'
+    must not silence an undisclosed PATCH just because the path 'dispatch'
+    contains the letters 'patch'."""
+    text = (
+        "# Discover Phase: Example Usage API Discovery\n\n"
+        "## Step 0: Consent Gate\n\n"
+        "This runs GET requests only, except POST /analytics/dispatch.\n"
+        + _GET_POST_PATCH_TABLE
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "PATCH" in result.stderr
+
+
+def test_method_name_hiding_inside_an_unrelated_word_in_output_does_not_qualify(
+    tmp_path: Path,
+) -> None:
+    """The PUT counterpart: a sentence containing 'output' must not satisfy
+    PUT merely because 'output' contains the letters 'put'."""
+    text = (
+        "# Discover Phase: Example Usage API Discovery\n\n"
+        "## Step 0: Consent Gate\n\n"
+        "This runs GET requests only, except POST /analytics/query; save "
+        "the output locally.\n"
+        + _GET_POST_PATCH_TABLE.replace(
+            "| 3 | `PATCH /settings` | update settings | settings.json |\n",
+            "| 3 | `PUT /settings` | update settings | settings.json |\n",
+        )
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "PUT" in result.stderr
+
+
 def test_real_plugin_discovery_files_pass_on_main() -> None:
     """Smoke test against the actual committed discover-*-api.md files (not
     a scratch fixture) — this is the gate's real-world assertion: whatever
