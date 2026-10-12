@@ -15,6 +15,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = PLUGIN_ROOT / "scripts" / "consent-disclosure-audit.py"
 TARGET_REL = "skills/example-skill/references/phases/discover/discover-example-api.md"
@@ -640,6 +642,206 @@ def test_method_name_hiding_inside_an_unrelated_word_in_output_does_not_qualify(
     result = _run(root)
     assert result.returncode == 1, result.stdout
     assert "PUT" in result.stderr
+
+
+def test_method_named_only_in_a_separate_denial_sentence_does_not_qualify(
+    tmp_path: Path,
+) -> None:
+    """Regression: 'This runs GET requests only, except POST /query. PATCH
+    requests are forbidden.' must still fail — PATCH is named only in a
+    separate, denying sentence, not in the affirmative exception clause that
+    grants POST. A method must be named in the SAME exception sentence to
+    count as disclosed."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, except POST /query. PATCH requests are
+forbidden.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /query` | q | q.json |
+| 3 | `PATCH /settings` | update settings | settings.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "PATCH" in result.stderr
+
+
+def test_both_methods_named_in_the_same_exception_sentence_passes(tmp_path: Path) -> None:
+    """The same table, but POST and PATCH are both named within the single
+    exception sentence — must pass."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, except POST /query and PATCH /settings.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /query` | q | q.json |
+| 3 | `PATCH /settings` | update settings | settings.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_prohibited_example_in_a_get_rows_own_cell_is_not_a_real_call(tmp_path: Path) -> None:
+    """Regression: a prohibited-example counter-example sitting inside a GET
+    row's own Purpose cell (not a separate prose line, as the earlier fix
+    covered) must not be read as a second method on that row."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, against a fixed list of usage endpoints.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint (GET) | Purpose | Output file |
+| - | --------------- | ------- | ------------ |
+| 1 | `/usage` | Never call `POST /v1/messages` here | usage.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_header_looking_prose_outside_the_real_header_row_is_ignored(tmp_path: Path) -> None:
+    """Regression: 'Endpoint (POST)' appearing in ordinary Step 2 prose,
+    never inside the table's own header row, must not be read as the
+    table's declared method."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, against a fixed list of usage endpoints.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.** Note: Endpoint (POST) is never used here,
+only GET.
+
+| # | Endpoint (GET) | Purpose | Output file |
+| - | --------------- | ------- | ------------ |
+| 1 | `/usage` | usage | usage.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_real_post_header_row_is_still_caught_after_column_scoping(tmp_path: Path) -> None:
+    """The column-scoping fix must not blind the script to a real header-cell
+    method declaration — only prose outside the actual header row is
+    excluded."""
+    rel = "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md"
+    real_text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
+    mutated = real_text.replace(
+        "Endpoint (GET, `https://api.anthropic.com`)",
+        "Endpoint (POST, `https://api.anthropic.com`)",
+    )
+    root = _write_fixture(tmp_path, mutated)
+    (root / TARGET_REL).write_text(mutated, encoding="utf-8")
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+
+
+@pytest.mark.parametrize("method", ["HEAD", "OPTIONS"])
+def test_head_and_options_rows_are_recognized_as_non_get(tmp_path: Path, method: str) -> None:
+    """Regression: HEAD and OPTIONS rows must be counted as non-GET methods
+    requiring disclosure, not silently dropped from the recognized-method
+    vocabulary (which previously let a GET row mask an unrecognized
+    HEAD/OPTIONS row and report the table as GET-only)."""
+    text = f"""\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `{method} /usage` | check | none |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert method in result.stderr
+
+
+def test_uppercase_except_marker_still_qualifies_the_claim(tmp_path: Path) -> None:
+    """Regression for the case-sensitivity gap introduced by the whole-word
+    fix: 'EXCEPT' and 'Except' must still grant an exception, matching the
+    script's own documentation which spells it in uppercase."""
+    for marker in ("EXCEPT", "Except"):
+        text = f"""\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, {marker} POST /query.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /query` | q | q.json |
+"""
+        root = _write_fixture(tmp_path, text)
+        result = _run(root)
+        assert result.returncode == 0, (marker, result.stderr)
+
+
+def test_negated_marker_still_fails_regardless_of_case(tmp_path: Path) -> None:
+    """The case-insensitivity fix must not reopen the earlier negated-marker
+    gap: 'WITHOUT EXCEPTION' must still fail to grant one, in any case."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+This runs GET requests only, WITHOUT EXCEPTION; POST is forbidden.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /query` | q | q.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
 
 
 def test_real_plugin_discovery_files_pass_on_main() -> None:

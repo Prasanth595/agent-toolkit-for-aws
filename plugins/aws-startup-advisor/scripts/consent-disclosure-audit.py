@@ -69,7 +69,7 @@ TARGET_GLOB = "references/phases/discover/discover-*-api.md"
 
 SELF = Path(__file__).resolve()
 
-_HTTP_METHOD = r"GET|POST|PUT|PATCH|DELETE"
+_HTTP_METHOD = r"GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"
 
 # A real call site: an HTTP verb immediately followed by a path or full URL,
 # inside backticks or in the table's Endpoint column — e.g. `` `GET /credits` ``,
@@ -89,11 +89,44 @@ _METHOD_CALL_RE = re.compile(
 # after the words "Capture Endpoint Table", which a bounded slice would miss.
 _METHOD_IN_HEADER_CELL_RE = re.compile(rf"Endpoint\s*\(\s*({_HTTP_METHOD})\b")
 
+# A table cell whose content IS (ignoring surrounding whitespace) the column
+# label "Endpoint", optionally followed by its parenthesized method/base-URL
+# qualifier — e.g. "Endpoint (GET)" or "Endpoint (GET, `https://...`)". Used
+# to find which pipe-delimited cell is the Endpoint column, so later rows'
+# method reads are confined to that one cell — never a Purpose/Notes/Output
+# cell in the same row, and never "Endpoint"-looking prose that is not
+# actually this table's own header row.
+_ENDPOINT_HEADER_CELL_RE = re.compile(r"(?i)^endpoint\b")
+
 # A markdown table is present in this section: a header-separator row, e.g.
 # "| - | --- | --- |" or "|---|---|". If this matches but no method was read
 # by either pattern above, the table's shape wasn't recognized — that is a
 # gap in this script, not a GET-only file, and must fail rather than skip.
 _TABLE_PRESENT_RE = re.compile(r"^\s*\|[\s:-]+\|[\s:-]+\|", re.MULTILINE)
+
+# A table's header-separator row: every cell is only dashes/colons (and
+# optional whitespace) — e.g. "| - | --- | --- |". Used to skip that row
+# when scanning for the Endpoint column so it is never mistaken for a data
+# row (its cells trivially match no useful content, but excluding it
+# explicitly keeps the row-walk's intent clear).
+_SEPARATOR_ROW_RE = re.compile(r"^[\s:-]+$")
+
+
+def _table_cells(line: str) -> list[str] | None:
+    """Split a markdown table row into its cells, or None if `line` is not a
+    pipe-delimited table row at all. Leading/trailing empty cells from the
+    row's own leading/trailing "|" are dropped."""
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return None
+    cells = stripped.split("|")
+    # A well-formed "| a | b |" row splits to ['', ' a ', ' b ', '']; drop the
+    # empty bookends a leading/trailing pipe produces.
+    if cells and cells[0] == "":
+        cells = cells[1:]
+    if cells and cells[-1] == "":
+        cells = cells[:-1]
+    return [c.strip() for c in cells]
 
 _STEP_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
 
@@ -120,13 +153,15 @@ _BLANKET_CLAIM_PATTERNS = [
 
 # A claim's own block is QUALIFIED (not a failure) when it names its own
 # exception inline — the fix pattern PR #436 converged on in every location.
-# Word-boundary matched so the noun "exception" (e.g. "without exception",
-# "no exception") never counts as the preposition "except" granting one —
-# the two are unrelated English words that happen to share a prefix.
+# Word-boundary AND case-insensitively matched: the script's own
+# documentation above spells this "EXCEPT" in uppercase, and the noun
+# "exception" (e.g. "without exception", "no exception") must never count as
+# the preposition "except" granting one regardless of case — the two are
+# unrelated English words that happen to share a prefix.
 _EXCEPTION_MARKER_RES = [
-    re.compile(r"\bexcept\b"),
-    re.compile(r"\bplus one\b"),
-    re.compile(r"\bplus a\b"),
+    re.compile(r"\bexcept\b", re.IGNORECASE),
+    re.compile(r"\bplus one\b", re.IGNORECASE),
+    re.compile(r"\bplus a\b", re.IGNORECASE),
 ]
 
 
@@ -150,28 +185,46 @@ def _methods_in_capture_section(text: str) -> tuple[set[str], bool]:
 
     methods: set[str] = set()
 
-    # Per-row calls, e.g. `` `GET /credits` `` or `` `POST /analytics/query` ``.
-    # Scoped to actual markdown TABLE ROWS (the line itself starts with "|")
-    # — never free-form Step 2 prose. Step 2 carries authoring guidance
-    # alongside the table (bucket-limit notes, "Never call X" prohibitions,
-    # confirm-before-capture prompts, ...), and a prohibited example given
-    # as a counter-example — `` Never call `POST /v1/messages` `` — contains
-    # the exact same METHOD-backtick-path shape as a real call site. Reading
-    # every backtick/pipe-bearing line in the section, not just table rows,
-    # misreads that counter-example as something this file actually calls.
+    # Find the table's own Endpoint column, from its header row, and read
+    # methods ONLY from that column — never from a Purpose/Notes/Query
+    # parameters/Output file cell in the same row, and never from
+    # "Endpoint"-looking text that is not this table's own header. Without
+    # this, a `` `POST /v1/messages` `` counter-example sitting in a GET
+    # row's Purpose cell (e.g. "Never call `POST /v1/messages` here") reads
+    # as a second method on a row that is actually GET-only, and
+    # "Endpoint (POST)" prose anywhere outside the real header row is
+    # misread as this table's own declared method.
+    endpoint_col: int | None = None
+    header_method: str | None = None
     for line in section.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("|"):
+        cells = _table_cells(line)
+        if cells is None:
             continue
-        for m in _METHOD_CALL_RE.finditer(stripped):
+        if endpoint_col is None:
+            for idx, cell in enumerate(cells):
+                if _ENDPOINT_HEADER_CELL_RE.match(cell):
+                    endpoint_col = idx
+                    m = _METHOD_IN_HEADER_CELL_RE.search(cell)
+                    if m:
+                        header_method = m.group(1)
+                    break
+            continue
+        if endpoint_col is None or endpoint_col >= len(cells):
+            continue
+        if _SEPARATOR_ROW_RE.match(cells[endpoint_col]) and all(
+            _SEPARATOR_ROW_RE.match(c) for c in cells
+        ):
+            continue  # the header-separator row itself, not a data row
+        for m in _METHOD_CALL_RE.finditer(cells[endpoint_col]):
             methods.add(m.group(1))
 
-    # The table's own "Endpoint (METHOD, ...)" header-column convention,
-    # read anywhere in the section (no length-limited slice) — this is the
-    # shape the real Anthropic and Azure-OpenAI tables use, with every row
-    # listing only a path.
-    for m in _METHOD_IN_HEADER_CELL_RE.finditer(section):
-        methods.add(m.group(1))
+    # The table's own "Endpoint (METHOD, ...)" header-column convention —
+    # every row lists only a path, with the single shared method named once
+    # in the header cell itself (the shape the real Anthropic and
+    # Azure-OpenAI tables use). Already captured above from the real header
+    # row; nothing further to scan.
+    if header_method:
+        methods.add(header_method)
 
     if methods:
         return methods, False
@@ -249,6 +302,28 @@ def _line_for_offset(lines: list[str], offset: int) -> int:
     return max(len(lines) - 1, 0)
 
 
+# A sentence boundary within a normalized (soft-wrap-joined) block: a period,
+# question mark, or exclamation point followed by whitespace (or end of
+# string). Used to isolate the single sentence an exception marker appears
+# in, so a method named only in a DIFFERENT, denying sentence of the same
+# block ("... except POST /query. PATCH requests are forbidden.") is never
+# credited as disclosed by that marker.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!])\s+")
+
+
+def _exception_clauses(normalized: str) -> list[str]:
+    """Every sentence in `normalized` that itself contains an exception
+    marker — the only text an exception marker is allowed to grant coverage
+    from. A method mentioned in a sibling sentence that merely happens to
+    sit in the same paragraph (a separate denial, a different claim) grants
+    nothing."""
+    return [
+        sentence
+        for sentence in _SENTENCE_SPLIT_RE.split(normalized)
+        if any(marker_re.search(sentence) for marker_re in _EXCEPTION_MARKER_RES)
+    ]
+
+
 def _unqualified_claims(text: str, non_get_methods: set[str]) -> list[tuple[int, str]]:
     """Every (line_number, offending_line) carrying a blanket GET-only claim
     with no inline exception, anywhere in its own logical block, for the
@@ -257,22 +332,28 @@ def _unqualified_claims(text: str, non_get_methods: set[str]) -> list[tuple[int,
     Methods are joined across physical lines before matching, so a claim that
     Markdown soft-wraps across two lines ("This runs GET requests" / "only.")
     is read as the single sentence it renders as. A block is QUALIFIED only
-    when it names an exception marker AND every actual non-GET method the
-    file calls, each as a complete token (`\\bPOST\\b`, not a substring match
-    that "dispatch" or "output" would also satisfy) — naming just one of
-    several undisclosed methods does not excuse the others, and a method
-    name hiding inside an unrelated word excuses nothing."""
+    when at least one of its SENTENCES carries an exception marker AND names
+    every actual non-GET method the file calls, each as a complete token
+    (`\\bPOST\\b`, not a substring match that "dispatch" or "output" would
+    also satisfy) — naming just one of several undisclosed methods does not
+    excuse the others, a method name hiding inside an unrelated word excuses
+    nothing, and a method named only in a DIFFERENT sentence (e.g. a
+    following denial — "except POST /query. PATCH requests are forbidden.")
+    is not disclosed by that marker either; every undisclosed method must be
+    named in the SAME affirmative exception sentence."""
     if not non_get_methods:
         return []
     failures: list[tuple[int, str]] = []
     for para_start, para in _paragraphs_with_line_numbers(text):
         lines = para.splitlines()
         normalized = " ".join(line.strip() for line in lines)
+        clauses = _exception_clauses(normalized)
         has_exception = any(
-            marker_re.search(normalized) for marker_re in _EXCEPTION_MARKER_RES
-        ) and all(
-            re.search(rf"\b{re.escape(method)}\b", normalized, re.IGNORECASE)
-            for method in non_get_methods
+            all(
+                re.search(rf"\b{re.escape(method)}\b", clause, re.IGNORECASE)
+                for method in non_get_methods
+            )
+            for clause in clauses
         )
         if has_exception:
             continue
