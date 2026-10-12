@@ -1,11 +1,13 @@
 [tasks."lint:artifacts"]
 description = "Validate aws-startup-advisor fixture artifacts against their published schema contracts"
 run = "python3 scripts/validate-artifacts.py --fixtures"
-
 [tasks."lint:vendored-parity"]
 description = "Check each skill's references/vendored/ copies are byte-identical to skills/shared/"
 run = "python3 tools/sync-vendored.py --check"
 
+[tasks."lint:skill-refs"]
+description = "Check every file path the aws-startup-advisor skills reference exists"
+run = "python3 tools/check-skill-refs.py --check"
 [tasks.ci]
 description = "Run startup advisor CI checks"
 depends = ["lint:model-id", "lint:artifacts", "lint:vendored-parity", "lint:skill-refs", "test", "test:heroku-source-review"]
@@ -13,15 +15,9 @@ depends = ["lint:model-id", "lint:artifacts", "lint:vendored-parity", "lint:skil
 [tasks."lint:model-id"]
 description = "Check model references against the lifecycle registry"
 run = "uv run --no-project python scripts/model-id-lint.py"
-
-[tasks."lint:skill-refs"]
-description = "Check every file path the aws-startup-advisor skills reference exists"
-run = "python3 tools/check-skill-refs.py --check"
-
 [tasks.test]
 description = "Run plugin contract tests"
 run = "uv run --no-project --with pytest python -m pytest tests -q"
-
 [tasks."test:heroku-source-review"]
 description = "Run Heroku application-source contract and validator tests"
 run = [

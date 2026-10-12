@@ -120,7 +120,7 @@
           "@L390": "projected_costs.breakdown.security_baseline_compliance",
           "architecture_comparison": "architecture_comparison"
         },
-        "_sections_why": "Workshop baseline capture copies the active estimation-infra.json into scenarios/scenario-NNN.estimation-infra.json. The snapshot uses the same Markdown shape, root heading, and section refinements."
+        "_sections_why": "Workshop baseline capture copies the active estimation-infra.json into scenarios/scenario-NNN.estimation-infra.json. The snapshot is the same artifact, so it uses the same Markdown shape, root heading, and section refinements — not the JSON Schema alone."
       }
     },
     "heroku-to-aws": {
