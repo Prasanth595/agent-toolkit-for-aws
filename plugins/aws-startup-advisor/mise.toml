@@ -8,7 +8,7 @@ run = "python3 tools/sync-vendored.py --check"
 
 [tasks.ci]
 description = "Run startup advisor CI checks"
-depends = ["lint:model-id", "test"]
+depends = ["lint:model-id", "lint:artifacts", "lint:vendored-parity", "test"]
 
 [tasks."lint:model-id"]
 description = "Check model references against the lifecycle registry"
