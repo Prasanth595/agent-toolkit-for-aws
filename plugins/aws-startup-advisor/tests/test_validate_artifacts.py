@@ -71,6 +71,40 @@ def test_required_from_comment_and_placeholder_is_any_type():
     assert n.keys["n"].is_any()  # a placeholder says nothing about the JSON type
 
 
+def test_empty_array_item_is_replaced_when_a_concrete_shape_arrives():
+    """Review finding on #387: `"services": []` seeded an `any` item, and merging the
+    later object kept `any`, so a scalar or nested list passed."""
+    seed = _node('{"services": [], "warnings": []}')
+    seed.merge(_node('{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}]}'))
+    item = seed.keys["services"].item
+    assert not item.is_any() and "object" in item.kinds
+    assert "routing_provenance" in item.required
+    seed.merge(_node('{"services": []}'))
+    assert not seed.keys["services"].item.is_any()
+    ex = '{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}]}'
+    root = _node('{"services": []}')
+    root.merge(_node(ex))
+
+    def check(value):
+        out = []
+        va.validate_shape(root, value, "", "a", "c", out)
+        return {(f.code, f.path) for f in out}
+
+    assert check({"services": []}) == set()
+    assert check({"services": [{"routing_provenance": "table", "n": 1}]}) == set()
+    assert check({"services": [None]}) == set()
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": ["not-an-object"]})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [17]})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [False]})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [[]]})
+    assert ("MISSING_REQUIRED", "services[0].routing_provenance") in check({"services": [{}]})
+    ph = _node('{"ids": ["<azure_id>"]}')
+    assert ph.keys["ids"].item.is_any()
+    out = []
+    va.validate_shape(ph, {"ids": [1, "x", False]}, "", "a", "c", out)
+    assert out == []
+
+
 def test_placeholder_key_makes_object_open_and_sets_any_key_template():
     n = _node('{"<key>": {"value": 1, "chosen_by": "user|default"}}')
     assert n.wildcard and n.any_key is not None
@@ -569,3 +603,118 @@ def test_gcp_preferences_chosen_by_enum_is_enforced_including_derived(tmp_path: 
     pref["design_constraints"]["cpu_architecture"] = {"value": "graviton", "chosen_by": "bogus"}
     r = _run("--run-dir", str(_write_run(tmp_path, "cpu", "preferences.json", pref)), "--skill", "gcp-to-aws", "--json")
     assert _errors(r) == {("ENUM_VIOLATION", "design_constraints.cpu_architecture.chosen_by")}, r.stdout
+
+
+def test_azure_design_arrays_reject_a_scalar_after_the_empty_seed(tmp_path: Path):
+    """Review finding on #387: services, clusters, deferred, and pending_rubric are seeded
+    `[]` and refined by a later object section. A scalar, string, boolean, or nested list
+    must fail. An empty array and an object stay valid as types. An array whose example
+    never names an item type stays open."""
+    src = PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-design/aws-design.json"
+    design = json.loads(src.read_text())
+    control = _errors(_run("--run-dir", str(src.parent), "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "aws-design.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    for key in ("services", "clusters", "deferred", "pending_rubric"):
+        for label, member in (("str", "not-an-object"), ("num", 17), ("bool", False), ("list", [])):
+            bad = json.loads(json.dumps(design))
+            bad[key] = [member]
+            assert ("TYPE_MISMATCH", f"{key}[0]") in run(f"{key}-{label}", bad) - control
+        empty = json.loads(json.dumps(design))
+        empty[key] = []
+        assert ("TYPE_MISMATCH", f"{key}[0]") not in run(key + "-empty", empty)
+        blank = json.loads(json.dumps(design))
+        blank[key] = [{}]
+        assert ("TYPE_MISMATCH", f"{key}[0]") not in run(key + "-obj", blank)
+    blank = json.loads(json.dumps(design))
+    blank["services"] = [{}]
+    assert ("MISSING_REQUIRED", "services[0].routing_provenance") in run("svc-obj", blank)
+
+
+def test_azure_preferences_follow_the_producer_route(tmp_path: Path):
+    """Review finding on #387: the infra shape was the only preferences contract, so an
+    AI-only file failed clarify_status and the mixed flow's AI rows were unknown keys."""
+    infra = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify/preferences.json").read_text())
+    rows = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai.md",
+                        "Step 3: Rows returned")
+    mixed = json.loads(json.dumps(infra))
+    mixed.update(rows)
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    assert ("MISSING_REQUIRED", "clarify_status") not in run("infra", infra)
+    assert run("mixed", mixed) - run("infra", infra) == set()
+    bad = json.loads(json.dumps(mixed))
+    bad["not_a_preference"] = 1
+    assert ("UNKNOWN_KEY", "not_a_preference") in run("mixed-bad", bad)
+    bad = json.loads(json.dumps(mixed))
+    bad["workloads"] = [42]
+    assert ("TYPE_MISMATCH", "workloads[0]") in run("mixed-scalar", bad)
+
+    ai = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai-only.md",
+                      "preferences.json (AI-only)")
+    assert run("ai", ai) == set(), run("ai", ai)
+    omitted = json.loads(json.dumps(ai))
+    del omitted["workloads"]
+    assert ("MISSING_REQUIRED", "workloads") in run("ai-omit", omitted)
+    dropped = json.loads(json.dumps(ai))
+    del dropped["ai_constraints"]["ai_framework"]
+    assert ("MISSING_REQUIRED", "ai_constraints.ai_framework") in run("ai-framework", dropped)
+    invented = json.loads(json.dumps(ai))
+    invented["metadata"]["invented"] = 1
+    assert ("UNKNOWN_KEY", "metadata.invented") in run("ai-invented", invented)
+    # the infra verdict stays required on the infra route
+    no_status = json.loads(json.dumps(infra))
+    no_status.pop("clarify_status", None)
+    assert ("MISSING_REQUIRED", "clarify_status") in run("infra-status", no_status)
+
+
+def test_gcp_drift_values_keep_their_json_types(tmp_path: Path):
+    """Review finding on #387: the live-discovery example typed drift values as strings,
+    so a numeric or boolean config change failed."""
+    inv = json.loads((PLUGIN_ROOT / "fixtures/gcp-workshop/seed/gcp-resource-inventory.json").read_text())
+    inv["live_metadata"] = {
+        "found": True,
+        "drift": {"config_conflicts": [{
+            "address": "google_compute_disk.d",
+            "field": "size_gb",
+            "terraform_value": 10,
+            "live_value": 20,
+        }]},
+    }
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "gcp-resource-inventory.json", data)),
+                            "--skill", "gcp-to-aws", "--json"))
+
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in run("num", inv)
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = False
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["live_value"] = True
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].live_value") not in run("bool", inv)
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = "db-f1-micro"
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in run("str", inv)
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["address"] = 10
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].address") in run("address", inv)
+
+
+def test_azure_workshop_index_records_capture_state(tmp_path: Path):
+    """Review finding on #387: the index example omitted the fields workshop-refresh writes."""
+    doc = PLUGIN_ROOT / "skills/azure-to-aws/references/shared/schema-workshop-scenarios.md"
+    index = _doc_example(doc, "scenarios/index.json")
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "scenarios/index.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    assert run("baseline", index) == set(), index
+    active = json.loads(json.dumps(index))
+    active["active_scenario_id"] = "scenario-002"
+    assert run("active", active) == set()
+    bad = json.loads(json.dumps(index))
+    bad["invented"] = 1
+    assert ("UNKNOWN_KEY", "invented") in run("bad", bad)

@@ -26,20 +26,26 @@ Not references (skipped): run-artifact paths (`$MIGRATION_DIR/…`, `$RUN_DIR/�
 
 Resolution order for a bare path `P` found in `skills/<skill>/…/file.md`:
   1. explicit prefix → plugin root / skill root / gcp-to-aws root / referencing file's dir.
-     An explicit prefix is authoritative: the agent runs `<SKILL_BASE>/scripts/x.py` as
-     written, so none of the fallbacks below apply to it.
+     An explicit prefix is authoritative: the agent runs `<SKILL_BASE>/scripts/x.py`,
+     `./scripts/x.py`, or `../../knowledge/estimate/estimate-defaults.json` as written.
+     A same-named file under the skill root does not make a wrong relative path exist,
+     and none of the fallbacks below apply.
   2. `skills/<skill>/P`                     (skill-relative — the documented convention)
   3. `<dir of referencing file>/P`          (file-relative)
   4. `skills/<skill>/references/P`          (agent-advisor short forms: phases/, shared/, design-refs/)
   5. `<plugin>/P` and `<repo>/P`            (plugin- or repo-relative)
 A path that resolves nowhere is MISSING_REF.
 
+This gate is plugin-local: it scans and is invoked only against aws-startup-advisor.
+Everything it reads lives inside this plugin directory (`plugins/aws-startup-advisor/`);
+it does not depend on, or write to, anything at the repository root.
+
 Usage
 -----
-    python3 tools/check-skill-refs.py --check            # CI: exit 1 on any non-baselined MISSING_REF
-    python3 tools/check-skill-refs.py --check --json
-    python3 tools/check-skill-refs.py --list             # print every resolved reference (debug)
-    --baseline tools/skill-refs-baseline.json            # known dead refs with reasons; stale entries fail
+    python3 plugins/aws-startup-advisor/tools/check-skill-refs.py --check     # CI: exit 1 on any non-baselined MISSING_REF
+    python3 plugins/aws-startup-advisor/tools/check-skill-refs.py --check --json
+    python3 plugins/aws-startup-advisor/tools/check-skill-refs.py --list      # print every resolved reference (debug)
+    --baseline plugins/aws-startup-advisor/tools/skill-refs-baseline.json     # known dead refs with reasons; stale entries fail
 
 Stdlib only (Python 3.9+).
 """
@@ -54,9 +60,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PLUGIN = REPO_ROOT / "plugins" / "aws-startup-advisor"
-DEFAULT_BASELINE = REPO_ROOT / "tools" / "skill-refs-baseline.json"
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = PLUGIN_ROOT.parent.parent
+DEFAULT_PLUGIN = PLUGIN_ROOT
+DEFAULT_BASELINE = PLUGIN_ROOT / "tools" / "skill-refs-baseline.json"
 
 EXTS = r"(?:md|json|py|sh|tf|ya?ml|html|txt|toml)"
 ROOTS = r"(?:references|knowledge|scripts|skills|agents|data|phases|shared|design-refs|fixtures|tools)"
@@ -77,7 +84,7 @@ _GCP_DEPENDENTS = {"agent-advisor", "llm-to-bedrock"}
 _AGENTS_OWNER = "llm-to-bedrock"
 # anything carrying a run-artifact prefix or templating is not a repo path
 _SKIP_PREFIX_RE = re.compile(
-    r"(\$\{?(MIGRATION_DIR|RUN_DIR|REPO|PHASE_DIR|PLAN_DIR|OUT|TARGET|APP|WORKSPACE|TMP)\}?/"
+    r"(\$\{?(MIGRATION_DIR|RUN_DIR|BEDROCK_RUN_DIR|REPO|PHASE_DIR|PLAN_DIR|OUT|TARGET|APP|WORKSPACE|TMP)\}?/"
     r"|<(PLAN_DIR|MIGRATION_DIR|RUN_DIR|REPO|run_dir|migration_dir|path|repo)>/"
     r"|\.migration/|\.saws-migrate/|terraform/|ai-migration/|poc/|scaffold/|\.github/)"
 )
@@ -131,9 +138,10 @@ def _candidates(prefix: str, path: str, source: Path, plugin: Path) -> List[Path
     elif "SCRIPTS" in p and skill is not None:
         cands.append(skill / "scripts" / path)
     elif p.startswith("./") or p.startswith("../"):
-        cands.append((here / p / path))
-        if skill is not None:
-            cands.append(skill / path)
+        # The relative prefix is the whole location. Do not also try `skill / path`:
+        # that unprefixed tail is how `../../knowledge/estimate/estimate-defaults.json`
+        # looked found when the literal target did not exist.
+        cands.append(here / p / path)
     # `<SKILL_BASE>/../gcp-to-aws/SKILL.md` style: prefix carries `../`
     if "../" in p and skill is not None and "SKILL_BASE" in p:
         up = skill
