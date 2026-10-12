@@ -37,8 +37,19 @@ sys.path[:0] = [str(_TELEMETRY / "consent"), str(_TELEMETRY / "metric_emission")
 
 import record  # noqa: E402  (paths set above so this resolves in-plugin)
 
-# scripts/telemetry/metric_emission/ -> the plugin root, where the manifests live.
-PLUGIN_ROOT = Path(__file__).resolve().parents[3]
+def _plugin_root():
+    """Recognize canonical/plugin-bundled layouts; never treat references/ as a plugin."""
+    if _TELEMETRY.parent.name == "scripts":
+        return _TELEMETRY.parent.parent
+    if (len(_TELEMETRY.parents) > 4
+            and _TELEMETRY.parent.name == "vendored"
+            and _TELEMETRY.parents[1].name == "references"
+            and _TELEMETRY.parents[3].name == "skills"):
+        return _TELEMETRY.parents[4]
+    return None
+
+
+PLUGIN_ROOT = _plugin_root()
 
 # Prod is the only stage a customer should reach; beta and gamma are the service
 # team's, which is what the override is for. It chooses where an event goes, never
@@ -56,26 +67,30 @@ TIMEOUT_SECONDS = 3.0
 # DNS, refused): unlike a timeout, nothing can have reached the service.
 UNREACHABLE = 0
 
+USER_AGENT = "aws-startup-advisor-plugin"
+
 SOURCE_CLAUDE_CODE = "CLAUDE_CODE"
 SOURCE_CODEX = "CODEX"
 SOURCE_CURSOR = "CURSOR"
 SOURCE_KIRO = "KIRO"
 SOURCE_OTHER = "OTHER"
 
-# First marker present wins. Only the Claude Code rows are verified against a
-# running host; an unmatched host reports OTHER rather than a plausible guess,
+# First marker present wins. Claude Code and Cursor Agent CLI markers have been
+# verified against running hosts; an unmatched host reports OTHER rather than a plausible guess,
 # because a wrong attribution silently moves one host's numbers into another's.
 # TODO(StartupEngBlend-3621): confirm the other three.
-# Cursor is checked first: it also exports Claude Code compatibility variables
-# to its hooks, so a Claude marker alone would misattribute every Cursor event.
+# Cursor's hook-specific markers precede Claude compatibility variables.
+# CURSOR_AGENT can be inherited by a nested CLI, so explicit Codex/Kiro markers
+# precede that weaker marker.
 _HOST_MARKERS = (
     ("CURSOR_VERSION", SOURCE_CURSOR),  # verified in Cursor's hook environment
     ("CURSOR_PROJECT_DIR", SOURCE_CURSOR),  # verified in Cursor's hook environment
     ("CURSOR_TRACE_ID", SOURCE_CURSOR),  # unverified
-    ("CLAUDECODE", SOURCE_CLAUDE_CODE),  # verified
-    ("CLAUDE_CODE_ENTRYPOINT", SOURCE_CLAUDE_CODE),  # verified
     ("CODEX_SANDBOX", SOURCE_CODEX),  # unverified
     ("KIRO_IDE", SOURCE_KIRO),  # unverified
+    ("CURSOR_AGENT", SOURCE_CURSOR),  # verified in Cursor Agent CLI
+    ("CLAUDECODE", SOURCE_CLAUDE_CODE),  # verified
+    ("CLAUDE_CODE_ENTRYPOINT", SOURCE_CLAUDE_CODE),  # verified
 )
 
 # The PluginSkillId enum, mirrored from model/types/plugin-telemetry.smithy. An
@@ -100,11 +115,15 @@ PLUGIN_SKILL_IDS = frozenset(
 
 EVENT_SKILL_INVOKED = "SKILL_INVOKED"
 
-MANIFEST_PATHS = (
-    PLUGIN_ROOT / ".claude-plugin" / "plugin.json",
-    PLUGIN_ROOT / ".cursor-plugin" / "plugin.json",
-    PLUGIN_ROOT / "plugin.json",
-)
+# A bundle reports its own generated version. Only recognized plugin layouts
+# may fall back to plugin manifests; unrelated references/plugin.json is ignored.
+MANIFEST_PATHS = (_TELEMETRY / "version.json",)
+if PLUGIN_ROOT is not None:
+    MANIFEST_PATHS += (
+        PLUGIN_ROOT / ".claude-plugin" / "plugin.json",
+        PLUGIN_ROOT / ".cursor-plugin" / "plugin.json",
+        PLUGIN_ROOT / "plugin.json",
+    )
 
 
 def endpoint():
@@ -118,6 +137,41 @@ def detect_source():
         if os.environ.get(name, "").strip():
             return source
     return SOURCE_OTHER
+
+
+def migration_reporting_mode():
+    """Use configured plugin hooks when reachable, otherwise the bundled CLI.
+
+    This checks the install layout, not whether a host enabled or ran its hooks.
+    """
+    source = detect_source()
+    manifest_name = {
+        SOURCE_CLAUDE_CODE: ".claude-plugin/plugin.json",
+        SOURCE_CURSOR: ".cursor-plugin/plugin.json",
+    }.get(source)
+    if not manifest_name or PLUGIN_ROOT is None:
+        return "cli"
+    try:
+        manifest = json.loads((PLUGIN_ROOT / manifest_name).read_text(encoding="utf-8"))
+        if manifest.get("name") != "aws-startup-advisor":
+            return "cli"
+        hook_file = (PLUGIN_ROOT / manifest["hooks"]).resolve()
+        hook_file.relative_to(PLUGIN_ROOT.resolve())
+        hooks = json.loads(hook_file.read_text(encoding="utf-8"))["hooks"]
+        script = "scripts/telemetry/metric_emission/migration.py"
+        if not (PLUGIN_ROOT / script).is_file():
+            return "cli"
+        events = ("PostToolUse", "Stop") if source == SOURCE_CLAUDE_CODE else (
+            "afterFileEdit", "afterShellExecution", "stop",
+        )
+        for event in events:
+            for entry in hooks.get(event, []):
+                commands = entry.get("hooks", []) if source == SOURCE_CLAUDE_CODE else [entry]
+                if any(script in command.get("command", "") for command in commands):
+                    return "hook"
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return "cli"
 
 
 def plugin_version():
@@ -178,7 +232,7 @@ def post_event_status(event, install_id, url, timeout=TIMEOUT_SECONDS):
         request = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
             method="POST",
         )
         try:
