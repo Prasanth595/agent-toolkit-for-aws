@@ -193,6 +193,8 @@ If the golden dataset records which source model each prompt used (e.g., a `sour
 
 **Source-side and target-side long-context decisions are independent of each other.** A flat-priced Bedrock target with no long-context tier (absent from `BEDROCK_LONG_CONTEXT`) must stay flat on its own side regardless of the source-side decision — it must never suppress a known, independently-applicable source-side breakpoint. Likewise a target that DOES have a long-context tier only applies it when the SOURCE side's own breakpoint fired; the two sides are never coupled through a single combined condition.
 
+**GPT-6 Ultrafast service tier.** When the plan/profile records `service_tier: "ultrafast"` for a same-model GPT-6 rewrite, populate `cost_compare.py`'s `SERVICE_TIER_BY_SOURCE[src] = "ultrafast"` for that source model id. The script applies the documented 6x-Standard multiplier for GPT-6 Astra and GPT-6.1 Sol — the only two model cards that support Ultrafast — and reports that pair's cost as **UNAVAILABLE** (excluded from `TOTAL`/savings, never silently priced at Standard) for GPT-6 Sol and GPT-6 Luna, which are Standard-only. An omitted entry, or a tier of `"standard"`, leaves pricing unchanged. See `openai-on-bedrock.md`'s "GPT-6 family: Ultrafast tier" section for the ground truth (Ultrafast = 6x Standard, Astra and 6.1 Sol only).
+
 Bedrock per-1M rates are `input_per_1k_usd * 1000` and `output_per_1k_usd * 1000` from §6.1; source per-1M rates come from §6.2. Run the cost computation through the pinned toolchain (Write the script with the `Write` tool, then run it):
 
 ```bash
@@ -266,6 +268,20 @@ TIER_DISTRIBUTION_BY_SOURCE = {
 BEDROCK_LONG_CONTEXT = {
     # "openai.gpt-6-sol": {"input": 4.40, "output": 16.50},
 }
+
+# Populate ONLY when the plan/profile records service_tier "ultrafast" for a same-model
+# GPT-6 rewrite. Key = source_model_id (matching MODEL_PAIRS[i][0]); value = the tier
+# string, e.g. "ultrafast" (anything else, or an absent key, is treated as "standard"
+# and leaves pricing untouched).
+SERVICE_TIER_BY_SOURCE = {
+    # "us.openai.gpt-6.1-sol": "ultrafast",
+}
+
+# GPT-6 Astra and GPT-6.1 Sol are the only two model cards with a documented Ultrafast
+# tier (6x Standard) -- GPT-6 Sol and GPT-6 Luna are Standard-only (see
+# openai-on-bedrock.md "GPT-6 family: Ultrafast tier"). Matched by substring so a bare,
+# geo-prefixed, or bedrock-runtime-CRIS form of either id all match.
+ULTRAFAST_SUPPORTED = ("gpt-6-astra", "gpt-6.1-sol")
 
 # Aggregate golden-dataset tokens per source model (used ONLY for pairs absent from
 # BASELINE_TOKENS_BY_SOURCE). Falls back to a single bucket when source_model is absent.
@@ -364,11 +380,37 @@ for pair in MODEL_PAIRS:
             # Source-side breakpoint fired but the target has no long-context tier
             # (stays flat) -- distinguish this from the both-sides case above.
             basis = f"{basis}-source-long-context"
-    total_source_cost += source_cost
-    total_bedrock_cost += bedrock_cost
-    rows.append((src, tgt, basis, in_tok, out_tok, source_cost, bedrock_cost))
+
+    # Ultrafast service-tier check -- runs AFTER the Standard source_cost/bedrock_cost
+    # above are computed (compatibly with the breakpoint/long-context/baseline/tier
+    # logic), applying on top of whichever basis won. Default/absent/"standard" tier is
+    # unchanged. A model that does NOT support Ultrafast (GPT-6 Sol, GPT-6 Luna) must
+    # never silently price an ultrafast request at Standard -- its cost is UNAVAILABLE
+    # and excluded from TOTAL/savings below, rather than contributing a wrong number.
+    cost_unavailable = False
+    if SERVICE_TIER_BY_SOURCE.get(src) == "ultrafast":
+        if any(name in src for name in ULTRAFAST_SUPPORTED):
+            source_cost *= 6
+            bedrock_cost *= 6
+            basis = f"{basis}-ultrafast"
+        else:
+            cost_unavailable = True
+            basis = f"{basis}-ultrafast-unavailable"
+
+    if cost_unavailable:
+        rows.append((src, tgt, basis, in_tok, out_tok, None, None))
+    else:
+        total_source_cost += source_cost
+        total_bedrock_cost += bedrock_cost
+        rows.append((src, tgt, basis, in_tok, out_tok, source_cost, bedrock_cost))
 
 for src, tgt, basis, in_tok, out_tok, sc, bc in rows:
+    if sc is None or bc is None:
+        print(
+            f"{src} -> {tgt} ({basis}): input={in_tok} output={out_tok} "
+            "ultrafast not supported for this model — cost unavailable"
+        )
+        continue
     print(f"{src} -> {tgt} ({basis}): input={in_tok} output={out_tok} source=${sc:.4f} bedrock=${bc:.4f}")
 print(f"TOTAL source=${total_source_cost:.4f} bedrock=${total_bedrock_cost:.4f}")
 if total_source_cost > 0:
