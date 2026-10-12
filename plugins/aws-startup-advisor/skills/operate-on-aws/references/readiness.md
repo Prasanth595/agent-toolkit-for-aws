@@ -255,8 +255,8 @@ You can just look — this is not something to ask about. Check **every** region
 user's region first if it is one of them, and keep a failed lookup separate from an empty one:
 
 ```bash
-supported="us-east-1 us-west-2 ca-central-1 sa-east-1 ap-south-1 ap-southeast-1 ap-southeast-2 \
-           ap-northeast-1 eu-central-1 eu-west-1 eu-west-2"
+supported="us-east-1 us-east-2 us-west-2 ca-central-1 sa-east-1 ap-south-1 ap-southeast-1 \
+           ap-southeast-2 ap-northeast-1 ap-northeast-2 eu-central-1 eu-west-1 eu-west-2 eu-west-3 eu-north-1"
 mine=<their-region>
 case " $supported " in
   *" $mine "*) regions="$mine ${supported/$mine/}" ;;   # theirs first, if DevOps Agent runs there
@@ -272,9 +272,9 @@ for r in $(echo "$regions"); do   # works in bash and zsh
 done
 ```
 
-The list is the eleven regions in
-[Supported Regions](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-supported-regions.html);
-check it there if a region seems missing. One region is never enough: an empty answer from one says
+The list is the regions in
+[Supported Regions](https://docs.aws.amazon.com/devopsagent/latest/userguide/about-aws-devops-agent-supported-regions.html)
+(15 as of October 2026). AWS adds regions over time, so check that page if a region seems missing. One region is never enough: an empty answer from one says
 nothing about the others, and the founder's default region is often not where their space was created.
 A default region DevOps Agent does not run in is skipped, not checked — a space there is impossible, and
 a space in a supported region still monitors workloads in every region.
