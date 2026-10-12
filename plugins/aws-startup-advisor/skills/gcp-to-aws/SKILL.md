@@ -5,6 +5,13 @@ description: "Migrate workloads from Google Cloud Platform to AWS — plus AI an
 
 # GCP-to-AWS Migration Skill
 
+## Optional usage telemetry
+
+Before starting or resuming, load `references/vendored/telemetry/PROTOCOL.md` and
+run its read-only status check. Use the returned reporting mode rather than the
+model's identity. Complete the existing notice exchange only when that protocol
+requires it; unavailable or declined telemetry never blocks this skill.
+
 ## Philosophy
 
 - **Re-platform by default**: Select AWS services that match GCP workload types (e.g., Cloud Run → Fargate, Cloud SQL → RDS).
@@ -209,6 +216,10 @@ Use **read-merge-write** updates for `.phase-status.json`:
 3. Keep prior completed phases unchanged.
 4. Set `current_phase` to the next deterministic phase — or `complete` after Generate, **or** after Estimate when the user chose Decision-gate **A** (`run_mode: "decide"`; Generate stays pending).
 5. Write the full file in the same turn as your final phase work message.
+6. Reconcile the saved state in `cli` reporting mode per
+   `references/vendored/telemetry/PROTOCOL.md` before advancing or returning,
+   including sidebar updates and decision-only or executed completion. In `hook`
+   mode, leave reporting to the host hooks.
 
 Example — after completing the Clarify phase, write `$MIGRATION_DIR/.phase-status.json` with:
 
@@ -239,7 +250,7 @@ Replace `MMDD-HHMM` with the actual migration ID, generate the `last_updated` IS
 
 | Phase        | Inputs                                                                                                                                                                   | Outputs                                                                                                                                                                                                                                       | Reference                                |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| **Discover** | `.tf` files, app source code, and/or billing exports (at least one required); optional OpenAI Admin API access or OpenRouter provisioning-key access supplements with real AI spend                            | `gcp-resource-inventory.json`, `gcp-resource-clusters.json`, `ai-workload-profile.json`, `billing-profile.json`, `openai-usage-profile.json`, `openrouter-usage-profile.json`, `.phase-status.json` updated (outputs vary by input)                                            | `references/phases/discover/discover.md` |
+| **Discover** | `.tf` files, app source code, and/or billing exports (at least one required); optional OpenAI Admin API access, OpenRouter provisioning-key access, or Anthropic Admin API access supplements with real AI spend | `gcp-resource-inventory.json`, `gcp-resource-clusters.json`, `ai-workload-profile.json`, `billing-profile.json`, `openai-usage-profile.json`, `openrouter-usage-profile.json`, `anthropic-usage-profile.json`, `.phase-status.json` updated (outputs vary by input)                                            | `references/phases/discover/discover.md` |
 | **Clarify**  | Discovery artifacts (`gcp-resource-inventory.json`, `gcp-resource-clusters.json`, `ai-workload-profile.json`, `billing-profile.json` — whichever exist)                  | `preferences.json`, `.phase-status.json` updated                                                                                                                                                                                              | `references/phases/clarify/clarify.md`   |
 | **Design**   | `preferences.json` + discovery artifacts                                                                                                                                 | `aws-design.json` (infra), `aws-design-ai.json` (AI), `aws-design-billing.json` (billing-only)                                                                                                                                                | `references/phases/design/design.md`     |
 | **Estimate** | `aws-design.json` or `aws-design-billing.json` or `aws-design-ai.json`, `preferences.json`                                                                               | `estimation-infra.json` or `estimation-ai.json` or `estimation-billing.json`, `.phase-status.json` updated                                                                                                                                    | `references/phases/estimate/estimate.md` |
@@ -381,7 +392,9 @@ When invoked, the agent **MUST follow this exact sequence**:
 
 1. **Load phase status**: Read `.phase-status.json` from `.migration/*/`.
    - If missing: Initialize for Phase 1 (Discover)
-   - If exists: Determine current phase using deterministic rules in **State Machine**
+   - If exists: Determine current phase using deterministic rules in **State Machine**.
+     After selecting and validating the run, reconcile in `cli` reporting mode
+     per `references/vendored/telemetry/PROTOCOL.md`; skip the CLI in `hook` mode.
 
 2. **Determine phase to execute**:
    - If `current_phase` exists: execute that phase.

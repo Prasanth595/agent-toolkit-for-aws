@@ -4,6 +4,7 @@
     python3 scripts/telemetry/metric_emission/migration.py                 # PostToolUse (Write|Edit|Bash)
     python3 scripts/telemetry/metric_emission/migration.py --reconcile     # Stop
     python3 scripts/telemetry/metric_emission/migration.py --session-end   # SessionEnd
+    python3 scripts/telemetry/metric_emission/migration.py --reconcile --via cli  # other hosts
 
 Nothing is inferred from the conversation and no skill instruction has to be
 followed. The migration skills maintain `.migration/<id>/.phase-status.json` (and
@@ -518,8 +519,15 @@ def reconcile(start_dir, session_id=None, session_end=False, edited_path=None, u
 
 
 def main(argv, stdin=None):
+    cli = via_mode(argv) == "cli"
+    if cli and client.migration_reporting_mode() == "hook":
+        return 0  # Claude Code and Cursor retain their existing hook path.
+    if cli and client.plugin_version() is None:
+        return 0  # do not advance a snapshot when a standalone bundle is incomplete
     session_end = "--session-end" in argv
-    payload = read_hook_payload(stdin)
+    # Explicit CLI calls use cwd; they have no hook payload and must not wait
+    # for stdin or accept a caller-supplied hook session/project identity.
+    payload = {} if cli else read_hook_payload(stdin)
     # Claude Code sends session_id on every hook; Cursor sends conversation_id.
     session_id = payload.get("session_id") or payload.get("conversation_id")
     tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
