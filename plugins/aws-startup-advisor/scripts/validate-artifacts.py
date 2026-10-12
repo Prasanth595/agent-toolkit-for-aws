@@ -513,6 +513,17 @@ def _merge_example_at(root: Node, path: str, value: Any, key_comments: Dict[str,
     node = build_node(value, key_comments, source)
     if path.endswith("[]") and isinstance(value, list):
         target = _walk_path(root, path[:-2])
+        # Stripping `[]` creates a missing leaf as an empty object. The example is the
+        # array itself, so that fresh leaf is an array. Leaving `object` in the kinds
+        # made `{object, array}` and an object-valued `workloads` passed the type check.
+        if (
+            target is not None
+            and target.kinds == {"object"}
+            and not target.keys
+            and target.item is None
+            and target.any_key is None
+        ):
+            target.kinds = {"array"}
     else:
         target = _walk_path(root, path)
     if target is not None:
@@ -885,6 +896,57 @@ def load_manifest(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _node_from_schema(schema: Any, source: str) -> Node:
+    """A shape node for a JSON Schema property the Markdown example never showed."""
+    n = Node(source=source)
+    if not isinstance(schema, dict):
+        n.kinds.add("any")
+        return n
+    raw = schema.get("type")
+    types = [raw] if isinstance(raw, str) else list(raw or [])
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else None
+    if not types and props is not None:
+        types = ["object"]
+    for t in types:
+        if t == "integer":
+            n.kinds.add("number")
+        elif t in ("object", "array", "string", "number", "boolean", "null"):
+            n.kinds.add(t)
+        else:
+            n.kinds.add("any")
+    if not n.kinds:
+        n.kinds.add("any")
+    if props is not None:
+        n.kinds.add("object")
+        for k, sub in props.items():
+            n.keys[k] = _node_from_schema(sub, source)
+    items = schema.get("items")
+    if isinstance(items, dict) and "array" in n.kinds:
+        n.item = _node_from_schema(items, source)
+    return n
+
+
+def _admit_schema_properties(node: Node, schema: Any, source: str) -> None:
+    """Keys the JSON Schema declares and the Markdown shape does not are still in the
+    contract. The shape check was reporting them UNKNOWN_KEY after the schema had accepted
+    the same bytes. Keys in neither stay unknown. A key the shape already defines is not
+    replaced, so a closed example object stays closed."""
+    if not isinstance(schema, dict):
+        return
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return
+    if "object" not in node.kinds and not node.is_any():
+        return
+    if "object" not in node.kinds:
+        node.kinds.add("object")
+    for k, sub in props.items():
+        if k not in node.keys:
+            node.keys[k] = _node_from_schema(sub, source)
+        else:
+            _admit_schema_properties(node.keys[k], sub, source)
+
+
 def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding]) -> List[Contract]:
     specs: Dict[str, Any] = {}
     specs.update(manifest.get("shared", {}))
@@ -908,6 +970,8 @@ def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding
                         f"_ANNOTATION_KEYWORDS (if it carries no constraint).", _rel(p)))
         if "shape" in spec:
             c.shape = build_shape_contract(spec, findings)
+        if c.shape is not None and c.json_schema is not None:
+            _admit_schema_properties(c.shape.root, c.json_schema, c.json_schema_path)
         contracts.append(c)
     return contracts
 
