@@ -185,8 +185,12 @@ Generate before/after examples per detected `integration.pattern` and `ai_source
 primary path (`migration_path: "mantle_openai_responses"`, `model_change: false`): the app
 keeps the OpenAI SDK; only the base URL (`.../openai/v1/responses`), credential (a Bedrock API
 key/token provider), model ID, and IAM (`bedrock-mantle:*`) change. Read
-`references/shared/openai-on-bedrock.md` for exact values. If the source uses Chat Completions,
-plan a reshape to `responses.create`. **No Converse fallback for GPT-5.5/GPT-5.4 — GPT-5.6 and
+`references/shared/openai-on-bedrock.md` for exact values. **A Chat Completions source is a
+supported near-drop-in for GPT-6 and GPT-5.6** (both list Chat Completions on mantle and runtime
+CRIS per their model cards) — keep `chat.completions.create` unless a Responses-only feature or
+demonstrated constraint drives a reshape. **GPT-5.5 and GPT-5.4 are the exception**: Chat
+Completions support is unconfirmed on their model cards, so a Chat Completions source on either
+still needs a planned reshape to `responses.create`. **No Converse fallback for GPT-5.5/GPT-5.4 — GPT-5.6 and
 GPT-6 differ.** GPT-5.5 and GPT-5.4 are mantle-only, in-region only: needing Guardrails/Knowledge
 Bases/logging/an unsupported region forces a `converse` path with `model_change: true` to a
 Bedrock-native model (or `gpt-oss`). GPT-5.6 Sol/Terra/Luna and all four GPT-6 models (Astra, Sol,
@@ -195,7 +199,13 @@ models the same need is satisfied by switching endpoint, not model: record
 `migration_path: "runtime_openai_cris"` with `model_change: false`. Note: `runtime_openai_cris`
 for GPT-6 Astra is valid only via Responses/Chat Completions/Converse — Astra does not support
 `Invoke`, so verify per-feature against Astra's model card before assuming parity with
-Sol/Luna/6.1 Sol.
+Sol/Luna/6.1 Sol. **When Guardrails is the driving need and the design keeps
+`runtime_openai_cris` (endpoint switch, not model switch), it MUST also record
+`bedrock_models[].required_client_api` so the generated client uses a Guardrails-capable
+surface — `converse` for Astra; `converse` / `chat_completions` / `invoke` (never `responses`)
+for 6.1 Sol and the other non-Astra GPT-6/5.6 CRIS models. Do not leave the client on
+`responses` when Guardrails is required.** `Responses` stays the default for a region-only
+CRIS move with no Guardrails need.
 Anthropic-SDK sources → boto3 Converse client swap. Record `code_migration.openrouter_path`
 when a router was detected (`same_model_mantle|direct|litellm|keep_openrouter`).
 

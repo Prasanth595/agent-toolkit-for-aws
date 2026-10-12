@@ -88,6 +88,8 @@ Generate `ai-migration/migrate_to_mantle.sh` — a shell script that configures 
   MAX_TOKENS=1024 # Starting point — see table above
   ```
 
+**CRIS variant client surface:** When `migration_path` is `"runtime_openai_cris"`, check `aws-design-ai.json` → `ai_architecture.bedrock_models[].required_client_api`. If it is non-Responses (`converse`, `chat_completions`, or `invoke`), the generated CRIS client/adapter MUST emit that surface — e.g. a `client.converse(...)` call against the `bedrock-runtime` CRIS id — rather than defaulting to `responses.create`. If absent or `"responses"`, keep the Responses surface (the region-only-move default).
+
 Skip Step 1 (provider adapter) when this step runs — the OpenAI SDK is the adapter. Step 2's test harness unconditionally imports `from provider_adapter import get_provider`, so when Step 1 is skipped (every `mantle`/`runtime_openai_cris` run), also emit a minimal `ai-migration/provider_adapter.py` stub here that exposes `get_provider()` returning a thin wrapper around the Mantle/CRIS OpenAI-SDK client configured by this script — this keeps Step 2 shared and path-agnostic without rewriting its import.
 
 ---
@@ -147,7 +149,7 @@ Generate `ai-migration/setup_bedrock.sh`.
 
 - Dry-run by default (`--execute` flag to run for real)
 - Step 1 — Request model access: List each model from `aws-design-ai.json` → `bedrock_models[].aws_model_id` and the embedding model
-- Step 2 — Create IAM role: Trust policy for the compute platform (Lambda, ECS, or EC2 based on `aws-design.json` if present). Bedrock policy: `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` scoped to `arn:aws:bedrock:*::foundation-model/*`
+- Step 2 — Create IAM role: Trust policy for the compute platform (Lambda, ECS, or EC2 based on `aws-design.json` if present). Bedrock policy: `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` scoped to `arn:aws:bedrock:*::foundation-model/*`. For a `runtime_openai_cris` target whose CRIS id is a GPT-6 model (Astra, Sol, Luna, 6.1 Sol), the Bedrock policy must additionally grant `bedrock:InvokeModel` on `arn:aws:bedrock:{region}:{account}:project/default` alongside the CRIS inference-profile ARN — both are required per the GPT-6 model cards' "Call the model" section. This does not affect the separate `bedrock-mantle:*` policy for bare mantle GPT ids.
 - Compliance carry-through: if `preferences.json` → `design_constraints.compliance` is set and not `none`/`unknown` (full-flow Q2 / AI-only Q1.5), the script and its printed notes MUST reflect the design's Step 0.7 constraints — `AWS_REGION` from the compliance-constrained region (GovCloud for fedramp, EU for gdpr), `eu.` inference-profile model IDs for gdpr, and for hipaa a printed warning that Bedrock invocation logs retain original content (KMS-encrypt + restrict IAM on the log group before enabling)
 - Step 3 — Print required environment variables: `AWS_REGION`, `AI_PROVIDER=bedrock`, model IDs
 - Step 4 — Check quota: Query current TPM quota for the primary model via `aws service-quotas get-service-quota`. If `aws-design-ai.json` → `ai_architecture.quota_risk` is `"high"` or `"medium"`, print warning: "⚠️ Your token volume may exceed default Bedrock quotas. Request a quota increase via Service Quotas console (allow 1–5 business days)." Include the `aws service-quotas request-service-quota-increase` command template.

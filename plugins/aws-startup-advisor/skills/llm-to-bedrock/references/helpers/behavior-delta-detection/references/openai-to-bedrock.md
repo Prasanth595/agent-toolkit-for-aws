@@ -1,6 +1,6 @@
 # OpenAI → Bedrock Behavior Deltas
 
-> v1 — last verified: 2026-05-21
+> v1 — last verified: 2026-10-15
 
 Per-delta reference for OpenAI → Bedrock parameter-surface differences. Loaded by `behavior-delta-detection` skill when `source_provider == "openai"`.
 
@@ -19,7 +19,7 @@ In the `detect_grep` recipes below, `<REPO>` is the repository path supplied in 
 - `resolution_kind`: `ux_choice`
 - Source (OpenAI): `client.chat.completions.create(...)`, `messages=[...]`, reads `choices[0].message.content`
 - Target (mantle GPT): `client.responses.create(...)`, `input=...`, reads `output_text`
-- Chat Completions support is **unverified** for these models — every AWS sample uses Responses, and no GPT model card lists Chat Completions as supported. Treat a Chat Completions source as requiring a reshape, and probe the target account before committing to either surface.
+- Chat Completions support is **model-specific, not uniformly unverified.** All four GPT-6 models (Astra, Sol, Luna, 6.1 Sol) and the GPT-5.6 family (Sol, Terra, Luna) list `Chat Completions` as a supported API on both `bedrock-mantle` and `bedrock-runtime` CRIS (per their model cards — see `openai-on-bedrock.md` § Access Paths). For these models, a Chat Completions source MAY keep `chat.completions.create` and `choices[0].message` parsing unchanged — **reshape to Responses is OPTIONAL**, driven only by a Responses-only feature (runtime prompt caching, reasoning-item round-trips on `bedrock-runtime`) or a demonstrated account-specific constraint, not by a blanket assumption that Chat Completions is unsupported. For GPT-5.5 / GPT-5.4 (mantle-only, no CRIS) Chat Completions support is still unconfirmed on their model cards — treat those two as requiring a reshape to Responses, and probe the target account before committing.
 
 ### detect_grep
 

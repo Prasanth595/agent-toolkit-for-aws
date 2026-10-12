@@ -51,7 +51,15 @@ Shell script, **dry-run by default** with an `--execute` flag. Sets
 load-bearing — bare `/v1` 404s), a Bedrock API key / token provider (NOT an OpenAI key), the
 `openai.gpt-*` model ID, and IAM needing `bedrock-mantle:*` (not `bedrock:InvokeModel`). Per-workload
 `MAX_TOKENS` from a lookup table, default `1024`. No prompt changes when the source already uses
-`responses.create`; a Chat Completions source needs a reshape (flag it in the script comments).
+`responses.create`; a Chat Completions source may keep `chat.completions.create` for GPT-6/GPT-5.6
+models (both support it natively) — reshape to Responses is optional, not mandatory.
+
+**CRIS variant (`runtime_openai_cris`) client surface:** check `aws-design-ai.json` →
+`ai_architecture.bedrock_models[].required_client_api`. If non-Responses (`converse`,
+`chat_completions`, or `invoke`), the generated CRIS script/adapter MUST emit that surface — e.g.
+a Converse call against the `bedrock-runtime` CRIS id — rather than defaulting to
+`responses.create`. Absent or `"responses"` keeps the Responses surface (the region-only-move
+default).
 
 ## Step 1: `provider_adapter.{py,js,go}` (direct / gpt-oss path)
 
@@ -69,7 +77,11 @@ diffs outputs, so the user validates behavior before cutover.
 
 ## Step 3: `setup_bedrock.sh`
 
-Enables the chosen Bedrock model(s), sets up IAM, and (mantle path) the Bedrock API key.
+Enables the chosen Bedrock model(s), sets up IAM, and (mantle path) the Bedrock API key. For a
+`runtime_openai_cris` target whose CRIS id is a GPT-6 model (Astra, Sol, Luna, 6.1 Sol), the IAM
+policy must grant `bedrock:InvokeModel` on `arn:aws:bedrock:{region}:{account}:project/default`
+in addition to the CRIS inference-profile ARN — both required per the GPT-6 model cards; the
+mantle `bedrock-mantle:*` policy is unaffected.
 
 ## Step 3B: `gateway_config.{yaml,py,json}` (gateway users)
 

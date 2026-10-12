@@ -101,8 +101,9 @@ Traditional-AI capabilities (AWS AI service, not Bedrock): `document_extraction`
 - **`bedrock_models[]`** — per Bedrock target: `source_model_id`, `aws_model_id`,
   `capabilities_matched[]`, `capability_gaps[]`, `honest_assessment`, `source_provider_price`,
   `bedrock_price`, `price_comparison`, `migration_complexity`, `model_change` (bool),
-  `migration_path` (see below), `quota_risk` (`low|medium|high`). Traditional-AI capabilities
-  do NOT appear here — they are `design_blocks[]` rows with `target_aws_service`.
+  `migration_path` (see below), `quota_risk` (`low|medium|high`), `required_client_api`
+  (optional — see below). Traditional-AI capabilities do NOT appear here — they are
+  `design_blocks[]` rows with `target_aws_service`.
 - **`capability_mapping`** — per capability that is `true` in the profile's
   `integration.capabilities_summary`: `{ parity: "full|partial|none", notes }`.
 - **`code_migration`** — `primary_pattern` (matches profile `integration.pattern`),
@@ -128,6 +129,18 @@ only via Responses/Chat Completions/Converse — Astra does not support `Invoke`
 needs Guardrails or Application Inference Profiles (Converse-only features that also require
 Invoke-adjacent plumbing on some other models) must verify against Astra's model card
 per-feature, not assume parity with Sol/Luna/6.1 Sol.
+
+## required_client_api (optional, per `bedrock_models[]` entry)
+
+`responses | converse | chat_completions | invoke` — records the client API surface the
+generated code must use. Absent/default is `responses` for a region-only `runtime_openai_cris`
+move (no Guardrails or other client-surface need). A Guardrails-requiring workload on
+`runtime_openai_cris` sets it to the surface that is actually Guardrails-capable for that model:
+`converse` for GPT-6 Astra (its only Converse-capable, non-Invoke surface), or
+`converse`/`chat_completions`/`invoke` — never `responses` — for GPT-6.1 Sol and the other
+non-Astra GPT-6/5.6 CRIS models. `generate-artifacts-ai.md`'s CRIS Step 1M reads this field and
+emits that surface instead of defaulting to `responses.create`. Keep the existing Astra-no-Invoke
+migration_path note above — `required_client_api` never sets `invoke` for Astra.
 
 ## regional_validation
 
