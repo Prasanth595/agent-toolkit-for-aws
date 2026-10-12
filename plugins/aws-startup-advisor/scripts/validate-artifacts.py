@@ -153,22 +153,23 @@ def strip_jsonc(text: str) -> Tuple[str, Dict[int, str], Dict[int, str]]:
             comments[i] = line[idx + 2:].strip()
             line = line[:idx].rstrip()
         # The key a trailing comment annotates is the LAST `"key":` opened on the line
-        # WHOSE OWN NESTING DEPTH MATCHES THE DEPTH AT THE END OF THE LINE -- i.e. a key
+        # WHOSE OWN NESTING DEPTH MATCHES THE DEPTH AT THE END OF THE LINE — i.e. a key
         # that is still "current" by the time the comment is reached, not merely the
         # last key-like string that happens to appear earliest in the text. Two cases
-        # must resolve differently:
+        # must resolve differently and both are exercised by tests:
         #   - `"routing_provenance": "table", // REQUIRED` (depth stays open on this
-        #     key's own value, never closed back out before the comment) -> the comment
-        #     belongs to `routing_provenance` itself, the last key opened.
+        #     key's own value, never closed back out before the comment) → the comment
+        #     belongs to `routing_provenance` itself, the last key opened, matching the
+        #     original design for a key immediately followed by its own `// REQUIRED`.
         #   - `"call_sites": [{ "file": "app.py", "line": 1 }], // REQUIRED` (the inline
         #     array/object value is fully opened AND closed before the comment, so depth
-        #     returns to the level `call_sites` itself was opened at) -> the comment
+        #     returns to the level `call_sites` itself was opened at) → the comment
         #     belongs to `call_sites`, the enclosing field, not to `line` (a key nested
         #     inside that value, whose own depth no longer matches the end-of-line depth).
-        # A key's value can also legitimately still be OPEN at end-of-line (e.g.
-        # `"workloads": [ // REQUIRED` whose `]` closes on a later line) -- that key was
-        # recorded one level shallower than `depth` (the depth its own `[`/`{` pushed
-        # to). Prefer an exact depth match; fall back to `depth - 1` for that case.
+        # Tracking bracket depth while re-scanning the comment-stripped line, and keeping
+        # the LAST key seen at each depth, implements this without changing the plain
+        # same-depth case (several flat `"a": 1, "b": 2 // REQUIRED` siblings still
+        # resolve to the last one, `b`, because nothing nests and depth never changes).
         depth = 0
         last_key_at_depth: Dict[int, str] = {}
         k_in_str = False
@@ -208,9 +209,18 @@ def strip_jsonc(text: str) -> Tuple[str, Dict[int, str], Dict[int, str]]:
                 between = line[key_start + 1:pos]
                 if between.strip() == "":
                     last_key_at_depth[depth] = line[string_open_pos + 1:key_start]
-            if ch not in '"':
+                key_start = None
+            elif ch not in '"' and not ch.isspace():
+                # Whitespace/tabs between a closed key string and its `:` must NOT drop
+                # the pending key (`"priority" : ...` is still a key, just spaced out) —
+                # only a genuinely different, non-whitespace character invalidates it.
                 key_start = None
             pos += 1
+        # A key's value can legitimately still be OPEN at end-of-line (e.g.
+        # `"workloads": [ // REQUIRED` whose `]` closes on a later line) — that key was
+        # recorded one level shallower than `depth` (the depth its own `[`/`{` pushed to).
+        # Prefer an exact depth match (the fully-closed-on-this-line case); fall back to
+        # `depth - 1` (the still-open-at-end-of-line case) only when no exact match exists.
         if depth in last_key_at_depth:
             keys[i] = last_key_at_depth[depth]
         elif (depth - 1) in last_key_at_depth:
@@ -572,6 +582,17 @@ def _merge_example_at(root: Node, path: str, value: Any, key_comments: Dict[str,
     node = build_node(value, key_comments, source)
     if path.endswith("[]") and isinstance(value, list):
         target = _walk_path(root, path[:-2])
+        # Stripping `[]` creates a missing leaf as an empty object. The example is the
+        # array itself, so that fresh leaf is an array. Leaving `object` in the kinds
+        # made `{object, array}` and an object-valued `workloads` passed the type check.
+        if (
+            target is not None
+            and target.kinds == {"object"}
+            and not target.keys
+            and target.item is None
+            and target.any_key is None
+        ):
+            target.kinds = {"array"}
     else:
         target = _walk_path(root, path)
     if target is not None:
@@ -947,10 +968,62 @@ def load_manifest(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding]) -> List[Contract]:
+def _node_from_schema(schema: Any, source: str) -> Node:
+    """A shape node for a JSON Schema property the Markdown example never showed."""
+    n = Node(source=source)
+    if not isinstance(schema, dict):
+        n.kinds.add("any")
+        return n
+    raw = schema.get("type")
+    types = [raw] if isinstance(raw, str) else list(raw or [])
+    props = schema.get("properties") if isinstance(schema.get("properties"), dict) else None
+    if not types and props is not None:
+        types = ["object"]
+    for t in types:
+        if t == "integer":
+            n.kinds.add("number")
+        elif t in ("object", "array", "string", "number", "boolean", "null"):
+            n.kinds.add(t)
+        else:
+            n.kinds.add("any")
+    if not n.kinds:
+        n.kinds.add("any")
+    if props is not None:
+        n.kinds.add("object")
+        for k, sub in props.items():
+            n.keys[k] = _node_from_schema(sub, source)
+    items = schema.get("items")
+    if isinstance(items, dict) and "array" in n.kinds:
+        n.item = _node_from_schema(items, source)
+    return n
+
+
+def _admit_schema_properties(node: Node, schema: Any, source: str) -> None:
+    """Keys the JSON Schema declares and the Markdown shape does not are still in the
+    contract. The shape check was reporting them UNKNOWN_KEY after the schema had accepted
+    the same bytes. Keys in neither stay unknown. A key the shape already defines is not
+    replaced, so a closed example object stays closed."""
+    if not isinstance(schema, dict):
+        return
+    props = schema.get("properties")
+    if not isinstance(props, dict):
+        return
+    if "object" not in node.kinds and not node.is_any():
+        return
+    if "object" not in node.kinds:
+        node.kinds.add("object")
+    for k, sub in props.items():
+        if k not in node.keys:
+            node.keys[k] = _node_from_schema(sub, source)
+        else:
+            _admit_schema_properties(node.keys[k], sub, source)
+
+
+def build_contracts(manifest: Dict[str, Any], skill: Optional[str], findings: List[Finding]) -> List[Contract]:
     specs: Dict[str, Any] = {}
     specs.update(manifest.get("shared", {}))
-    specs.update(manifest.get("skills", {}).get(skill, {}))
+    if skill is not None:
+        specs.update(manifest.get("skills", {}).get(skill, {}))
     contracts: List[Contract] = []
     for glob_, spec in specs.items():
         c = Contract(artifact_glob=glob_)
@@ -970,6 +1043,8 @@ def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding
                         f"_ANNOTATION_KEYWORDS (if it carries no constraint).", _rel(p)))
         if "shape" in spec:
             c.shape = build_shape_contract(spec, findings)
+        if c.shape is not None and c.json_schema is not None:
+            _admit_schema_properties(c.shape.root, c.json_schema, c.json_schema_path)
         for route in spec.get("route_shapes", []):
             built = build_shape_contract(route, findings)
             if built is not None:
@@ -1009,7 +1084,7 @@ def find_artifacts(run_dir: Path) -> List[Path]:
     return out
 
 
-def validate_run_dir(run_dir: Path, skill: str, manifest: Dict[str, Any], findings: List[Finding]) -> int:
+def validate_run_dir(run_dir: Path, skill: Optional[str], manifest: Dict[str, Any], findings: List[Finding]) -> int:
     contracts = build_contracts(manifest, skill, findings)
     checked = 0
     for p in find_artifacts(run_dir):
@@ -1017,7 +1092,8 @@ def validate_run_dir(run_dir: Path, skill: str, manifest: Dict[str, Any], findin
         matched = [c for c in contracts if fnmatch.fnmatch(name, c.artifact_glob)]
         rel = _rel(p)
         if not matched:
-            findings.append(Finding("NO_CONTRACT", rel, "", f"no contract covers '{name}' for skill {skill}", ""))
+            if skill is not None:
+                findings.append(Finding("NO_CONTRACT", rel, "", f"no contract covers '{name}' for skill {skill}", ""))
             continue
         try:
             value = json.loads(p.read_text(encoding="utf-8"))
@@ -1107,8 +1183,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         fixtures_root = PLUGIN_ROOT / "fixtures"
         for d in sorted(p for p in fixtures_root.iterdir() if p.is_dir()):
             skill = skill_for_fixture(d.name, manifest)
-            if skill is None:
-                continue
             checked += validate_run_dir(d, skill, manifest, findings)
     else:
         if not args.skill:

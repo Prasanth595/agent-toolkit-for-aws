@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = PLUGIN_ROOT / "scripts" / "validate-artifacts.py"
 
@@ -71,6 +73,32 @@ def test_strip_jsonc_still_binds_to_the_last_of_several_flat_sibling_keys():
     assert keys[1] == "b"
 
 
+@pytest.mark.parametrize("separator", [" ", "\t", "  "])
+def test_strip_jsonc_keeps_the_pending_key_across_whitespace_before_the_colon(separator: str):
+    """`"priority" : "balanced", // REQUIRED` (a space or tab between the closed key
+    string and its `:`) must still bind the comment to `priority`. The depth-tracking fix
+    unconditionally reset the pending key on any character that was not a `"`, including
+    whitespace encountered before the colon was reached, so a spaced key lost its
+    REQUIRED annotation entirely. Only a genuinely different, non-whitespace character
+    (not whitespace waiting for `:`) may invalidate the pending key.
+    """
+    text = f'{{\n  "priority"{separator}: "balanced", // REQUIRED\n}}'
+    _, comments, keys = va.strip_jsonc(text)
+    assert comments[1] == "REQUIRED"
+    assert keys[1] == "priority"
+
+
+def test_strip_jsonc_still_invalidates_a_key_followed_by_a_real_token_before_the_colon():
+    """A non-whitespace, non-colon character between a closed key string and a `:`
+    elsewhere on the line (not actually this key's own colon) must still drop the
+    pending key -- the whitespace exemption must not silently accept arbitrary content.
+    """
+    text = '{\n  "a" junk "b": 1 // REQUIRED\n}'
+    _, comments, keys = va.strip_jsonc(text)
+    assert comments[1] == "REQUIRED"
+    assert keys[1] == "b"
+
+
 # --------------------------------------------------------------------------- template inference
 
 
@@ -88,6 +116,12 @@ def test_enum_from_pipe_string_and_from_comment():
     n = _node('{"status": "full|reduced", "tier": "compute", // network | data | compute\n}')
     assert n.keys["status"].enum == {"full", "reduced"}
     assert n.keys["tier"].enum == {"network", "data", "compute"}
+    quoted = _node('{"mode": "wizard", // "fast_path" | "wizard" — which flow\n'
+                   ' "clustering_mode": "full", // "full" | "simplified_live" (live-only)\n}')
+    assert quoted.keys["mode"].enum == {"fast_path", "wizard"}
+    assert quoted.keys["clustering_mode"].enum == {"full", "simplified_live"}
+    prose = _node('{"note": "x", // "not an enum" | "also prose here"\n}')
+    assert prose.keys["note"].enum is None
 
 
 def test_quoted_comment_enum_members_are_recognized():
@@ -104,40 +138,6 @@ def test_required_from_comment_and_placeholder_is_any_type():
     n = _node('{"id": "<uuid>", // REQUIRED\n "n": "<Q13 value>"}')
     assert "id" in n.required
     assert n.keys["n"].is_any()  # a placeholder says nothing about the JSON type
-
-
-def test_empty_array_item_is_replaced_when_a_concrete_shape_arrives():
-    """Review finding on #387: `"services": []` seeded an `any` item, and merging the
-    later object kept `any`, so a scalar or nested list passed."""
-    seed = _node('{"services": [], "warnings": []}')
-    seed.merge(_node('{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}]}'))
-    item = seed.keys["services"].item
-    assert not item.is_any() and "object" in item.kinds
-    assert "routing_provenance" in item.required
-    seed.merge(_node('{"services": []}'))
-    assert not seed.keys["services"].item.is_any()
-    ex = '{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}]}'
-    root = _node('{"services": []}')
-    root.merge(_node(ex))
-
-    def check(value):
-        out = []
-        va.validate_shape(root, value, "", "a", "c", out)
-        return {(f.code, f.path) for f in out}
-
-    assert check({"services": []}) == set()
-    assert check({"services": [{"routing_provenance": "table", "n": 1}]}) == set()
-    assert check({"services": [None]}) == set()
-    assert ("TYPE_MISMATCH", "services[0]") in check({"services": ["not-an-object"]})
-    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [17]})
-    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [False]})
-    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [[]]})
-    assert ("MISSING_REQUIRED", "services[0].routing_provenance") in check({"services": [{}]})
-    ph = _node('{"ids": ["<azure_id>"]}')
-    assert ph.keys["ids"].item.is_any()
-    out = []
-    va.validate_shape(ph, {"ids": [1, "x", False]}, "", "a", "c", out)
-    assert out == []
 
 
 def test_placeholder_key_makes_object_open_and_sets_any_key_template():
@@ -180,6 +180,42 @@ def test_any_key_template_applies_to_named_children():
     ex = '{"rows": {"<key>": {"value": "x", "chosen_by": "user|default"}}}'
     found = _validate(ex, {"rows": {"q1": {"value": "y", "chosen_by": "user", "extra": 1}}})
     assert found == {("UNKNOWN_KEY", "rows.q1.extra")}
+
+
+def test_empty_array_item_is_replaced_when_a_concrete_shape_arrives():
+    """Review finding on #385/#387: `"services": []` seeded an `any` item, and merging the
+    later object kept `any`, so a scalar or nested list passed."""
+    seed = _node('{"services": [], "workloads": []}')
+    seed.merge(_node('{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}]}'))
+    item = seed.keys["services"].item
+    assert not item.is_any() and "object" in item.kinds
+    assert "routing_provenance" in item.required
+    seed.merge(_node('{"services": []}'))
+    assert not seed.keys["services"].item.is_any()
+    root = _node('{"services": [], "workloads": []}')
+    root.merge(_node('{"services": [{"routing_provenance": "table", // REQUIRED\n "n": 1}],'
+                     ' "workloads": [{"workload_id": "wl"}]}'))
+
+    def check(value):
+        out = []
+        va.validate_shape(root, value, "", "a", "c", out)
+        return {(f.code, f.path) for f in out}
+
+    assert check({"services": [], "workloads": []}) == set()
+    assert check({"services": [{"routing_provenance": "table", "n": 1}], "workloads": [{"workload_id": "wl"}]}) == set()
+    assert check({"services": [None]}) == set()
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": ["not-an-object"], "workloads": []})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [17], "workloads": []})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [False], "workloads": []})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [[]], "workloads": []})
+    assert ("TYPE_MISMATCH", "services[0]") in check({"services": [["nested"]], "workloads": []})
+    assert ("TYPE_MISMATCH", "workloads[0]") in check({"services": [], "workloads": [42]})
+    assert ("MISSING_REQUIRED", "services[0].routing_provenance") in check({"services": [{}], "workloads": []})
+    ph = _node('{"ids": ["<azure_id>"]}')
+    assert ph.keys["ids"].item.is_any()
+    out = []
+    va.validate_shape(ph, {"ids": [1, "x", False]}, "", "a", "c", out)
+    assert out == []
 
 
 def test_allowed_anywhere_vocabulary():
@@ -246,6 +282,7 @@ def test_wrapped_array_example_merges_at_the_array_level(tmp_path: Path):
     root = _node('{"metadata": {"a": 1}}')
     text, comments, keys = va.strip_jsonc('{"workloads": [{"workload_id": "wl_1", "structured_output": false, "call_sites": [{"file": "a", "line": 1}]}]}')
     va._merge_example_at(root, "workloads[]", json.loads(text), {}, "t")
+    assert root.keys["workloads"].kinds == {"array"}
     item = root.keys["workloads"].item
     assert set(item.keys) == {"workload_id", "structured_output", "call_sites"}
     # a bare per-item example still lands on the item
@@ -355,6 +392,62 @@ def test_fixtures_pass_with_baseline_and_no_stale_entries():
     assert report["stale_baseline_entries"] == [], "remove baseline entries that no longer match anything"
 
 
+def test_neutral_matrix_shared_artifacts_extend_the_mapped_fixture_count():
+    manifest = va.load_manifest(PLUGIN_ROOT / "scripts" / "artifact-contracts.json")
+    fixtures_root = PLUGIN_ROOT / "fixtures"
+    matrix = fixtures_root / "ai-migration-matrix"
+    shared_artifacts = [p for p in va.find_artifacts(matrix) if p.name in manifest["shared"]]
+    assert sum(p.name == ".phase-status.json" for p in shared_artifacts) == 14
+    assert sum(p.name == "integration-validation.json" for p in shared_artifacts) == 7
+    assert not any(p.name.startswith("expected-") for p in va.find_artifacts(matrix))
+
+    matrix_findings = []
+    matrix_checked = va.validate_run_dir(matrix, None, manifest, matrix_findings)
+    assert matrix_checked == len(shared_artifacts)
+    assert matrix_findings == []
+
+    mapped_checked = 0
+    mapped_findings = []
+    for fixture_dir in sorted(p for p in fixtures_root.iterdir() if p.is_dir()):
+        skill = va.skill_for_fixture(fixture_dir.name, manifest)
+        if skill is not None:
+            mapped_checked += va.validate_run_dir(fixture_dir, skill, manifest, mapped_findings)
+
+    r = _run("--fixtures", "--json")
+    assert r.returncode == 0, r.stdout + r.stderr
+    report = json.loads(r.stdout)
+    assert report["checked_artifacts"] - mapped_checked == len(shared_artifacts)
+
+
+def test_invalid_neutral_shared_artifacts_fail_their_schemas(tmp_path: Path):
+    matrix = PLUGIN_ROOT / "fixtures" / "ai-migration-matrix"
+    manifest = va.load_manifest(PLUGIN_ROOT / "scripts" / "artifact-contracts.json")
+    mutations = {
+        ".phase-status.json": lambda value: value.pop("migration_id"),
+        "integration-validation.json": lambda value: value.pop("run_id"),
+    }
+    for name, mutate in mutations.items():
+        source = next(matrix.rglob(name))
+        value = json.loads(source.read_text())
+        mutate(value)
+        neutral = tmp_path / name.lstrip(".")
+        neutral.mkdir()
+        (neutral / name).write_text(json.dumps(value))
+        findings = []
+        assert va.validate_run_dir(neutral, None, manifest, findings) == 1
+        assert any(f.code == "SCHEMA_VIOLATION" for f in findings), findings
+
+
+def test_neutral_fixture_skips_provider_artifacts_and_expected_snapshots(tmp_path: Path):
+    manifest = va.load_manifest(PLUGIN_ROOT / "scripts" / "artifact-contracts.json")
+    (tmp_path / "gcp-resource-inventory.json").write_text("{}")
+    (tmp_path / "expected-artifacts.json").write_text("not json")
+    findings = []
+    assert va.validate_run_dir(tmp_path, None, manifest, findings) == 0
+    assert findings == []
+    assert [p.name for p in va.find_artifacts(tmp_path)] == ["gcp-resource-inventory.json"]
+
+
 def test_injected_off_contract_key_fails(tmp_path: Path):
     """The regression this tool exists for: a producer emits a key its contract never
     documented. Copy a golden run, plant the key, expect exit 1 naming the path."""
@@ -370,6 +463,65 @@ def test_injected_off_contract_key_fails(tmp_path: Path):
     report = json.loads(r.stdout)
     assert any(e["code"] == "UNKNOWN_KEY" and e["path"] == "resources[0].invented_by_a_phase_file"
                for e in report["errors"]), report["errors"]
+
+
+def _ai_only_preferences_example() -> dict:
+    """Load the real `## preferences.json (AI-only)` example from
+    `clarify-ai-only.md`, filling in its `chosen_by` placeholder so it is a concrete,
+    schema-valid document rather than a documentation template."""
+    doc = (
+        PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "clarify"
+        / "clarify-ai-only.md"
+    ).read_text()
+    import re
+    m = re.search(r"## preferences\.json \(AI-only\)\s*```jsonc\n(.*?)\n```", doc, re.S)
+    lines = []
+    for line in m.group(1).split("\n"):
+        idx = line.find(" //")
+        lines.append(line[:idx] if idx != -1 else line)
+    data = json.loads("\n".join(lines))
+
+    def fix_chosen_by(node):
+        if isinstance(node, dict):
+            if node.get("chosen_by") == "user|extracted|default|derived":
+                node["chosen_by"] = "extracted"
+            for v in node.values():
+                fix_chosen_by(v)
+        elif isinstance(node, list):
+            for v in node:
+                fix_chosen_by(v)
+
+    fix_chosen_by(data)
+    return data
+
+
+def test_required_inline_array_field_cannot_be_omitted_on_either_route(tmp_path: Path):
+    """Finding 3 regression. `clarify-ai-only.md`'s `workloads[].call_sites` is declared
+    `// REQUIRED` as `"call_sites": [{ "file": "app.py", "line": 1 }], // REQUIRED` — an
+    inline array of objects on one line. Before the `strip_jsonc` key-attribution fix,
+    the trailing comment bound to `line` (the last key opened on the line, nested inside
+    the array) instead of `call_sites` (the enclosing field), so omitting the entire
+    `call_sites` array passed validation with no MISSING_REQUIRED finding. `priority` is
+    the control: a plain top-level sibling on the same object, correctly flagged either
+    way, proving the fix did not just start over-flagging unrelated keys."""
+    manifest = va.load_manifest(PLUGIN_ROOT / "scripts" / "artifact-contracts.json")
+
+    base = _ai_only_preferences_example()
+    for mutate, missing_path in (
+        (lambda d: d["workloads"][0].pop("call_sites"), "workloads[0].call_sites"),
+        (lambda d: d["workloads"][0].pop("priority"), "workloads[0].priority"),
+    ):
+        import copy
+        data = copy.deepcopy(base)
+        mutate(data)
+        run = tmp_path / missing_path.replace("[", "_").replace("]", "").replace(".", "_")
+        run.mkdir()
+        (run / "preferences.json").write_text(json.dumps(data))
+        findings = []
+        va.validate_run_dir(run, "azure-to-aws", manifest, findings)
+        assert any(
+            f.code == "MISSING_REQUIRED" and f.path == missing_path for f in findings
+        ), (missing_path, [f.as_dict() for f in findings])
 
 
 def test_empty_phases_fails_min_properties(tmp_path: Path):
@@ -594,6 +746,10 @@ def test_gcp_ai_workloads_fields_are_checked(tmp_path: Path):
     assert _errors(r) == {("UNKNOWN_KEY", "workloads[0].model_name"),
                           ("TYPE_MISMATCH", "workloads[0].structured_output"),
                           ("TYPE_MISMATCH", "workloads[0].call_sites")}
+    obj = json.loads(json.dumps(profile))
+    obj["workloads"] = {"invented": "not-an-array"}
+    r = _run("--run-dir", str(_write_run(tmp_path, "object", "ai-workload-profile.json", obj)), "--skill", "gcp-to-aws", "--json")
+    assert ("TYPE_MISMATCH", "workloads") in _errors(r)
 
 
 def test_heroku_workshop_preferences_subset_is_an_open_knob_map(tmp_path: Path):
@@ -641,10 +797,10 @@ def test_gcp_preferences_chosen_by_enum_is_enforced_including_derived(tmp_path: 
 
 
 def test_azure_design_arrays_reject_a_scalar_after_the_empty_seed(tmp_path: Path):
-    """Review finding on #387 and #386: services, clusters, deferred, and pending_rubric are
-    seeded `[]` and refined by a later object section. A scalar, string, boolean, or nested
-    list must fail. An empty array and an object stay valid as types. Null stays compatible.
-    An array whose example never names an item type stays open."""
+    """Review finding on #385/#387: services, clusters, deferred, and pending_rubric are
+    seeded `[]` and refined by a later object section. A scalar, string, boolean, or
+    nested list must fail. An empty array and an object stay valid as types. An array
+    whose example never names an item type stays open."""
     src = PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-design/aws-design.json"
     design = json.loads(src.read_text())
     control = _errors(_run("--run-dir", str(src.parent), "--skill", "azure-to-aws", "--no-baseline", "--json"))
@@ -667,9 +823,14 @@ def test_azure_design_arrays_reject_a_scalar_after_the_empty_seed(tmp_path: Path
     blank = json.loads(json.dumps(design))
     blank["services"] = [{}]
     assert ("MISSING_REQUIRED", "services[0].routing_provenance") in run("svc-obj", blank)
-    nulled = json.loads(json.dumps(design))
-    nulled["services"] = [None]
-    assert ("TYPE_MISMATCH", "services[0]") not in run("null-item", nulled)
+    profile = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/shared/schema-discover-ai.md", "Shape")
+    ok = _errors(_run("--run-dir", str(_write_run(tmp_path, "wl-ok", "ai-workload-profile.json", profile)),
+                      "--skill", "azure-to-aws", "--no-baseline", "--json"))
+    wl_bad = json.loads(json.dumps(profile))
+    wl_bad["workloads"] = [42]
+    errs = _errors(_run("--run-dir", str(_write_run(tmp_path, "wl-bad", "ai-workload-profile.json", wl_bad)),
+                        "--skill", "azure-to-aws", "--no-baseline", "--json"))
+    assert ("TYPE_MISMATCH", "workloads[0]") in errs - ok
 
 
 def test_gcp_cluster_edges_reject_a_scalar_member(tmp_path: Path):
@@ -689,6 +850,376 @@ def test_gcp_cluster_edges_reject_a_scalar_member(tmp_path: Path):
     r = _run("--run-dir", str(_write_run(tmp_path, "empty", "gcp-resource-clusters.json", bad)),
              "--skill", "gcp-to-aws", "--no-baseline", "--json")
     assert r.returncode == 0, r.stdout
+
+
+
+def test_heroku_inventory_clarifications_is_a_signal_map(tmp_path: Path):
+    """Review finding on #385: inventory_clarifications was closed to database_ha, so a
+    redis or region signal failed even though sources.Q1 extracted was already allowed."""
+    pref = json.loads((PLUGIN_ROOT / "fixtures/heroku-workshop/seed/preferences.json").read_text())
+    pref["metadata"]["inventory_clarifications"] = {
+        "database_ha": "plan:premium-0",
+        "redis_ha": "plan:mini",
+        "target_region": "space:virginia",
+    }
+    pref["sources"]["Q1"] = "extracted"
+
+    def run(name, artifact, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, artifact, data)),
+                            "--skill", "heroku-to-aws", "--json"))
+
+    for artifact in ("preferences.json", "scenarios/scenario-001.preferences.json"):
+        assert run("ok-" + artifact, artifact, pref) == set(), artifact
+    bad = json.loads(json.dumps(pref))
+    bad["invented_preference"] = 1
+    assert run("bad", "preferences.json", bad) == {("UNKNOWN_KEY", "invented_preference")}
+
+
+def test_schema_declared_estimate_properties_are_admitted(tmp_path: Path):
+    """Review finding on #385: complexity_inputs and workshop are in the shared JSON Schema
+    and absent from the Markdown shape, so a valid estimate failed the shape check."""
+    est = json.loads((PLUGIN_ROOT / "fixtures/gcp-decision-gate/after-decide-complete/estimation-infra.json").read_text())
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "estimation-infra.json", data)),
+                            "--skill", "gcp-to-aws", "--json"))
+
+    control = run("base", est)
+    est["complexity_inputs"] = {"tier_inputs": {"requests": 1}}
+    est["workshop"] = {"scenario_id": "scenario-002", "region_note": "eu-west-1 is a what-if"}
+    assert run("declared", est) - control == set()
+    unknown = json.loads(json.dumps(est))
+    unknown["not_in_schema"] = 1
+    unknown["workshop"]["invented"] = 1
+    unknown["pricing_source"]["services_by_source"] = {"cached": ["Fargate"], "live": ["Fargate"]}
+    errs = run("unknown", unknown)
+    assert ("UNKNOWN_KEY", "not_in_schema") in errs
+    assert ("UNKNOWN_KEY", "workshop.invented") in errs
+    assert ("UNKNOWN_KEY", "pricing_source.services_by_source.live") in errs
+
+
+def test_azure_preferences_follow_the_producer_route(tmp_path: Path):
+    """Review finding on #387: the infra shape was the only preferences contract, so an
+    AI-only file failed clarify_status and the mixed flow's AI rows were unknown keys."""
+    infra = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify/preferences.json").read_text())
+    rows = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai.md",
+                        "Step 3: Rows returned")
+    mixed = json.loads(json.dumps(infra))
+    mixed.update(rows)
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    assert ("MISSING_REQUIRED", "clarify_status") not in run("infra", infra)
+    mixed_errors = run("mixed", mixed)
+    assert mixed_errors - run("infra", infra) == set()
+    # The mixed-route AI rows are imported directly from clarify-ai.md's own "Step 3:
+    # Rows returned" example (via _doc_example above), so they must now be the final
+    # assembled {disposition, value, default} envelope clarify-assemble.md's merge
+    # rules require, not the bare per-fragment values the example previously showed
+    # ("ai_priority": "balanced" with no wrapper). Assert zero AI-specific errors
+    # explicitly, not merely "no new errors beyond infra's own pre-existing ones" --
+    # confirms the AI rows genuinely validate, not that two broken sets happen to match.
+    assert not any(path.startswith(("ai_", "startup_program_status", "ai_constraints"))
+                   for _, path in mixed_errors), mixed_errors
+    bad = json.loads(json.dumps(mixed))
+    bad["not_a_preference"] = 1
+    assert ("UNKNOWN_KEY", "not_a_preference") in run("mixed-bad", bad)
+    bad = json.loads(json.dumps(mixed))
+    bad["workloads"] = [42]
+    assert ("TYPE_MISMATCH", "workloads[0]") in run("mixed-scalar", bad)
+
+    ai = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai-only.md",
+                      "preferences.json (AI-only)")
+    assert run("ai", ai) == set(), run("ai", ai)
+    omitted = json.loads(json.dumps(ai))
+    del omitted["workloads"]
+    assert ("MISSING_REQUIRED", "workloads") in run("ai-omit", omitted)
+    dropped = json.loads(json.dumps(ai))
+    del dropped["ai_constraints"]["ai_framework"]
+    assert ("MISSING_REQUIRED", "ai_constraints.ai_framework") in run("ai-framework", dropped)
+    invented = json.loads(json.dumps(ai))
+    invented["metadata"]["invented"] = 1
+    assert ("UNKNOWN_KEY", "metadata.invented") in run("ai-invented", invented)
+
+    # Q1 is documented as select-all with a ["direct"] array default, skipped/defaulted
+    # Q1.5 compliance is documented as appending a metadata.report_caveats entry, and
+    # source is REQUIRED on every chosen_by: "extracted" row per schema-preferences.md's
+    # own fundamental rule -- but route_shapes does not inherit the parent preferences
+    # .json entry's allowed_anywhere, so source was previously rejected on this route even
+    # though the general contract requires it. Prove the producer contract now accepts
+    # the documented shapes it describes, not only its own single literal example.
+    multi_framework = json.loads(json.dumps(ai))
+    multi_framework["ai_constraints"]["ai_framework"]["value"] = ["direct", "langchain"]
+    assert run("ai-multi-framework", multi_framework) == set(), run("ai-multi-framework", multi_framework)
+    with_caveat = json.loads(json.dumps(ai))
+    with_caveat["metadata"]["report_caveats"] = ["Compliance requirements were not confirmed by the user"]
+    assert run("ai-caveat", with_caveat) == set(), run("ai-caveat", with_caveat)
+    with_source = json.loads(json.dumps(ai))
+    with_source["design_constraints"]["target_region"]["source"] = "discovery.ai-workload-profile.json"
+    assert run("ai-source", with_source) == set(), run("ai-source", with_source)
+
+    # Q21 (ai_latency) is documented in clarify-ai.md's own prose and "Who consumes
+    # these" table but, like every other top-level AI row here, was never marked
+    # `// REQUIRED` in the contract itself (only `workloads[]`'s own fields are).
+    # The review finding is that ADDING the documented row used to fail UNKNOWN_KEY
+    # because the example omitted it; prove the now-fixed example accepts it (part of
+    # the `mixed` assertions above) and that it is a genuinely typed row, not that this
+    # top-level field is contractually required (it is not).
+    assert "ai_latency" in mixed and mixed["ai_latency"]["value"] == "important"
+
+    # the infra verdict stays required on the infra route
+    no_status = json.loads(json.dumps(infra))
+    no_status.pop("clarify_status", None)
+    assert ("MISSING_REQUIRED", "clarify_status") in run("infra-status", no_status)
+
+
+def test_ai_workload_capability_uses_the_discovery_design_vocabulary(tmp_path: Path):
+    """Review finding: clarify-ai-only.md's and clarify-ai.md's workloads[] examples both
+    persisted `capability: "chat"`, but schema-discover-ai.md's capability enum is
+    `text_generation`, `structured_output`, `image_generation`, `embedding`, … -- "chat"
+    is not a member, and design-ai.md has no routing case for it. Clarify's persisted
+    workloads[] is Design's source of truth, so a published example using an off-vocabulary
+    value is a real source-contract mismatch even though the shape validator (which only
+    checks type, not enum membership against a different file) accepts it either way.
+    """
+    discover_vocab_text = (
+        PLUGIN_ROOT / "skills/azure-to-aws/references/shared/schema-discover-ai.md"
+    ).read_text()
+    assert "`capability` enum: `text_generation`" in discover_vocab_text
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    ai = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai-only.md",
+                      "preferences.json (AI-only)")
+    assert ai["workloads"][0]["capability"] == "text_generation", ai["workloads"][0]["capability"]
+    assert run("ai-only-capability", ai) == set(), run("ai-only-capability", ai)
+
+    mixed_workloads = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai.md",
+                                   "workloads[]")
+    assert mixed_workloads[0]["capability"] == "text_generation", mixed_workloads[0]["capability"]
+
+
+def test_gcp_drift_values_keep_their_json_types(tmp_path: Path):
+    """Review finding on #385/#387: the live-discovery example typed drift values as
+    strings, so a numeric, boolean, or structured config change failed."""
+    inv = json.loads((PLUGIN_ROOT / "fixtures/gcp-workshop/seed/gcp-resource-inventory.json").read_text())
+    inv["live_metadata"] = {
+        "found": True,
+        "drift": {"config_conflicts": [{
+            "address": "google_compute_disk.d",
+            "field": "size_gb",
+            "terraform_value": 10,
+            "live_value": 20,
+        }]},
+    }
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "gcp-resource-inventory.json", data)),
+                            "--skill", "gcp-to-aws", "--json"))
+
+    numeric = run("num", inv)
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in numeric
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].live_value") not in numeric
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = False
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["live_value"] = True
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].live_value") not in run("bool", inv)
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = "db-f1-micro"
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["live_value"] = {"tier": "db-custom-2-8192"}
+    structured = run("structured", inv)
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in structured
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].live_value") not in structured
+    inv["live_metadata"]["drift"]["config_conflicts"][0]["address"] = 10
+    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].address") in run("address", inv)
+
+
+def test_quoted_azure_enums_reject_invented_members(tmp_path: Path):
+    """Review finding on #385: `"full" | "simplified_live"` and `"fast_path" | "wizard"` were
+    not recognized, so an invented mode passed. Unquoted clarify_status still rejects."""
+    inv = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-discover/azure-resource-inventory.json").read_text())
+
+    def run_inv(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "azure-resource-inventory.json", data)),
+                            "--skill", "azure-to-aws", "--json"))
+
+    control = run_inv("cluster-omit", inv)
+    assert ("ENUM_VIOLATION", "metadata.clustering_mode") not in control
+    for mode in ("full", "simplified_live"):
+        data = json.loads(json.dumps(inv))
+        data["metadata"]["clustering_mode"] = mode
+        assert ("ENUM_VIOLATION", "metadata.clustering_mode") not in run_inv("cluster-" + mode, data) - control
+    bad = json.loads(json.dumps(inv))
+    bad["metadata"]["clustering_mode"] = "invented-mode"
+    assert ("ENUM_VIOLATION", "metadata.clustering_mode") in run_inv("cluster-bad", bad)
+
+    pref = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify-fast-path/preferences.json").read_text())
+
+    def run_pref(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
+                            "--skill", "azure-to-aws", "--json"))
+
+    for mode in ("fast_path", "wizard"):
+        ok = json.loads(json.dumps(pref))
+        ok["metadata"]["clarify_mode"] = mode
+        assert ("ENUM_VIOLATION", "metadata.clarify_mode") not in run_pref("mode-" + mode, ok)
+    bad = json.loads(json.dumps(pref))
+    bad["metadata"]["clarify_mode"] = "invented-mode"
+    assert ("ENUM_VIOLATION", "metadata.clarify_mode") in run_pref("mode-bad", bad)
+
+
+def test_azure_user_stated_db_size_is_optional(tmp_path: Path):
+    """Review finding on #385: Step 3b writes user_stated_size_gib and the example omitted it,
+    so recording the user's 120 GiB failed. Absence, and the measured audit trail, stay valid."""
+    src = PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify-fast-path/preferences.json"
+    pref = json.loads(src.read_text())
+    measured = pref["data"]["db_cutover"]["largest_relational_db_gib"]
+    coverage = pref["data"]["db_cutover"]["size_coverage"]
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
+                            "--skill", "azure-to-aws", "--json"))
+
+    assert ("UNKNOWN_KEY", "data.db_cutover.user_stated_size_gib") not in run("before", pref)
+    confirmed = json.loads(json.dumps(pref))
+    row = confirmed["data"]["db_cutover"]
+    row["user_stated_size_gib"] = 120
+    row["value"] = "dump_restore"
+    row["source"] = "user_confirmed_at_generate"
+    row["deferred_to_generate"] = False
+    confirmed["metadata"]["deferred_to_generate"] = [
+        k for k in confirmed["metadata"].get("deferred_to_generate", []) if k != "data.db_cutover"
+    ]
+    confirmed["metadata"]["questions_defaulted"] = [
+        k for k in confirmed["metadata"].get("questions_defaulted", []) if k != "data.db_cutover"
+    ]
+    assert run("confirmed", confirmed) == set(), run("confirmed", confirmed)
+    assert confirmed["data"]["db_cutover"]["largest_relational_db_gib"] == measured
+    assert confirmed["data"]["db_cutover"]["size_coverage"] == coverage
+    extra = json.loads(json.dumps(confirmed))
+    extra["data"]["db_cutover"]["invented"] = 1
+    assert ("UNKNOWN_KEY", "data.db_cutover.invented") in run("extra", extra)
+
+
+def test_azure_workshop_index_records_capture_state(tmp_path: Path):
+    """Review finding on #385/#387: the index example omitted the fields workshop-refresh
+    writes (inventory_fingerprint, active_scenario_id, max_scenarios), so baseline capture
+    and Apply/resume failed. A simple active_scenario_id resume and a fuller resume that
+    appends a new scenario, plus omitting the optional fields entirely, must all stay valid."""
+    doc = PLUGIN_ROOT / "skills/azure-to-aws/references/shared/schema-workshop-scenarios.md"
+    index = _doc_example(doc, "scenarios/index.json")
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "scenarios/index.json", data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    assert run("baseline", index) == set(), index
+    active = json.loads(json.dumps(index))
+    active["active_scenario_id"] = "scenario-002"
+    assert run("active", active) == set()
+    resumed = json.loads(json.dumps(index))
+    resumed["active_scenario_id"] = "scenario-002"
+    resumed["scenarios"].append({
+        "scenario_id": "scenario-002",
+        "label": "Graviton",
+        "created_at": "2026-10-02T00:00:00Z",
+        "preference_patch": {},
+        "totals": {"non_optimized_monthly": 1, "right_sized_monthly": 1},
+        "pricing_source": "cached",
+        "design_snapshot": "scenarios/scenario-002/aws-design.json",
+        "estimate_snapshot": "scenarios/scenario-002/estimation-infra.json",
+    })
+    assert run("resume", resumed) == set()
+    omitted = json.loads(json.dumps(index))
+    del omitted["inventory_fingerprint"]
+    del omitted["active_scenario_id"]
+    del omitted["max_scenarios"]
+    assert run("omitted", omitted) == set()
+    bad = json.loads(json.dumps(index))
+    bad["invented"] = 1
+    assert ("UNKNOWN_KEY", "invented") in run("bad", bad)
+
+
+def test_gcp_inventory_estimate_accepts_the_cache_category(tmp_path: Path):
+    """Review finding on #385: estimate-infra.md records Memorystore under breakdown.cache."""
+    est = json.loads((PLUGIN_ROOT / "fixtures/gcp-decision-gate/after-decide-complete/estimation-infra.json").read_text())
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "estimation-infra.json", data)),
+                            "--skill", "gcp-to-aws", "--json"))
+
+    control = run("base", est)
+    est.setdefault("current_costs", {})["source"] = "inventory_estimate"
+    est["current_costs"].setdefault("breakdown", {})["cache"] = 10
+    assert run("cache", est) - control == set()
+    bad = json.loads(json.dumps(est))
+    bad["current_costs"]["breakdown"]["invented"] = 1
+    assert ("UNKNOWN_KEY", "current_costs.breakdown.invented") in run("bad", bad)
+
+
+def test_workshop_snapshots_reuse_the_active_contracts(tmp_path: Path):
+    """Review finding on #385: scenario copies skipped the active shape, or had no contract."""
+    est = json.loads((PLUGIN_ROOT / "fixtures/gcp-decision-gate/after-decide-complete/estimation-infra.json").read_text())
+    doc = PLUGIN_ROOT / "skills/gcp-to-aws/references/shared/schema-estimate-infra.md"
+    est["projected_costs"]["scenario_deltas"] = _doc_example(doc, "Cost tiers")["scenario_deltas"]
+
+    def run_gcp(name, artifact, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, artifact, data)),
+                            "--skill", "gcp-to-aws", "--no-baseline", "--json"))
+
+    for artifact in ("estimation-infra.json", "scenarios/scenario-017.estimation-infra.json"):
+        bad = json.loads(json.dumps(est))
+        bad["projected_costs"]["scenario_deltas"]["bogus"] = []
+        assert ("UNKNOWN_KEY", "projected_costs.scenario_deltas.bogus") in run_gcp("gcp-" + artifact, artifact, bad)
+
+    pref = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify/preferences.json").read_text())
+    design = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-design/aws-design.json").read_text())
+    azure_est = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-estimate/estimation-infra.json").read_text())
+
+    def run_az(name, artifact, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, artifact, data)),
+                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
+
+    pairs = (
+        ("preferences.json", "scenarios/scenario-001.preferences.json", pref, "clarify_status", "invented-status", "ENUM_VIOLATION"),
+        ("aws-design.json", "scenarios/scenario-001.aws-design.json", design, None, None, "MISSING_REQUIRED"),
+        ("estimation-infra.json", "scenarios/scenario-001.estimation-infra.json", azure_est, "complexity_tier", "enormous", "SCHEMA_VIOLATION"),
+    )
+    for active, snap, data, key, value, code in pairs:
+        bad = json.loads(json.dumps(data))
+        if key == "clarify_status":
+            bad["clarify_status"] = value
+            path = "clarify_status"
+        elif code == "MISSING_REQUIRED":
+            del bad["services"][0]["routing_provenance"]
+            path = "services[0].routing_provenance"
+        else:
+            bad["complexity_tier"] = value
+            path = "complexity_tier"
+        assert (code, path) in run_az("a-" + active, active, bad)
+        assert (code, path) in run_az("s-" + snap, snap, bad)
+        assert "NO_CONTRACT" not in {c for c, _ in run_az("s-" + snap, snap, bad)}
+
+
+def test_heroku_scenario_accepts_recommendation_outcome(tmp_path: Path):
+    """Review finding on #385: workshop-invariants.md permits a nullable recommendation_outcome."""
+    sc = json.loads((PLUGIN_ROOT / "fixtures/heroku-workshop/after-arm64-reprice/scenarios/scenario-002.json").read_text())
+
+    def run(name, data):
+        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "scenarios/scenario-002.json", data)),
+                            "--skill", "heroku-to-aws", "--json"))
+
+    control = run("base", sc)
+    for value in ("conditional_go", None):
+        ok = json.loads(json.dumps(sc))
+        ok["estimation_summary"]["recommendation_outcome"] = value
+        assert ("UNKNOWN_KEY", "estimation_summary.recommendation_outcome") not in run(str(value), ok)
+        assert run(str(value), ok) - control == set()
+    bad = json.loads(json.dumps(sc))
+    bad["estimation_summary"]["invented"] = 1
+    assert ("UNKNOWN_KEY", "estimation_summary.invented") in run("bad", bad)
 
 
 def test_azure_quoted_preference_enums_reject_unknown_values(tmp_path: Path):
@@ -722,12 +1253,11 @@ def test_azure_quoted_preference_enums_reject_unknown_values(tmp_path: Path):
     assert ("ENUM_VIOLATION", "clarify_status") in run("status-bad", bad)
 
 
+
 def test_azure_discovery_verdict_is_required(tmp_path: Path):
-    """Review finding on #386: `metadata.clarify_fast_path` is REQUIRED on a comment inside
-    the object, which the parser dropped, so a discovery inventory without the verdict passed."""
+    """Review finding on #385: the REQUIRED marker inside clarify_fast_path was dropped."""
     src = PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-discover/azure-resource-inventory.json"
     inv = json.loads(src.read_text())
-    assert inv["metadata"]["clarify_fast_path"]["eligible"] is False
 
     def run(name, data):
         return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "azure-resource-inventory.json", data)),
@@ -737,13 +1267,6 @@ def test_azure_discovery_verdict_is_required(tmp_path: Path):
     fresh = json.loads(json.dumps(inv))
     del fresh["metadata"]["clarify_fast_path"]
     assert ("MISSING_REQUIRED", "metadata.clarify_fast_path") in run("omitted", fresh)
-    still = json.loads(json.dumps(inv))
-    still["metadata"]["clarify_fast_path"] = {"eligible": False, "reasons_ineligible": ["has_vm"]}
-    assert ("MISSING_REQUIRED", "metadata.clarify_fast_path") not in run("ineligible", still)
-    # the inline resource requirement was already enforced and stays enforced
-    dropped = json.loads(json.dumps(inv))
-    del dropped["resources"][0]["azure_type_provenance"]
-    assert ("MISSING_REQUIRED", "resources[0].azure_type_provenance") in run("provenance", dropped)
 
 
 def test_gcp_estimate_snapshots_use_the_active_estimate_shape(tmp_path: Path):
@@ -773,120 +1296,3 @@ def test_gcp_estimate_snapshots_use_the_active_estimate_shape(tmp_path: Path):
         bad["pricing_source"]["services_by_source"]["live"] = ["Fargate"]
         assert ("UNKNOWN_KEY", "pricing_source.services_by_source.live") in run("bad-" + artifact, artifact, bad)
 
-
-def test_azure_preferences_follow_the_producer_route(tmp_path: Path):
-    """Review finding on #387: the infra shape was the only preferences contract, so an
-    AI-only file failed clarify_status and the mixed flow's AI rows were unknown keys."""
-    infra = json.loads((PLUGIN_ROOT / "fixtures/azure-iac-terraform/after-clarify/preferences.json").read_text())
-    rows = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai.md",
-                        "Step 3: Rows returned")
-    mixed = json.loads(json.dumps(infra))
-    mixed.update(rows)
-
-    def run(name, data):
-        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "preferences.json", data)),
-                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
-
-    assert ("MISSING_REQUIRED", "clarify_status") not in run("infra", infra)
-    assert run("mixed", mixed) - run("infra", infra) == set()
-    bad = json.loads(json.dumps(mixed))
-    bad["not_a_preference"] = 1
-    assert ("UNKNOWN_KEY", "not_a_preference") in run("mixed-bad", bad)
-    bad = json.loads(json.dumps(mixed))
-    bad["workloads"] = [42]
-    assert ("TYPE_MISMATCH", "workloads[0]") in run("mixed-scalar", bad)
-
-    ai = _doc_example(PLUGIN_ROOT / "skills/azure-to-aws/references/phases/clarify/clarify-ai-only.md",
-                      "preferences.json (AI-only)")
-    assert run("ai", ai) == set(), run("ai", ai)
-    omitted = json.loads(json.dumps(ai))
-    del omitted["workloads"]
-    assert ("MISSING_REQUIRED", "workloads") in run("ai-omit", omitted)
-    dropped = json.loads(json.dumps(ai))
-    del dropped["ai_constraints"]["ai_framework"]
-    assert ("MISSING_REQUIRED", "ai_constraints.ai_framework") in run("ai-framework", dropped)
-    invented = json.loads(json.dumps(ai))
-    invented["metadata"]["invented"] = 1
-    assert ("UNKNOWN_KEY", "metadata.invented") in run("ai-invented", invented)
-
-    # Review finding: Q1 is documented as select-all with a ["direct"] array default,
-    # skipped/defaulted Q1.5 compliance is documented as appending a
-    # metadata.report_caveats entry, and Step 3's prose permits per-constraint `source`
-    # provenance. Each of these three documented variations independently used to fail
-    # against the committed example (ai_framework typed as a bare string, report_caveats
-    # absent from metadata, source never accepted) even though the literal, unmodified
-    # example passed. Prove the producer contract now actually accepts the documented
-    # shapes it describes, not only its own single literal example.
-    multi_framework = json.loads(json.dumps(ai))
-    multi_framework["ai_constraints"]["ai_framework"]["value"] = ["direct", "langchain"]
-    assert run("ai-multi-framework", multi_framework) == set(), run("ai-multi-framework", multi_framework)
-    with_caveat = json.loads(json.dumps(ai))
-    with_caveat["metadata"]["report_caveats"] = ["Compliance requirements were not confirmed by the user"]
-    assert run("ai-caveat", with_caveat) == set(), run("ai-caveat", with_caveat)
-    with_source = json.loads(json.dumps(ai))
-    with_source["design_constraints"]["target_region"]["source"] = "discovery.ai-workload-profile.json"
-    assert run("ai-source", with_source) == set(), run("ai-source", with_source)
-
-    # Review finding: workloads[0].call_sites is declared `"call_sites": [{ "file": ...,
-    # "line": 1 }], // REQUIRED` -- an inline array of objects on one line. Before the
-    # strip_jsonc key-attribution fix, the trailing comment bound to `line` (the last key
-    # opened on the line, nested inside the array) instead of `call_sites` (the enclosing
-    # field), so omitting the entire call_sites array passed with no finding in both Azure
-    # preferences routes. model_id is the control: a plain sibling, correctly flagged
-    # either way, proving the fix did not just start over-flagging unrelated keys.
-    ai_no_call_sites = json.loads(json.dumps(ai))
-    del ai_no_call_sites["workloads"][0]["call_sites"]
-    assert ("MISSING_REQUIRED", "workloads[0].call_sites") in run("ai-no-call-sites", ai_no_call_sites)
-    ai_no_model_id = json.loads(json.dumps(ai))
-    del ai_no_model_id["workloads"][0]["model_id"]
-    assert ("MISSING_REQUIRED", "workloads[0].model_id") in run("ai-no-model-id", ai_no_model_id)
-    # the infra verdict stays required on the infra route
-    no_status = json.loads(json.dumps(infra))
-    no_status.pop("clarify_status", None)
-    assert ("MISSING_REQUIRED", "clarify_status") in run("infra-status", no_status)
-
-
-def test_gcp_drift_values_keep_their_json_types(tmp_path: Path):
-    """Review finding on #387: the live-discovery example typed drift values as strings,
-    so a numeric or boolean config change failed."""
-    inv = json.loads((PLUGIN_ROOT / "fixtures/gcp-workshop/seed/gcp-resource-inventory.json").read_text())
-    inv["live_metadata"] = {
-        "found": True,
-        "drift": {"config_conflicts": [{
-            "address": "google_compute_disk.d",
-            "field": "size_gb",
-            "terraform_value": 10,
-            "live_value": 20,
-        }]},
-    }
-
-    def run(name, data):
-        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "gcp-resource-inventory.json", data)),
-                            "--skill", "gcp-to-aws", "--json"))
-
-    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in run("num", inv)
-    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = False
-    inv["live_metadata"]["drift"]["config_conflicts"][0]["live_value"] = True
-    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].live_value") not in run("bool", inv)
-    inv["live_metadata"]["drift"]["config_conflicts"][0]["terraform_value"] = "db-f1-micro"
-    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].terraform_value") not in run("str", inv)
-    inv["live_metadata"]["drift"]["config_conflicts"][0]["address"] = 10
-    assert ("TYPE_MISMATCH", "live_metadata.drift.config_conflicts[0].address") in run("address", inv)
-
-
-def test_azure_workshop_index_records_capture_state(tmp_path: Path):
-    """Review finding on #387: the index example omitted the fields workshop-refresh writes."""
-    doc = PLUGIN_ROOT / "skills/azure-to-aws/references/shared/schema-workshop-scenarios.md"
-    index = _doc_example(doc, "scenarios/index.json")
-
-    def run(name, data):
-        return _errors(_run("--run-dir", str(_write_run(tmp_path, name, "scenarios/index.json", data)),
-                            "--skill", "azure-to-aws", "--no-baseline", "--json"))
-
-    assert run("baseline", index) == set(), index
-    active = json.loads(json.dumps(index))
-    active["active_scenario_id"] = "scenario-002"
-    assert run("active", active) == set()
-    bad = json.loads(json.dumps(index))
-    bad["invented"] = 1
-    assert ("UNKNOWN_KEY", "invented") in run("bad", bad)

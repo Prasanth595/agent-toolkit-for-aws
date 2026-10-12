@@ -94,6 +94,45 @@ Say a row name to change it — I'll re-run Design and Estimate and show this pa
 [C] Generate the migration artifacts — Terraform, migration scripts, and docs
 ```
 
+For an AI-only run (Step 1 item 0 — no `estimation-infra.json` because
+`azure-resource-inventory.json` is absent), present the gate without option B
+(there is no infra to reprice) and replace option C's label with the artifact
+route Generate will actually emit. Resolve that route in this order — the
+OpenRouter subroute wins over `migration_path`, because `generate-artifacts-ai.md`
+Step 3B does — and then show only the matching label:
+
+1. **OpenRouter subroute**, when `aws-design-ai.json` →
+   `code_migration.openrouter_path` is set, or `ai-workload-profile.json` has a
+   `base_url` containing `openrouter.ai`:
+   - `same_model_mantle` → `[C] Generate the Mantle migration script and A/B test harness`
+     (Step 3B skips gateway config and runs Step 1M; no provider adapter).
+   - `direct` → `[C] Generate the Bedrock setup script, provider adapter, and A/B test harness`
+     (Step 3B skips gateway config and emits the adapter).
+   - `litellm`, `keep_openrouter`, or absent → `[C] Generate the gateway config, Bedrock setup script, and A/B test harness`
+     (absent defaults to litellm). Do not promise a provider adapter on these three.
+2. **Otherwise** read `ai_architecture.code_migration.migration_path`:
+   - `mantle_openai_responses` (Design's spelling) or `mantle` → the Mantle label above.
+   - `converse`, `direct`, or `gpt-oss` → the adapter label above.
+     `converse` is a Converse client swap, not a Mantle script and not gateway config.
+   - `llm_router` / `api_gateway` / `voice_platform` / `framework` → the gateway
+     label above. This bullet does not apply when step 1 already matched an
+     OpenRouter subroute.
+   - **absent/missing `migration_path`** → consult the confirmed framework in
+     `preferences.json` → `ai_constraints.ai_framework.value` (an ARRAY) BEFORE
+     defaulting: if that array includes any of `llm_router` / `api_gateway` /
+     `voice_platform` / `framework`, show the gateway label above; otherwise show
+     the adapter label. This mirrors `generate-artifacts-ai.md` Step 0's
+     framework-based dispatch (a gateway framework routes to Step 3B gateway
+     config, not the adapter), so the menu label matches the artifact Generate
+     emits when `migration_path` was never recorded.
+
+Whichever label is shown, add a line to the presented gate stating that this
+does not deploy any servers and does not rewrite the existing application
+code — but it DOES write `ai-migration/bedrock_monitoring.tf` (budget,
+anomaly detection, inference profiles — Step 3F, emitted on every path): say
+so explicitly rather than claiming "no infrastructure," since that file is
+real Terraform the user will see land in Generate's output.
+
 **The "Assumptions behind this number" block** is built from `preferences.json`:
 one row per key in `metadata.questions_defaulted[]`, plus one per key in
 `metadata.deferred_to_generate[]` (labelled "confirmed before Generate"). The two lists
