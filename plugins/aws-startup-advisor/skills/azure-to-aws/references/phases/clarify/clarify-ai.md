@@ -193,25 +193,6 @@ and is REQUIRED on `DETECTED` applies here the same as the infra flow.
 ]
 ```
 
-### `workloads[]`
-
-```jsonc
-[
-  {
-    "workload_id": "wl-1", // REQUIRED
-    "model_id": "gpt-4o", // REQUIRED
-    "sdk_method": "chat.completions", // REQUIRED
-    "capability": "chat", // REQUIRED
-    "capability_confidence": "high", // REQUIRED
-    "structured_output": false, // REQUIRED
-    "call_sites": [{ "file": "app.py", "line": 1 }], // REQUIRED
-    "target_bedrock_model": "anthropic.claude", // REQUIRED
-    "priority": "balanced", // REQUIRED
-    "latency_tier": "standard" // REQUIRED
-  }
-]
-```
-
 ## Who consumes these
 
 | Field                                                                                  | Consumer                                            |
