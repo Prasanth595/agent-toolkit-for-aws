@@ -1,5 +1,13 @@
 # Phase 4: Estimate AWS Costs (Orchestrator)
 
+## Telemetry boundary
+
+Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including
+when this phase is executed inline by another skill. In `cli` mode, reconcile
+after each persisted `.phase-status.json` update and before waiting, returning,
+or advancing. This includes the post-Estimate decision and workshop state writes.
+In `hook` mode, leave reporting to the configured hooks.
+
 **Execute ALL steps in order. Do not skip or optimize.**
 
 ## Step 0: Pricing Mode Selection
@@ -178,11 +186,14 @@ commit." Suggest at most one.
      `$MIGRATION_DIR/decision-report.html` and `$MIGRATION_DIR/DECISION.md`
      per that file's decision-mode rules (no appendices, no Terraform, CTA
      footer). Validate with
-     `python3 "$PLUGIN_ROOT/scripts/validate-migration-report.py" "$MIGRATION_DIR/decision-report.html" --mode decision`
+     `python3 "$PLUGIN_ROOT/scripts/validate-migration-report.py" "$MIGRATION_DIR/decision-report.html" --mode decision --migration-dir "$MIGRATION_DIR"`
      and pass `--estimation-infra` / `--estimation-ai` / `--aws-design` when
      those files exist so the Cost Optimization gate can fire
      (absolute paths — cwd must not be load-bearing) and fix failures before
-     presenting.
+     presenting. `--migration-dir` is required on a real run: it is how the
+     validator finds `scenarios/index.json`, so the what-if column check
+     (Region, HA, Compute, Arch, the three tiers, Complexity) fires when
+     Workshop produced two or more scenarios before the user chose A.
   2. Set `run_mode: "decide"` and `current_phase: "complete"` in
      `.phase-status.json` (`phases.generate` **stays** `"pending"` — this
      combination means "decision complete, execution available on request";
@@ -204,24 +215,68 @@ commit." Suggest at most one.
        the Terraform and migration scripts' — everything is saved and I'll pick
        up from here."
      - If step 3 printed `PLAN_OK`, close with that same sentence and also name
-       `plan.json` in it, with **AWS Startups Migrate** as a Markdown link (the
-       close is prose, so a link renders here, unlike the fenced Generate
-       produced-list). Substitute the run's `run_id` (from `.phase-status.json`),
-       lowercased if it is a UUID — e.g. "Your decision report is saved at
+       `plan.json` in it as plain text, with no link (the What's next block
+       below carries the only link) — e.g. "Your decision report is saved at
        `decision-report.html` (plus a Slack-friendly `DECISION.md`), and your
-       uploadable plan at `plan.json` — upload it to
-       [AWS Startups Migrate](https://startups.aws.com/startups/en-US/migrate/credits?source=plugin&run=<run_id>)
-       for up to $1,500 in credits. If you decide to migrate, say 'generate the
+       uploadable plan at `plan.json` — upload it to AWS Startups Migrate
+       to see if you qualify for AWS credits. If you decide to migrate, say 'generate the
        Terraform and migration scripts' — everything is saved and I'll pick up
-       from here." The `plan.json` filename appears in EXACTLY ONE place — this
-       close — and NEVER in the What's next block below.
+       from here."
   5. **Web-handoff — only when step 3 printed `PLAN_OK`** (if it printed
-     `PLAN_SKIP`, omit this whole block; there is no file to upload). Append the
-     What's next block below, verbatim, replacing `<run_id>` in the link with the
+     `PLAN_SKIP`, omit this whole step; there is no file to upload).
+
+     **Show the user their `plan.json`.** The `.migration` folder is hidden by default
+     on macOS and Linux, so open the file's location for them instead of leaving them
+     to find it. Run the command for the user's OS once, as an ordinary command — the
+     agent's own permission prompt is the user's choice, so do not ask separately
+     first:
+
+     - macOS: `open -R "$MIGRATION_DIR/plan.json"` — opens Finder with the file
+       selected, even inside the hidden folder.
+     - Windows: `MSYS_NO_PATHCONV=1 explorer.exe /select,"<absolute Windows path to plan.json>"`
+       — the prefix stops Git Bash from rewriting `/select,` as a path (drop it in
+       PowerShell or cmd). In Git Bash, get the Windows path with
+       `cygpath -w "$MIGRATION_DIR/plan.json"`. `explorer.exe` exits non-zero even
+       when it succeeds, so treat it as opened unless it prints an error.
+     - Linux: `xdg-open "$MIGRATION_DIR"` — opens the folder (it cannot select the
+       file).
+
+     Then show exactly ONE of the two messages below, as plain text (not in a code
+     block). Do not reword them — this copy is owned by the web experience.
+
+     If the folder opened:
+
+     > **The folder is open with your plan.json selected.**
+
+     On Linux, where the file cannot be selected, show **The folder with your
+     plan.json is open.** instead.
+
+     If the command failed, was not available, or the user declined it, show this
+     as its own message, separate from the phase summary, and do not add any other
+     explanation of why it did not open. Replace `<absolute path to plan.json>`
+     with the real absolute path:
+
+     > The folder did not open. The open command is blocked in your permissions.
+     >
+     > Your plan.json is saved at:
+     > `<absolute path to plan.json>`
+     >
+     > The .migration folder is hidden by default on macOS. In Finder, press Command + Shift + Period (.) to show it.
+
+     On Linux, use this last line instead: "The .migration folder is hidden by
+     default on Linux. In your file manager, press Ctrl + H to show it." On Windows,
+     the folder is not hidden, so omit the last line.
+
+     Adjust only the first line: if the migration report also failed to open, start
+     with "The report and the folder did not open." instead; keep "The open command
+     is blocked in your permissions." only when a permission rule blocked it, and
+     drop that sentence when the user declined or the command failed for another
+     reason.
+
+     Then append the What's next block below, verbatim, replacing `<run_id>` in the link with the
      run's `run_id` (from `.phase-status.json`), lowercased if it is a UUID so the
      `run=` value matches the plan's `runId`. It MUST begin with the "💬 What's
-     next" heading — do NOT add a `plan.json` line (or any file line) above or
-     inside it. The call-to-action must be a Markdown link so it renders as
+     next" heading. The call-to-action must be a Markdown link so it renders as
      clickable text with no bare URL. Do not reword it — this copy is owned by the
      web experience:
 
@@ -229,17 +284,16 @@ commit." Suggest at most one.
      >
      > - **Refine your plan**
      >   Tell me what to change. For example: "use Fargate instead," "make it multi-region," or "reduce the cost."
-     > - **Claim your credits**
-     >   When you're happy with your plan, upload it below to apply for up to $1,500 in AWS migration credits.
+     > - **See your AWS credits**
+     >   Sign in or create an account on AWS Startups Migrate, then upload plan.json to see the AWS migration credits you qualify for.
      >
-     > [🎉 Get up to $1,500 in AWS migration credits →](https://startups.aws.com/startups/en-US/migrate/credits?source=plugin&run=<run_id>)
+     > [Go to AWS Startups Migrate →](https://startups.aws.com/startups/en-US/migrate/credits?source=plugin&run=<run_id>)
      >
-     > Upload your plan to AWS Startups Migrate to see what you qualify for and unlock:
+     > After you upload, you also get:
      >
      > - Interactive plan dashboard
      > - Monthly cost estimate
-     > - Migration paths: AI Agent, AWS Expert, or AWS Partner
-     > - Up to $1,500 in AWS migration credits
+     > - Migration paths: AI agent, AWS expert, or AWS Partner
 
      Ship note: this reaches customers only after the import page and the
      ImportPlan API are both live in production.
