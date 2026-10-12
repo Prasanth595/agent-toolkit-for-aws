@@ -358,6 +358,135 @@ def test_mutating_the_real_anthropic_header_to_post_is_caught(tmp_path: Path) ->
     assert "GET requests only" in result.stderr or "non-GET" in result.stderr
 
 
+def test_soft_wrapped_claim_across_two_lines_is_caught(tmp_path: Path) -> None:
+    """Regression for the Markdown-soft-wrap finding: 'This runs GET
+    requests' and 'only.' on the next line render as one sentence and must
+    be read as one claim, not two unmatched fragments."""
+    text = _UNQUALIFIED_POST_FILE.replace(
+        "This runs GET requests only, against a fixed list of usage endpoints.",
+        "This runs GET requests\nonly, against a fixed list of usage endpoints.",
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "GET requests" in result.stderr
+
+
+def test_soft_wrapped_exception_still_qualifies_the_claim(tmp_path: Path) -> None:
+    """The wrapped counterpart must still pass: a claim AND its exception,
+    both soft-wrapped, in the same logical block."""
+    text = _QUALIFIED_POST_FILE.replace(
+        "This runs GET requests against a fixed list of usage endpoints, plus one\n"
+        "read-only POST to /analytics/query for an aggregate split.",
+        "This runs GET requests against a fixed list of usage\nendpoints, plus one "
+        "read-only POST to /analytics/query\nfor an aggregate split.",
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_adjacent_bullet_exception_does_not_qualify_a_different_bullet(tmp_path: Path) -> None:
+    """Regression for the list-item finding: two adjacent bullets with no
+    blank line between them must stay separate logical blocks, so the
+    second bullet's exception cannot silence the first bullet's unqualified
+    claim."""
+    text = _UNQUALIFIED_POST_FILE.replace(
+        "This runs GET requests only, against a fixed list of usage endpoints.",
+        "- This runs GET requests only.\n"
+        "- Forbidden: other calls, except POST /analytics/query.",
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "This runs GET requests only." in result.stderr
+
+
+def test_sibling_bullet_with_own_exception_still_passes(tmp_path: Path) -> None:
+    """The same two-bullet shape, but the FIRST bullet carries its own
+    exception rather than borrowing the second bullet's — must still pass."""
+    text = """\
+# Discover Phase: Example Usage API Discovery
+
+## Step 0: Consent Gate
+
+- This runs GET requests only, except POST /analytics/query.
+- A second, unrelated bullet with no claim at all.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /analytics/query` | per-model split | analytics.json |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+_GET_POST_PATCH_TABLE = """\
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Endpoint | Purpose | Output file |
+| - | -------- | ------- | ------------ |
+| 1 | `GET /usage` | usage | usage.json |
+| 2 | `POST /analytics/query` | per-model split | analytics.json |
+| 3 | `PATCH /settings` | update settings | settings.json |
+"""
+
+
+def test_exception_naming_only_one_of_two_undisclosed_methods_still_fails(tmp_path: Path) -> None:
+    """Regression for the multi-method finding: a table calling GET, POST,
+    and PATCH, with a claim excepting only POST, must still fail on the
+    undisclosed PATCH."""
+    text = (
+        "# Discover Phase: Example Usage API Discovery\n\n"
+        "## Step 0: Consent Gate\n\n"
+        "This runs GET requests only, except POST /analytics/query, against a "
+        "fixed list of usage endpoints.\n"
+        + _GET_POST_PATCH_TABLE
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "PATCH" in result.stderr
+
+
+def test_exception_naming_every_undisclosed_method_passes(tmp_path: Path) -> None:
+    """The same GET/POST/PATCH table, but the claim excepts both non-GET
+    methods — must pass."""
+    text = (
+        "# Discover Phase: Example Usage API Discovery\n\n"
+        "## Step 0: Consent Gate\n\n"
+        "This runs GET requests only, except POST /analytics/query and PATCH "
+        "/settings, against a fixed list of usage endpoints.\n"
+        + _GET_POST_PATCH_TABLE
+    )
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 0, result.stderr
+
+
+def test_unreadable_file_fails_closed_instead_of_being_skipped(tmp_path: Path) -> None:
+    """Regression for the unreadable-input finding: a file that can't be
+    decoded as UTF-8 must be reported as a failure (and never counted among
+    'checked' files), not silently skipped as if it had passed."""
+    root = _write_fixture(tmp_path, _UNQUALIFIED_POST_FILE)
+    (root / TARGET_REL).write_bytes(
+        _UNQUALIFIED_POST_FILE.encode("utf-8") + b"\xff"
+    )
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "could not read file" in result.stderr
+    assert "OK (1 discovery sub-file(s) checked)" not in result.stdout
+
+
 def test_real_plugin_discovery_files_pass_on_main() -> None:
     """Smoke test against the actual committed discover-*-api.md files (not
     a scratch fixture) — this is the gate's real-world assertion: whatever

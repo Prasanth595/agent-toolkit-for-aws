@@ -166,21 +166,44 @@ def _methods_in_capture_section(text: str) -> tuple[set[str], bool]:
     return set(), True
 
 
+# A new Markdown list item ("- ", "* ", "+ ", or "1. ") at or above the
+# current item's indentation starts a NEW logical block. A line indented
+# deeper than the item marker (a wrapped continuation, or a nested item) stays
+# part of the same block. Without this, two adjacent bullets with no blank
+# line between them — the common case in this plugin's prose — are merged
+# into one paragraph, letting a later bullet's exception wrongly qualify an
+# earlier bullet's unrelated claim.
+_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+\.)\s+")
+
+
 def _paragraphs_with_line_numbers(text: str) -> list[tuple[int, str]]:
-    """Split into blank-line-delimited paragraphs, each tagged with its
-    starting line number. A Markdown bullet that wraps across lines (common
-    in this plugin's prose) is one paragraph, so an exception clause stated
-    two sentences into the same bullet still counts as qualifying it — only a
-    DIFFERENT paragraph repeating the claim with no exception is a failure."""
+    """Split into logical blocks, each tagged with its starting line number.
+    A block ends at a blank line, OR at the next list item written at the
+    same or a shallower indent than the current one (a sibling or outer
+    bullet) — whichever comes first. A line that wraps across physical lines
+    with no blank line and no new list-item marker (plain prose, or a nested
+    continuation line) stays part of the same block, so an exception clause
+    stated two sentences — or two soft-wrapped lines — into the same bullet
+    still counts as qualifying it. Only a DIFFERENT block repeating the claim
+    with no exception is a failure."""
     paragraphs: list[tuple[int, str]] = []
     buf: list[str] = []
     start = 1
+    item_indent: int | None = None
     for i, line in enumerate(text.splitlines(), 1):
         if line.strip() == "":
             if buf:
                 paragraphs.append((start, "\n".join(buf)))
                 buf = []
+            item_indent = None
             continue
+        item_match = _LIST_ITEM_RE.match(line)
+        if item_match:
+            indent = len(item_match.group(1))
+            if buf and (item_indent is None or indent <= item_indent):
+                paragraphs.append((start, "\n".join(buf)))
+                buf = []
+            item_indent = indent
         if not buf:
             start = i
         buf.append(line)
@@ -189,23 +212,51 @@ def _paragraphs_with_line_numbers(text: str) -> list[tuple[int, str]]:
     return paragraphs
 
 
+def _line_for_offset(lines: list[str], offset: int) -> int:
+    """Which physical line (0-indexed, into `lines`) a character offset in
+    `" ".join(line.strip() for line in lines)` falls on — so a claim matched
+    only after joining soft-wrapped lines back into one string can still be
+    reported against a real source line."""
+    pos = 0
+    for idx, line in enumerate(lines):
+        length = len(line.strip())
+        if offset <= pos + length:
+            return idx
+        pos += length + 1  # +1 for the joining space
+    return max(len(lines) - 1, 0)
+
+
 def _unqualified_claims(text: str, non_get_methods: set[str]) -> list[tuple[int, str]]:
     """Every (line_number, offending_line) carrying a blanket GET-only claim
-    with no inline exception, anywhere in its own paragraph, for the non-GET
-    methods this file actually calls."""
+    with no inline exception, anywhere in its own logical block, for the
+    non-GET methods this file actually calls.
+
+    Methods are joined across physical lines before matching, so a claim that
+    Markdown soft-wraps across two lines ("This runs GET requests" / "only.")
+    is read as the single sentence it renders as. A block is QUALIFIED only
+    when it names an exception marker AND every actual non-GET method the
+    file calls — naming just one of several undisclosed methods does not
+    excuse the others."""
     if not non_get_methods:
         return []
     failures: list[tuple[int, str]] = []
     for para_start, para in _paragraphs_with_line_numbers(text):
-        lowered_para = para.lower()
-        has_exception = any(marker in lowered_para for marker in _EXCEPTION_MARKERS) and any(
-            method.lower() in lowered_para for method in non_get_methods
+        lines = para.splitlines()
+        normalized = " ".join(line.strip() for line in lines)
+        lowered_norm = normalized.lower()
+        has_exception = any(marker in lowered_norm for marker in _EXCEPTION_MARKERS) and all(
+            method.lower() in lowered_norm for method in non_get_methods
         )
         if has_exception:
             continue
-        for offset, line in enumerate(para.splitlines()):
-            if any(p.search(line) for p in _BLANKET_CLAIM_PATTERNS):
-                failures.append((para_start + offset, line.strip()))
+        seen: set[int] = set()
+        for pattern in _BLANKET_CLAIM_PATTERNS:
+            for m in pattern.finditer(normalized):
+                line_idx = _line_for_offset(lines, m.start())
+                if line_idx in seen:
+                    continue
+                seen.add(line_idx)
+                failures.append((para_start + line_idx, lines[line_idx].strip()))
     return failures
 
 
@@ -224,12 +275,18 @@ def audit(plugin: Path) -> tuple[list[str], list[str], int]:
         )
 
     failures: list[str] = []
+    checked = 0
     for path in files:
+        rel = str(path.relative_to(plugin))
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
+        except (UnicodeDecodeError, OSError) as e:
+            # An unreadable file was inspected for NOTHING, not confirmed
+            # clean — it must count as a failure, not a silent skip that lets
+            # the checked-file count claim an unread input passed.
+            failures.append(f"{rel}: could not read file ({e}) — treating as a failure, not a skip")
             continue
-        rel = str(path.relative_to(plugin))
+        checked += 1
 
         real_methods, unrecognized_table = _methods_in_capture_section(text)
         if unrecognized_table:
@@ -254,7 +311,7 @@ def audit(plugin: Path) -> tuple[list[str], list[str], int]:
                 f"endpoint, to this line: {line!r}"
             )
 
-    return [], failures, len(files)
+    return [], failures, checked
 
 
 def main() -> int:
