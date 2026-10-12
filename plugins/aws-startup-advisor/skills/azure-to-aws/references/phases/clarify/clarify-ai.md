@@ -113,14 +113,15 @@ Q16–Q22, and write `"workloads": []` when none.
 Every row is merged into the final `preferences.json` by `clarify-assemble.md`'s Step
 "Assemble the artifact" rules 1–2: it carries `disposition`, `value`, and `default`, exactly
 like every other fragment's rows (see `clarify-global.md`'s `## Rows returned` for the same
-convention). A row whose value came from its default stays **PROPOSED** — never promoted to
-DETECTED (DETECTED means read from the estate; Design's rationale and the report distinguish
-"you chose" from "we assumed"). A `DETECTED` row additionally carries `source` naming where
-the value was read from (per `schema-preferences.md`'s `allowed_anywhere` provenance keys).
+convention). A value taken from its default stays **PROPOSED** — never promoted to DETECTED
+(DETECTED means read from the estate; Design's rationale and the report distinguish "you
+chose" from "we assumed"). A `DETECTED` row additionally carries `source` naming where the
+value was read from — `schema-preferences.md`'s rule that the justification key is `source`
+and is REQUIRED on `DETECTED` applies here the same as the infra flow.
 
 ```jsonc
 {
-  "ai_framework": { "disposition": "PROPOSED", "value": ["direct"], "default": ["direct"] },
+  "ai_framework": { "disposition": "DETECTED", "value": ["direct"], "default": ["direct"], "source": "integration.pattern + integration.gateway_type" },
   "ai_monthly_spend": {
     "disposition": "DETECTED",
     "value": "$500-$2K",
@@ -181,7 +182,7 @@ the value was read from (per `schema-preferences.md`'s `allowed_anywhere` proven
     "workload_id": "wl-1", // REQUIRED
     "model_id": "gpt-4o", // REQUIRED
     "sdk_method": "chat.completions", // REQUIRED
-    "capability": "chat", // REQUIRED
+    "capability": "text_generation", // REQUIRED — the schema-discover-ai.md / design-ai.md capability enum (text_generation, structured_output, image_generation, embedding, …), not an ad hoc "chat" value
     "capability_confidence": "high", // REQUIRED
     "structured_output": false, // REQUIRED
     "call_sites": [{ "file": "app.py", "line": 1 }], // REQUIRED
