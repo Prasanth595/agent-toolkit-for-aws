@@ -321,7 +321,12 @@ class Node:
 
 _PLACEHOLDER_RE = re.compile(r"^<.*>$")
 _ENUM_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:+\-/]+$")
-_COMMENT_ENUM_RE = re.compile(r"(?:^|[—:\-]\s*)([A-Za-z0-9_.:+\-/]+(?:\s*\|\s*[A-Za-z0-9_.:+\-/]+)+)\s*(?:$|[—(\-])")
+# A member may be a bare token or a quoted one (`"fast_path" | "wizard"`). Quotes are
+# stripped before the token check, so a quoted phrase with spaces stays free text.
+_ENUM_ALT = r"(?:`[^`]+`|\"[^\"]+\"|'[^']+'|[A-Za-z0-9_.:+\-/]+)"
+_COMMENT_ENUM_RE = re.compile(
+    rf"(?:^|[—:\-]\s*)({_ENUM_ALT}(?:\s*\|\s*{_ENUM_ALT})+)\s*(?:$|[—(\-])"
+)
 # `terraform | live | billing (or a "+"-joined set)` — members may be combined with "+"
 _JOINED_SET_RE = re.compile(r"[\"'`]?\+[\"'`]?[\s-]*joined|joined\s+(?:by|with|on)\s+[\"'`]?\+", re.I)
 
@@ -335,12 +340,19 @@ def _enum_from_string(s: str) -> Optional[Set[str]]:
     return None
 
 
+def _enum_token(raw: str) -> Optional[str]:
+    t = raw.strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'`":
+        t = t[1:-1]
+    return t if _ENUM_TOKEN_RE.match(t) else None
+
+
 def _enum_from_comment(c: str) -> Optional[Set[str]]:
     m = _COMMENT_ENUM_RE.search(c)
     if not m:
         return None
-    toks = [t.strip() for t in m.group(1).split("|")]
-    if len(toks) >= 2 and all(_ENUM_TOKEN_RE.match(t) for t in toks):
+    toks = [_enum_token(t) for t in m.group(1).split("|")]
+    if len(toks) >= 2 and all(t is not None for t in toks):
         return set(toks)
     return None
 
@@ -514,8 +526,18 @@ def parse_block(block: Block, doc: Path, findings: List[Finding]) -> Optional[Tu
                 contract=_rel(doc)))
             return None
     key_comments: Dict[str, List[str]] = {}
+    raw_lines = block.text.splitlines()
     for ln, c in comments.items():
         k = keys.get(ln)
+        if k is None:
+            # A comment on its own line inside an object belongs to the key that opened
+            # it. `metadata.clarify_fast_path`'s REQUIRED marker is written that way, and
+            # dropping it left the verdict optional.
+            prev = ln - 1
+            while prev >= 0 and not raw_lines[prev].split("//", 1)[0].strip():
+                prev -= 1
+            if prev >= 0 and prev in keys and raw_lines[prev].split("//", 1)[0].rstrip().endswith("{"):
+                k = keys[prev]
         if k is not None:
             key_comments.setdefault(k, []).append(c)
     return value, key_comments
