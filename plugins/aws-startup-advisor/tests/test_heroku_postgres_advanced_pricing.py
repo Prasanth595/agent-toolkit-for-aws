@@ -339,3 +339,114 @@ def test_schema_documents_advanced_tier_fields() -> None:
     assert "instance_count" in text
     assert "leader" in text
     assert "follower" in text
+
+
+# --- Round 6: Advanced-family detection must survive failed/skipped captures ---
+#
+# Reviewer finding (leon1418, PR #434, databaseId 4242785449,
+# estimate-cost-engine.md): round 4/5 gated the Advanced exception on
+# `config.tier == "advanced"`, but `tier` is set ONLY by a successful
+# `data:pg:info` capture (see discover-live.md). A failed, skipped, or
+# malformed capture leaves a record with NO `tier` at all, e.g. the exact
+# failure shape:
+#   {"addon_service": "heroku-postgresql", "plan": "advanced",
+#    "provider": "heroku", "monthly_price_usd": 0}
+# That record never matched `tier == "advanced"`, so it fell through to the
+# flat monthly_price_usd sum and contributed exactly $0 for a real Advanced
+# database. The fix gates on the preserved `addon_service`/`plan` identity
+# instead, which survives capture failure, and only consults `tier` /
+# `advanced_pools` after the identity match to decide the pool-sum vs.
+# unpriced_heroku branch.
+
+
+def test_cost_engine_rung2_detects_advanced_family_by_identity_not_tier() -> None:
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung2_idx = text.index("2. **Live-captured prices")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung2 = text[rung2_idx:rung3_idx]
+    assert 'addon_service == "heroku-postgresql"' in rung2
+    assert 'plan' in rung2 and '== "advanced"' in rung2
+    # The identity check must appear before the first `tier ==` condition —
+    # i.e. it is the gate, not nested inside a tier-gated clause.
+    identity_pos = rung2.index('addon_service == "heroku-postgresql"')
+    tier_pos = rung2.index('tier ==')
+    assert identity_pos < tier_pos, (
+        "the addon_service/plan identity check must be evaluated BEFORE any "
+        "tier == condition, not nested inside one"
+    )
+
+
+def test_cost_engine_rung2_marks_failed_capture_record_unpriced_not_zero() -> None:
+    """Reviewer's exact failure-shape record (databaseId 4242785449):
+
+    {"addon_service": "heroku-postgresql", "plan": "advanced",
+     "provider": "heroku", "monthly_price_usd": 0}
+
+    No `tier` key at all — this must be marked "unpriced_heroku", never
+    contribute $0 to the flat sum.
+    """
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung2_idx = text.index("2. **Live-captured prices")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung2 = text[rung2_idx:rung3_idx]
+    assert "unpriced_heroku" in rung2
+    identity_pos = rung2.index('addon_service == "heroku-postgresql"')
+    nearby = rung2[identity_pos:identity_pos + 2500]
+    assert "failed" in nearby or "skipped" in nearby or "malformed" in nearby, (
+        "rung 2 must explicitly name the failed/skipped/malformed no-tier "
+        "case near the identity check"
+    )
+    assert "unpriced_heroku" in nearby
+    assert "do NOT" in nearby and "$0" in nearby
+
+
+def test_cost_engine_rung2_covers_private_and_shield_advanced_variants() -> None:
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung2_idx = text.index("2. **Live-captured prices")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung2 = text[rung2_idx:rung3_idx]
+    assert "Private" in rung2
+    assert "Shield" in rung2
+
+
+def test_cost_engine_rung3_detects_advanced_family_by_identity_not_tier() -> None:
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung4_idx = text.index("4. **User-provided**")
+    rung3 = text[rung3_idx:rung4_idx]
+    assert 'addon_service == "heroku-postgresql"' in rung3
+    assert 'plan' in rung3 and '== "advanced"' in rung3
+    identity_pos = rung3.index('addon_service == "heroku-postgresql"')
+    tier_pos = rung3.index('tier ==')
+    assert identity_pos < tier_pos, (
+        "rung 3's identity check must gate before any tier == condition"
+    )
+
+
+def test_cost_engine_rung3_covers_failed_capture_and_private_shield() -> None:
+    text = COST_ENGINE.read_text(encoding="utf-8")
+    rung3_idx = text.index("3. **Heroku pricing cache**")
+    rung4_idx = text.index("4. **User-provided**")
+    rung3 = text[rung3_idx:rung4_idx]
+    assert "Private" in rung3
+    assert "Shield" in rung3
+    assert "failed" in rung3 or "skipped" in rung3 or "malformed" in rung3
+    assert "unpriced_heroku" in rung3
+
+
+def test_pricing_cache_rule9_gates_on_identity_not_tier() -> None:
+    text = PRICING_CACHE.read_text(encoding="utf-8")
+    usage_rules_idx = text.index("## Usage Rules")
+    rule9_idx = text.index("9. **Heroku Postgres Advanced", usage_rules_idx)
+    rule9 = text[rule9_idx:]
+    assert 'addon_service == "heroku-postgresql"' in rule9
+    assert 'plan' in rule9 and '== "advanced"' in rule9
+    identity_pos = rule9.index('addon_service == "heroku-postgresql"')
+    tier_pos = rule9.index('tier ==')
+    assert identity_pos < tier_pos, (
+        "rule 9's identity check must gate before any tier == condition"
+    )
+    # Pricing math is unchanged — still keyed off instance_count/advanced_pools.
+    assert "instance_count" in rule9
+    assert "advanced_pools" in rule9
+    assert "unpriced_heroku" in rule9
