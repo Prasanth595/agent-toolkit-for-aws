@@ -28,7 +28,12 @@ This is a textual contradiction check, not an HTTP conformance check: it does
 not call any API. It reads two things out of each `discover-*-api.md` file:
 
   1. The real HTTP methods, from the Capture Endpoint Table (the "## Step 2:
-     Capture" section's numbered table and its lead-in sentence).
+     Capture" section): either a per-row `` `METHOD /path` `` cell, or the
+     table's own "Endpoint (METHOD, ...)" header-column convention (the shape
+     the Anthropic and Azure-OpenAI tables use, where every row lists only a
+     path). If a table is present but neither shape is recognized, this is
+     reported as a failure (an unrecognized table shape), never silently
+     skipped as if the file were GET-only.
   2. Every blanket "GET only" / "non-GET" claim anywhere in the file (Security
      Contract, Step 0 consent copy, Scope Boundary FORBIDDEN bullets, or any
      other prose) via a fixed set of phrasings.
@@ -74,9 +79,21 @@ _HTTP_METHOD = r"GET|POST|PUT|PATCH|DELETE"
 _METHOD_CALL_RE = re.compile(
     rf"\b({_HTTP_METHOD})\b\s*(?:to that same base|against)?\s*[`/]"
 )
-# The table's own header-column convention when every row shares one method,
-# e.g. "Endpoint (GET, `https://api.openai.com`)" or "Every row is `GET`".
-_METHOD_HEADER_RE = re.compile(rf"\b({_HTTP_METHOD})\b")
+# The table's OWN header-column convention when every row shares one method,
+# written as a parenthesized qualifier on the "Endpoint" column header itself
+# — e.g. "| # | Endpoint (GET, `https://api.openai.com`) | ..." or
+# "Endpoint (GET)". Anchored to "Endpoint (" (not a bare word search) so it
+# only ever reads the table's own declared method, never an unrelated verb
+# mentioned anywhere else in the section — and so it has no length limit to
+# evade: the real Anthropic/Azure-OpenAI tables put this 600-800+ characters
+# after the words "Capture Endpoint Table", which a bounded slice would miss.
+_METHOD_IN_HEADER_CELL_RE = re.compile(rf"Endpoint\s*\(\s*({_HTTP_METHOD})\b")
+
+# A markdown table is present in this section: a header-separator row, e.g.
+# "| - | --- | --- |" or "|---|---|". If this matches but no method was read
+# by either pattern above, the table's shape wasn't recognized — that is a
+# gap in this script, not a GET-only file, and must fail rather than skip.
+_TABLE_PRESENT_RE = re.compile(r"^\s*\|[\s:-]+\|[\s:-]+\|", re.MULTILINE)
 
 _STEP_HEADING_RE = re.compile(r"^##\s", re.MULTILINE)
 
@@ -99,8 +116,12 @@ _BLANKET_CLAIM_PATTERNS = [
 _EXCEPTION_MARKERS = ("except", "plus one", "plus a")
 
 
-def _methods_in_capture_section(text: str) -> set[str]:
-    """The real HTTP methods this file's Capture Endpoint Table calls.
+def _methods_in_capture_section(text: str) -> tuple[set[str], bool]:
+    """Returns (real HTTP methods this file's Capture Endpoint Table calls,
+    unrecognized_table) — `unrecognized_table` is True when Step 2 plainly
+    contains a markdown table but neither method pattern read anything from
+    it, meaning this script's table-shape coverage is incomplete for this
+    file, not that the file is GET-only.
 
     Scoped to the "## Step 2: Capture" section (up to the next "## " heading)
     so a method named only in Error Handling, Security Contract prose, or the
@@ -108,28 +129,41 @@ def _methods_in_capture_section(text: str) -> set[str]:
     those sections describe policy, not endpoints."""
     match = re.search(r"^##\s+Step 2:.*$", text, re.MULTILINE)
     if not match:
-        return set()
+        return set(), False
     rest = text[match.end() :]
     end = _STEP_HEADING_RE.search(rest)
     section = rest[: end.start()] if end else rest
 
     methods: set[str] = set()
+
+    # Per-row calls, e.g. `` `GET /credits` `` or `` `POST /analytics/query` ``.
     for line in section.splitlines():
         if "|" not in line and "`" not in line:
             continue
         for m in _METHOD_CALL_RE.finditer(line):
             methods.add(m.group(1))
-    if methods:
-        return methods
 
-    # Fallback: no verb was glued to a path/backtick (an unusual table shape).
-    # Read the lead-in sentence's own verb mentions instead of reporting "no
-    # calls" for a file that plainly has a Capture Endpoint Table.
-    lead_in = section.split("Capture Endpoint Table", 1)
-    if len(lead_in) == 2:
-        for m in _METHOD_HEADER_RE.finditer(lead_in[1][:400]):
-            methods.add(m.group(1))
-    return methods
+    # The table's own "Endpoint (METHOD, ...)" header-column convention,
+    # read anywhere in the section (no length-limited slice) — this is the
+    # shape the real Anthropic and Azure-OpenAI tables use, with every row
+    # listing only a path.
+    for m in _METHOD_IN_HEADER_CELL_RE.finditer(section):
+        methods.add(m.group(1))
+
+    if methods:
+        return methods, False
+
+    # Nothing read. If the section has no markdown table at all, there is
+    # genuinely nothing to extract (not every discovery sub-file necessarily
+    # has one) — that is NOT an error.
+    if not _TABLE_PRESENT_RE.search(section):
+        return set(), False
+
+    # A table IS present and neither pattern matched it: an unrecognized
+    # table shape, not a GET-only file. Must not be treated the same as "no
+    # non-GET method found" (which skips the file as clean) — report it so
+    # the caller fails closed instead of silently passing an unchecked file.
+    return set(), True
 
 
 def _paragraphs_with_line_numbers(text: str) -> list[tuple[int, str]]:
@@ -197,7 +231,17 @@ def audit(plugin: Path) -> tuple[list[str], list[str], int]:
             continue
         rel = str(path.relative_to(plugin))
 
-        real_methods = _methods_in_capture_section(text)
+        real_methods, unrecognized_table = _methods_in_capture_section(text)
+        if unrecognized_table:
+            failures.append(
+                f"{rel}: Step 2 contains a Capture Endpoint Table but no HTTP "
+                f"method could be read from it (neither a per-row `METHOD "
+                f"/path` cell nor an 'Endpoint (METHOD, ...)' header cell "
+                f"matched) — fix the table shape, or this script's method "
+                f"patterns, rather than letting this file pass unchecked"
+            )
+            continue
+
         non_get = real_methods - {"GET"}
         if not non_get:
             continue  # GET-only flow: no disclosure gap is even possible.

@@ -199,8 +199,9 @@ def test_no_matching_files_is_a_setup_error_not_a_silent_pass(tmp_path: Path) ->
 
 def test_methods_in_capture_section_reads_table_rows() -> None:
     mod = _load()
-    methods = mod._methods_in_capture_section(_UNQUALIFIED_POST_FILE)
+    methods, unrecognized = mod._methods_in_capture_section(_UNQUALIFIED_POST_FILE)
     assert methods == {"GET", "POST"}
+    assert unrecognized is False
 
 
 def test_methods_in_capture_section_ignores_scope_boundary_mentions() -> None:
@@ -208,8 +209,153 @@ def test_methods_in_capture_section_ignores_scope_boundary_mentions() -> None:
     the Capture Endpoint Table itself) must not be read as a real call."""
     mod = _load()
     text = _GET_ONLY_FILE  # Scope Boundary mentions "non-GET" but never POST.
-    methods = mod._methods_in_capture_section(text)
+    methods, unrecognized = mod._methods_in_capture_section(text)
     assert methods == {"GET"}
+    assert unrecognized is False
+
+
+# The real Anthropic/Azure-OpenAI table shape: every row lists only a path,
+# and the single shared method lives in the "Endpoint (METHOD, ...)" header
+# cell, far enough past the words "Capture Endpoint Table" that a
+# length-bounded slice would miss it (the real files put ~600-800 characters
+# of prose in between). Regression fixture for the blocking review finding
+# on this PR: a bounded slice silently returned no method for this shape,
+# which was then treated as GET-only and skipped — so swapping GET for POST
+# in the header, with every "GET requests only" sentence left in place,
+# still exited 0.
+_HEADER_METHOD_FILE = """\
+# Discover Phase: Example Usage API Discovery
+
+## Security Contract (applies to every step)
+
+1. Exact-endpoint allowlist, GET only. Call ONLY the two endpoints below.
+
+## Step 0: Consent Gate
+
+This runs GET requests only, against a fixed list of usage/cost endpoints.
+
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.** Row 1 is filtered to the selected workspaces
+in a single call via repeated `workspace_ids[]=<id>` query parameters. Row 2
+has no `workspace_ids[]` parameter at all — the endpoint has none — but it
+does accept `group_by` as an array, so it runs in one single call with both
+dimensions together. Each returned row already carries its own workspace_id
+field plus the parsed description dimension. After the call returns, filter
+the rows client-side to keep only those whose workspace_id is in the
+selection — discard the rest before anything is written to the output file.
+Unselected workspaces' rows pass through this one response but are never
+stored past that filter, consistent with the Step 0 consent promise made
+above. This padding exists so the header cell below lands well past the
+400-character mark some bounded-slice implementations use.
+
+| # | Endpoint ({method}, `https://api.example.com`) | Query parameters | Output file |
+|---|---|---|---|
+| 1 | `/v1/organizations/usage_report/messages` | `starting_at`, `bucket_width=1d` | usage-messages.json |
+| 2 | `/v1/organizations/cost_report` | `starting_at`, `bucket_width=1d` | cost-report.json |
+
+## Scope Boundary
+
+- Any non-GET method is forbidden.
+"""
+
+
+def test_methods_in_capture_section_reads_header_cell_convention_far_from_the_label() -> None:
+    """The 'Endpoint (METHOD, ...)' header-cell shape must be read regardless
+    of how much prose sits between the words 'Capture Endpoint Table' and the
+    header row — no fixed-length slice."""
+    mod = _load()
+    text = _HEADER_METHOD_FILE.format(method="GET")
+    methods, unrecognized = mod._methods_in_capture_section(text)
+    assert methods == {"GET"}
+    assert unrecognized is False
+
+
+def test_header_cell_post_is_detected_even_far_from_the_label(tmp_path: Path) -> None:
+    """The exact exploit from the blocking review finding: the table's own
+    header cell says POST, but every blanket 'GET requests only' sentence
+    was left unchanged. This must fail — not pass as if the file were
+    GET-only."""
+    root = _write_fixture(tmp_path, _HEADER_METHOD_FILE.format(method="POST"))
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "GET requests only" in result.stderr
+    assert "non-GET method" in result.stderr
+
+
+def test_committed_anthropic_and_azure_openai_files_have_their_method_detected() -> None:
+    """Regression for the exact files named in the blocking review finding:
+    both discover-anthropic-api.md copies and azure's discover-openai-api.md
+    put their method in a header cell far past any fixed-length slice. Each
+    must resolve to a non-empty, GET-only method set on the real committed
+    files (not an empty set silently treated as GET-only)."""
+    mod = _load()
+    for rel in (
+        "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md",
+        "skills/azure-to-aws/references/phases/discover/discover-anthropic-api.md",
+        "skills/azure-to-aws/references/phases/discover/discover-openai-api.md",
+    ):
+        text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
+        methods, unrecognized = mod._methods_in_capture_section(text)
+        assert methods == {"GET"}, f"{rel}: expected {{'GET'}}, got {methods!r}"
+        assert unrecognized is False, rel
+
+
+def test_all_six_committed_discovery_files_return_a_nonempty_method_set() -> None:
+    """Every real discover-*-api.md file in this plugin must resolve to a
+    non-empty method set — an empty read must never be silently treated as
+    'this file is GET-only, nothing to check.'"""
+    mod = _load()
+    files = sorted(
+        PLUGIN_ROOT.glob("skills/*/references/phases/discover/discover-*-api.md")
+    )
+    assert len(files) == 6, f"expected 6 discovery sub-files, found {len(files)}"
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        methods, unrecognized = mod._methods_in_capture_section(text)
+        assert methods, f"{path}: no HTTP method read (unrecognized={unrecognized})"
+        assert unrecognized is False, path
+
+
+def test_unrecognized_table_shape_fails_closed_instead_of_skipping(tmp_path: Path) -> None:
+    """A Capture Endpoint Table whose shape matches neither the per-row nor
+    the header-cell convention must fail the audit, not be treated as a
+    GET-only file with nothing to check."""
+    text = """\
+## Step 2: Capture
+
+**2c. Capture Endpoint Table.**
+
+| # | Something unrecognized | Purpose |
+| - | ----------------------- | ------- |
+| 1 | mystery-cell            | x       |
+"""
+    root = _write_fixture(tmp_path, text)
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "no HTTP method could be read" in result.stderr
+
+
+def test_mutating_the_real_anthropic_header_to_post_is_caught(tmp_path: Path) -> None:
+    """End-to-end reproduction of the blocking finding's exact mutation: copy
+    the real committed Anthropic file, flip its header cell from GET to
+    POST, change nothing else, and confirm the audit now fails instead of
+    exiting 0."""
+    rel = "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md"
+    real_text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
+    assert "Endpoint (GET, `https://api.anthropic.com`)" in real_text
+    mutated = real_text.replace(
+        "Endpoint (GET, `https://api.anthropic.com`)",
+        "Endpoint (POST, `https://api.anthropic.com`)",
+    )
+    root = _write_fixture(tmp_path, mutated)
+    # _write_fixture writes to a generic example path; move it to match the
+    # real relative path so the fixture's own section-detection logic (which
+    # doesn't care about the path) still exercises the real file's content.
+    (root / TARGET_REL).write_text(mutated, encoding="utf-8")
+    result = _run(root)
+    assert result.returncode == 1, result.stdout
+    assert "GET requests only" in result.stderr or "non-GET" in result.stderr
 
 
 def test_real_plugin_discovery_files_pass_on_main() -> None:
