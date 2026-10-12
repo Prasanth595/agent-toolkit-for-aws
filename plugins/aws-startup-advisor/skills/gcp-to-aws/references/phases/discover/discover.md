@@ -199,18 +199,25 @@ Step 2d): if `/analytics/query` entry's `status` is `"failed"`, there is a
 pending Analytics-only retry — load `discover-openrouter-api.md` and resume
 from its Step 2 retry path for the Analytics row only (reusing the
 already-good `/activity.json`, per that file's own rule), then proceed to
-Step 3 once Analytics reaches a terminal state (`ok` or `skipped`). **A manifest
-with an `/activity` entry but NO `/analytics/query` entry at all** (an old
+Step 3 once Analytics reaches a terminal state (`ok` or `skipped`). **A manifest with an `/activity` entry but NO `/analytics/query` entry at all** (an old
 manifest captured before this skill added the Analytics row — three entries:
-`/credits`, `/activity: ok`, `/key`) is treated the same as `/analytics/query:
-failed` for routing purposes: load `discover-openrouter-api.md` and resume from
-its Step 2 retry path for the Analytics row only (the file's own Step 2c row 4
-"FIRST attempt" branch applies, since there is no manifest entry yet to mark
-this a retry) — reusing the existing `/activity.json`, same as a genuine
-`/analytics/query: failed` resume. This does not re-ask Step 0 consent: the
-manifest's existence already proves this run passed Step 0, and the current
-Step 0 text already discloses the POST as part of the single combined consent
-gate. Only when
+`/credits`, `/activity: ok`, `/key`) is PERMANENTLY `cost_provenance: "unknown"` —
+do NOT attempt to upgrade it to Analytics-backed data, and make NO new request of any
+kind (no retry, no `/analytics/query` call, no key re-intake). The consent that produced
+this old manifest predates the `/analytics/query` POST's existence in Step 0's disclosure
+text, so it cannot have covered that call — attempting it now without re-asking would be a
+live request the user never actually consented to, and by this point the capture's key file
+has already been deleted (this manifest's `/activity: ok` with no Analytics row at all can
+only exist from a run whose Step 4 cleanup already ran under a pre-Analytics version of this
+skill) and the manifest has no `window_start_utc`/`window_end_utc` to supply a retry's
+`time_range` either way. Route this case into `discover-openrouter-api.md`'s EXISTING
+unknown-provenance handling instead: load `discover-openrouter-api.md` and execute from its
+Step 3 directly (parse the existing, already-captured `activity.json` — never re-captured),
+treating the ABSENT `/analytics/query` entry exactly as Step 3's own rollup rule already
+treats a `failed`/`skipped` Analytics row — `cost_provenance: "unknown"` for every model, with
+the matching `metadata.capture_warnings` entry Step 3 already appends for that case. This does
+not re-ask Step 0 consent (no new request means nothing new to consent to), and it does not
+proceed through Step 2 at all for this manifest. Only when
 the `/analytics/query` entry is already `"ok"` or `"skipped"` does `/activity:
 ok` mean execute straight from Step 3 (parse the existing captures) as
 before. The merge SUMS OpenRouter spend with a genuinely

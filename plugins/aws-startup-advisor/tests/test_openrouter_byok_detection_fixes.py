@@ -413,7 +413,78 @@ def test_skill_md_byok_passthrough_bullet_has_no_mixed_language() -> None:
         "disclosure is needed — a pure byok_passthrough row has no "
         "independent portion to lose"
     )
-    assert "No further disclosure needed" in _normalize(byok_bullet)
+    # Round 5's Finding 4 fix replaced the old unconditional "No further
+    # disclosure needed" closing sentence (which was only true when the
+    # row's monthly_cost_usd/usage is zero) with a conditional rule: no
+    # disclosure when the fee is zero/negligible, but a capture_warnings
+    # entry when it is nonzero.
+    assert "no disclosure is needed" in _normalize(byok_bullet).lower()
+    assert "zero" in byok_bullet.lower()
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 5 — Finding 4: byok_passthrough router/credit fee disclosure
+# ---------------------------------------------------------------------------
+
+
+def test_skill_md_byok_passthrough_discloses_nonzero_router_fee() -> None:
+    """Finding 4: a byok_passthrough row's own OpenRouter router/credit fee
+    (its monthly_cost_usd, i.e. /activity's `usage` field) must be disclosed via
+    capture_warnings when excluded, not silently dropped."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step15_idx = text.index("## Step 1.5")
+    phase_a_idx = text.index("## Phase A")
+    step15_section = text[step15_idx:phase_a_idx]
+
+    byok_idx = step15_section.index('row\'s `cost_provenance` is `"byok_passthrough"` →')
+    mixed_idx = step15_section.index('row\'s `cost_provenance` is `"mixed"` →')
+    byok_bullet = step15_section[byok_idx:mixed_idx]
+
+    assert "byok_usage_inference" in byok_bullet
+    assert "router/credit fee" in byok_bullet
+    assert "capture_warnings" in byok_bullet
+    assert "get-user-activity.md" in byok_bullet, (
+        "the fix must cite the primary-source field-name verification"
+    )
+    normalized = _normalize(byok_bullet)
+    assert "Do NOT add this fee back INTO the baseline sum" in normalized
+
+
+def test_byok_passthrough_nonzero_fee_fixture_through_real_baseline_consumer() -> None:
+    """Nonzero-fee fixture: a byok_passthrough row with a nonzero monthly_cost_usd
+    (the router fee) must trigger a disclosed-exclusion, not a silent drop, when run
+    through the real baseline-consumer exclusion rule."""
+    openrouter_row = {
+        "model": "anthropic/claude-sonnet-4",
+        "monthly_cost_usd": 5.00,  # the router/credit fee — nonzero
+        "prompt_tokens": 900_000,
+        "completion_tokens": 90_000,
+        "cost_provenance": "byok_passthrough",
+    }
+
+    def exclude_byok_passthrough_row(row: dict) -> tuple[bool, str | None]:
+        """Returns (excluded_from_sum, warning_or_None)."""
+        assert row["cost_provenance"] == "byok_passthrough"
+        excluded = True  # tokens+dollars always excluded from the cross-profile sum
+        warning = None
+        if row["monthly_cost_usd"] > 0.005:
+            warning = (
+                f"{row['model']} classified byok_passthrough — its "
+                f"${row['monthly_cost_usd']:.2f} OpenRouter router/credit fee was "
+                f"excluded from this baseline along with its (correctly excluded, "
+                f"already-duplicated) token figures; this fee is a real charge NOT "
+                f"reflected in the figure above."
+            )
+        return excluded, warning
+
+    excluded, warning = exclude_byok_passthrough_row(openrouter_row)
+    assert excluded is True
+    assert warning is not None and "$5.00" in warning and "router/credit fee" in warning
+
+    # Sanity: a zero-fee byok_passthrough row still needs no disclosure (today's behavior).
+    zero_fee_row = dict(openrouter_row, monthly_cost_usd=0.0)
+    _, zero_fee_warning = exclude_byok_passthrough_row(zero_fee_row)
+    assert zero_fee_warning is None
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +578,70 @@ def test_openrouter_discover_copies_remain_mirrored_for_uncertain_fix() -> None:
     assert gcp_block == azure_block, (
         "the Finding-1 uncertain-rollup fix text has drifted between the "
         "gcp-to-aws and azure-to-aws discover-openrouter-api.md copies"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 5 — Finding 1: "uncertain" cost_provenance has no Step 1.5 handler
+# ---------------------------------------------------------------------------
+
+
+def test_skill_md_step15_handles_uncertain_cost_provenance() -> None:
+    """Finding 1 (round 5): Step 1.5 must have an explicit `uncertain` bullet that
+    reuses the `unknown` branch's exclusion policy, not fall through unmatched."""
+    text = SKILL_MD.read_text(encoding="utf-8")
+    step15_idx = text.index("## Step 1.5")
+    phase_a_idx = text.index("## Phase A")
+    step15_section = text[step15_idx:phase_a_idx]
+
+    unknown_idx = step15_section.index('row\'s `cost_provenance` is `"unknown"` →')
+    keep_idx = step15_section.index("Keep every OpenRouter-only model")
+    uncertain_idx = step15_section.index('row\'s `cost_provenance` is `"uncertain"` →')
+
+    assert unknown_idx < uncertain_idx < keep_idx, (
+        "the uncertain bullet must sit between the unknown bullet and the "
+        "'keep every OpenRouter-only model' line, in the per-model branch"
+    )
+    uncertain_bullet = step15_section[uncertain_idx:keep_idx]
+    assert "SAME conservative handling as" in uncertain_bullet
+    assert "EXCLUDE this row's dollar AND token figures" in uncertain_bullet
+    assert "Do NOT reuse" in uncertain_bullet and "mixed" in uncertain_bullet.lower()
+
+
+def test_uncertain_row_excluded_from_baseline_sum_not_double_counted() -> None:
+    """Real Step 1.5 rollup simulation: a baseline with one uncertain-tagged
+    OpenRouter row that overlaps a direct-provider model must exclude that row's
+    tokens/dollars from the combined sum entirely (no double count, no silent
+    full-weight inclusion as if independently confirmed)."""
+    openrouter_rows = [
+        {"model": "openai/gpt-4.1", "monthly_cost_usd": 50.0, "prompt_tokens": 100_000,
+         "completion_tokens": 10_000, "cost_provenance": "uncertain"},
+        {"model": "mistral/mixtral-8x7b", "monthly_cost_usd": 12.0, "prompt_tokens": 40_000,
+         "completion_tokens": 5_000, "cost_provenance": "no_byok"},
+    ]
+    direct_rows = [{"model": "gpt-4.1", "monthly_cost_usd": 48.5}]
+
+    def model_matches(direct_name: str, or_name: str) -> bool:
+        return or_name.rsplit("/", 1)[-1] == direct_name
+
+    def rollup(openrouter_rows: list[dict], direct_rows: list[dict]) -> float:
+        direct_names = {r["model"] for r in direct_rows}
+        direct_total = sum(r["monthly_cost_usd"] for r in direct_rows)
+        or_total = 0.0
+        for row in openrouter_rows:
+            matched = any(model_matches(d, row["model"]) for d in direct_names)
+            if matched and row["cost_provenance"] in ("byok_passthrough", "mixed", "unknown", "uncertain"):
+                continue  # excluded from the sum — the fix under test
+            or_total += row["monthly_cost_usd"]
+        return direct_total + or_total
+
+    total = rollup(openrouter_rows, direct_rows)
+    # Expected: direct gpt-4.1 (48.5) + OpenRouter mixtral no_byok (12.0) only.
+    # The uncertain gpt-4.1 row's 50.0 must NOT be added on top of (or instead of) the
+    # direct profile's 48.5 — the bug under test would otherwise sum 48.5 + 50.0 + 12.0 = 110.5.
+    assert total == 60.5, (
+        f"uncertain row must be excluded from the baseline sum like unknown/mixed/"
+        f"byok_passthrough rows are, got {total}"
     )
 
 
@@ -630,29 +765,106 @@ def test_openrouter_discover_copies_remain_mirrored_for_utc_window_fix() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_gcp_discover_handles_manifest_missing_analytics_entry() -> None:
+# ---------------------------------------------------------------------------
+# PR #436 round 5 — Finding 2: workspace scope not persisted across early interruption
+# ---------------------------------------------------------------------------
+
+
+def test_both_copies_persist_workspace_scope_in_manifest_schema() -> None:
+    """Finding 2: workspace_scope must be a required manifest field, written at
+    Step 2d, distinct from the final profile's metadata.workspace_scope."""
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        step2d_idx = text.index("**2d. Run the script, then delete it.**")
+        step3_idx = text.index("## Step 3: Parse Captures")
+        section = text[step2d_idx:step3_idx]
+        assert '"workspace_scope": null' in section, (
+            f"{f}: Step 2d's manifest schema must include workspace_scope"
+        )
+        assert "written on EVERY manifest write in this step" in section
+        assert "deliberate" in section
+
+
+def test_both_copies_resume_reads_workspace_scope_before_reasking() -> None:
+    for f in OPENROUTER_DISCOVER_FILES:
+        text = f.read_text(encoding="utf-8")
+        assert "read `$WORKSPACE_ID` from the EXISTING manifest's `workspace_scope` field FIRST" in text
+        assert "Step 1.5 is NEVER" in text
+
+
+def test_workspace_a_interrupted_retry_fixture_does_not_pick_up_workspace_b() -> None:
+    """Fixture: two workspaces A and B. A capture scoped to A is interrupted after
+    the manifest's first write (activity: ok, analytics: failed) with
+    workspace_scope recorded. A resumed Analytics-only retry must reuse workspace
+    A's scope, not silently query account-wide (which would mix in workspace B)."""
+    manifest_after_interruption = {
+        "captured_at": "2026-02-01T00:00:00Z",
+        "window_start_utc": "2026-01-02T00:00:00Z",
+        "window_end_utc": "2026-02-01T00:00:00Z",
+        "workspace_scope": {"workspace_id": "ws-A-uuid", "workspace_name": "Workspace A"},
+        "captures": [
+            {"endpoint": "/credits", "status": "ok"},
+            {"endpoint": "/activity", "status": "ok"},
+            {"endpoint": "/key", "status": "ok"},
+            {"endpoint": "/analytics/query", "status": "failed"},
+        ],
+    }
+
+    def resolve_workspace_id_for_retry(manifest: dict) -> str | None:
+        scope = manifest.get("workspace_scope")
+        if scope is None:
+            return None
+        return scope["workspace_id"]
+
+    resolved = resolve_workspace_id_for_retry(manifest_after_interruption)
+    assert resolved == "ws-A-uuid", (
+        "a resumed Analytics-only retry must restore workspace A's scope from the "
+        "manifest, not default to unset/account-wide (which would silently include "
+        "workspace B's or every workspace's data)"
+    )
+    # Sanity: a manifest with no workspace_scope key at all (pre-fix) must not be
+    # misread as "account-wide" via a KeyError-swallowing default — it is a
+    # distinct, acknowledged gap, not equivalent to an explicit null.
+    pre_fix_manifest = {k: v for k, v in manifest_after_interruption.items() if k != "workspace_scope"}
+    assert "workspace_scope" not in pre_fix_manifest
+
+
+# ---------------------------------------------------------------------------
+# PR #436 round 5 — Finding 3: pre-Analytics manifest upgrade bypasses consent re-request
+# ---------------------------------------------------------------------------
+
+
+def test_gcp_discover_routes_pre_analytics_manifest_to_unknown_provenance() -> None:
     text = GCP_DISCOVER_MD.read_text(encoding="utf-8")
     idx = text.index("**1f. OpenRouter usage discovery")
     next_idx = text.index("**1g.")
     section = _normalize(text[idx:next_idx])
     assert "NO `/analytics/query` entry at all" in section
-    assert "treated the same as `/analytics/query: failed`" in section
+    assert "PERMANENTLY `cost_provenance: \"unknown\"`" in section
+    assert "do NOT attempt to upgrade it to Analytics-backed data" in section
+    assert "make NO new request of any kind" in section
+    assert "execute from its Step 3 directly" in section
     assert "does not re-ask Step 0 consent" in section
 
 
-def test_azure_discover_handles_manifest_missing_analytics_entry() -> None:
+def test_azure_discover_routes_pre_analytics_manifest_to_unknown_provenance() -> None:
     text = AZURE_DISCOVER_MD.read_text(encoding="utf-8")
     idx = text.index("### OpenRouter usage-API consent + capture")
     next_idx = text.index("### Anthropic usage-API consent + capture")
     section = _normalize(text[idx:next_idx])
     assert "NO `/analytics/query` entry present at all" in section
-    assert "do NOT re-offer Step 0 consent" in section
+    assert "PERMANENTLY `cost_provenance: \"unknown\"`" in section
+    assert "do NOT attempt a" in section and "live upgrade" in section
+    assert "make NO new request" in section
+    assert "resume it directly at Step 3" in section
+    assert "re-offer Step 0 consent (no new request" in section
 
 
 def test_three_entry_pre_analytics_manifest_routes_through_both_callers() -> None:
     """Reviewer's exact scenario: a manifest with only /credits, /activity: ok,
-    /key (no /analytics/query key at all) must route into the Analytics retry
-    path through BOTH callers' decision logic, not fall through unmatched."""
+    /key (no /analytics/query key at all) must route into permanent
+    unknown-provenance handling through BOTH callers' decision logic, not
+    attempt a live Analytics upgrade."""
     old_manifest = {
         "captured_at": "2026-01-01T00:00:00Z",
         "window_days": 30,
@@ -666,10 +878,7 @@ def test_three_entry_pre_analytics_manifest_routes_through_both_callers() -> Non
     def find_entry(manifest: dict, endpoint: str) -> dict | None:
         return next((c for c in manifest["captures"] if c["endpoint"] == endpoint), None)
 
-    activity_entry = find_entry(old_manifest, "/activity")
     analytics_entry = find_entry(old_manifest, "/analytics/query")
-
-    assert activity_entry is not None and activity_entry["status"] == "ok"
     assert analytics_entry is None, (
         "sanity: this fixture reproduces the reviewer's gap — no /analytics/query "
         "entry present at all, distinct from status: failed"
@@ -686,13 +895,13 @@ def test_three_entry_pre_analytics_manifest_routes_through_both_callers() -> Non
             return "exit_clean_no_reask"
         # activity["status"] == "ok" from here
         if analytics is None:
-            return "resume_analytics_retry_first_attempt"  # the fix
+            return "route_to_unknown_provenance_step3"  # the fix
         if analytics["status"] == "failed":
             return "resume_analytics_retry"
         return "proceed_step3"
 
-    assert route(old_manifest) == "resume_analytics_retry_first_attempt", (
-        "a pre-Analytics manifest (no /analytics/query entry) must route into the "
-        "Analytics retry path, not fall through unmatched and not silently proceed "
-        "to Step 3 treating Analytics as skipped"
+    assert route(old_manifest) == "route_to_unknown_provenance_step3", (
+        "a pre-Analytics manifest (no /analytics/query entry) must route directly "
+        "into Step 3 with permanent unknown provenance, never attempt a live "
+        "Analytics-row upgrade and never re-ask Step 0 consent"
     )

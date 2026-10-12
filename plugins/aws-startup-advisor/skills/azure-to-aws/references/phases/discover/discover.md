@@ -255,12 +255,17 @@ reading an archive the customer already handed over is not interactive.
      today.
    - **Manifest exists, `/activity` entry `"ok"`, NO `/analytics/query` entry present at all**
      (an old three-entry manifest from before the Analytics row existed: `/credits`, `/activity:
-     ok`, `/key`) → treat identically to the next case below (`/analytics/query: "failed"`) for
-     routing purposes — do NOT re-offer Step 0 consent (the manifest already proves this run
-     passed it, and Step 0's text already discloses the POST); resume
-     `discover-openrouter-api.md` from its Step 2 Analytics-only retry path (its "FIRST attempt"
-     branch, since there is no prior Analytics attempt to retry), then proceed to Step 3 once
-     Analytics reaches a terminal state.
+     ok`, `/key`) → PERMANENTLY `cost_provenance: "unknown"` for this manifest — do NOT attempt a
+     live upgrade to Analytics-backed data, and make NO new request. The consent that produced this
+     old manifest predates the `/analytics/query` POST's existence in Step 0's disclosure, so it
+     cannot have covered that call, and by this point the capture's key file is already deleted and
+     the manifest has no `window_start_utc`/`window_end_utc` to supply a retry's `time_range`
+     anyway. Route into `discover-openrouter-api.md`'s EXISTING unknown-provenance handling: resume
+     it directly at Step 3 (parse the already-captured `activity.json`; never re-capture), treating
+     the absent `/analytics/query` entry exactly as Step 3's own rollup rule treats a
+     `failed`/`skipped` Analytics row — `cost_provenance: "unknown"` for every model, with the
+     matching `capture_warnings` entry. Do NOT re-offer Step 0 consent (no new request, nothing new
+     to consent to) and do NOT enter Step 2 for this manifest.
    - **Manifest exists, `/activity` entry `"ok"`, `/analytics/query` entry `"failed"`** → a
      pending Analytics-only retry — do NOT re-offer consent; resume
      `discover-openrouter-api.md` from its Step 2 Analytics-only retry path (reusing the

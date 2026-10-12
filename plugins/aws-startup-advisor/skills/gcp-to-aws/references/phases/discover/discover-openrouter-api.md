@@ -185,7 +185,10 @@ but not independently confirmed against a live multi-workspace account.)*
 4. **On `[B]`:** record the chosen workspace's `id` as `$WORKSPACE_ID` (and its
    `name` for the profile metadata). OpenRouter's `workspace_id` filter takes one
    workspace at a time — no documented array form, unlike Anthropic's
-   `workspace_ids[]`.
+   `workspace_ids[]`. This value is persisted into the manifest at Step 2d's very
+   first write (not deferred to a successful full capture) — see Step 2d's
+   `workspace_scope` field — so an interruption any time after that first write
+   still has the scope recorded.
 5. **On `[A]`, or when this step was skipped (≤1 workspace):** leave
    `$WORKSPACE_ID` unset — capture proceeds unscoped, exactly as before this
    step existed.
@@ -314,6 +317,22 @@ GET https://openrouter.ai/api/v1/credits  →  credits.json
   unset, omit `filters` entirely — the call stays account-wide, unchanged from
   today.
 
+  On a RESUMED invocation of this file (any retry entry point — the `/activity`-failed retry,
+  the Analytics-only retry, or the pre-Analytics-manifest compatibility routing in `discover.md`),
+  read `$WORKSPACE_ID` from the EXISTING manifest's `workspace_scope` field FIRST, before
+  re-running Step 1.5 or falling back to an unset default — `workspace_scope.workspace_id` (when
+  non-null) becomes `$WORKSPACE_ID` for this invocation; `workspace_scope: null` means `$WORKSPACE_ID`
+  stays unset, deliberately, exactly as it was on the original capture. Step 1.5 is NEVER
+  re-executed on a resume that has an existing manifest with a `workspace_scope` key present
+  (null or not) — re-running Step 1.5 would re-call `GET /workspaces` and risk re-asking the user
+  a question already answered, and more importantly risks the user picking a DIFFERENT workspace
+  for what is supposed to be a continuation of the SAME capture, silently mixing scopes across the
+  `/activity` data already on disk (captured under the original scope) and a freshly-scoped
+  `/analytics/query` retry. A manifest with no `workspace_scope` key at all (pre-this-fix) has no
+  recorded scope to restore — treat `$WORKSPACE_ID` as unset for the retry (same as today's
+  behavior), since there is no reliable value to recover; this is a narrow, acknowledged gap for
+  manifests written before this fix, not a new design decision this fix needs to solve further.
+
   **Auth-failure handling on this row** mirrors Step 2d's existing `/activity`
   mid-table-failure branch, not the probe's: this call is NOT the probe (that's
   still `/credits`), so a 401/403 here is a mid-table failure — record `failed`
@@ -339,12 +358,28 @@ GET https://openrouter.ai/api/v1/credits  →  credits.json
   "window_days": 30,
   "window_start_utc": "<ISO 8601 UTC, UTC-midnight-aligned>",
   "window_end_utc": "<ISO 8601 UTC, UTC-midnight-aligned>",
+  "workspace_scope": null,
   "provisioning_key_sha256": "<sha256 of .openrouter-key-env contents — fingerprint only>",
   "captures": [
     { "endpoint": "<row endpoint>", "file": "<file>", "status": "ok|failed|skipped", "note": null }
   ]
 }
 ```
+
+`workspace_scope` is written on EVERY manifest write in this step (the initial write and any
+retry-driven re-write), not only after a successful full capture — this is the SAME persistence
+timing already used for `window_start_utc`/`window_end_utc` above, and for the same reason: a
+capture interrupted after this write but before Step 3 must leave enough state on disk for a
+resumed Analytics-only retry (Step 2's retry path, entered directly without re-running Step 1.5)
+to reuse the EXACT SAME scope rather than defaulting to unset/account-wide. Value is `null` when
+Step 1.5 was skipped (≤1 workspace) or the user explicitly chose `[A]` All workspaces — both are
+deliberate "no scoping" outcomes, recorded as an explicit `null`, never an absent field — or
+`{ "workspace_id": "<id>", "workspace_name": "<name>" }` when `$WORKSPACE_ID` was set via `[B]`.
+A manifest written by a version of this file that predates this field has NO `workspace_scope`
+key at all — that absence means "pre-this-fix manifest," not "account-wide," and callers must
+not conflate the two (see this file's Step 2 resume rules and `discover.md`'s re-entry check for
+how an old manifest without `window_start_utc`/`window_end_utc` is already handled the same way;
+`workspace_scope`'s absence is diagnosed identically).
 
 Every attempted or deliberately skipped call gets an entry. **`/activity`'s
 `status` is special — unlike `/key` (optional context, `skipped` is harmless),
