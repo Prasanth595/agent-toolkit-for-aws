@@ -852,7 +852,6 @@ def test_gcp_cluster_edges_reject_a_scalar_member(tmp_path: Path):
     assert r.returncode == 0, r.stdout
 
 
-
 def test_heroku_inventory_clarifications_is_a_signal_map(tmp_path: Path):
     """Review finding on #385: inventory_clarifications was closed to database_ha, so a
     redis or region signal failed even though sources.Q1 extracted was already allowed."""
