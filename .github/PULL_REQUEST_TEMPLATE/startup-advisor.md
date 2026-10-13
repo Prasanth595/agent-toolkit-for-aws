@@ -1,3 +1,14 @@
+## Type of Change
+
+Select at least one.
+
+- [ ] New plugin
+- [ ] New skill
+- [ ] Bug fix
+- [ ] Documentation update
+- [ ] CI/CD change
+- [ ] Other
+
 ## Startup Advisor review checklist
 
 By submitting this PR, I confirm that:

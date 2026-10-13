@@ -7,8 +7,9 @@ const COMMENT_MARKER = "<!-- startup-advisor-author-checklist -->";
 const PLUGIN_PREFIX = "plugins/aws-startup-advisor/";
 const TEMPLATE_PATH = ".github/PULL_REQUEST_TEMPLATE/startup-advisor.md";
 const HEADING = "## Startup Advisor review checklist";
+const TYPE_HEADING = "## Type of Change";
 
-function checklistItems(markdown) {
+function checklistItems(markdown, heading = HEADING) {
   const items = [];
   let inSection = false;
   let fence = null;
@@ -20,7 +21,7 @@ function checklistItems(markdown) {
       continue;
     }
     if (fence) continue;
-    if (line.trim() === HEADING) {
+    if (line.trim() === heading) {
       inSection = true;
       continue;
     }
@@ -36,6 +37,10 @@ function evaluate(pr, files, template) {
   if (expected.length !== 4 || new Set(expected).size !== expected.length) {
     throw new Error("The trusted template must contain four distinct confirmations.");
   }
+  const changeTypes = checklistItems(template, TYPE_HEADING).map((item) => item.text);
+  if (!changeTypes.length || new Set(changeTypes).size !== changeTypes.length) {
+    throw new Error("The trusted template must contain distinct change type options.");
+  }
   if (files.length !== pr.changed_files || new Set(files.map((file) => file.filename)).size !== files.length) {
     throw new Error("Incomplete PR file inventory; checklist requirements are unknown.");
   }
@@ -46,12 +51,15 @@ function evaluate(pr, files, template) {
     const matches = items.filter((item) => item.text === text);
     return matches.length !== 1 || !matches[0].checked;
   });
+  const changeTypeSelected = checklistItems(pr.body, TYPE_HEADING)
+    .some((item) => item.checked && changeTypes.includes(item.text));
   return {
     number: pr.number,
     head: pr.head.sha,
     inScope,
     missing,
-    checklistComplete: missing.length === 0,
+    changeTypeSelected,
+    checklistComplete: changeTypeSelected && missing.length === 0,
   };
 }
 
@@ -96,14 +104,17 @@ function reminder(repository, result) {
     return `${COMMENT_MARKER}\nThis PR does not change Startup Advisor. Its author checklist is not required.`;
   }
   if (result.checklistComplete) {
-    return `${COMMENT_MARKER}\nAll four Startup Advisor author confirmations are complete.\n\n` +
+    return `${COMMENT_MARKER}\nA change type is selected and all four Startup Advisor author confirmations are complete.\n\n` +
       "The author checklist check now passes. CI and reviewers still need to verify the change.";
   }
+  const requiredUpdates = [
+    ...(!result.changeTypeSelected ? ["Select at least one option under `Type of Change`."] : []),
+    ...result.missing,
+  ];
   return `${COMMENT_MARKER}\nThis PR changes Startup Advisor and is awaiting author confirmation.\n\n` +
-    `Add the checklist from [the Startup Advisor PR template](${templateUrl}) to the PR description, ` +
-    "then complete the following confirmations there:\n\n" +
-    result.missing.map((text) => `- ${text}`).join("\n") +
-    "\n\nKeep the checklist heading and include each item exactly once, with its original wording. The check will run again when you update the description.";
+    `Use [the Startup Advisor PR template](${templateUrl}) to update the following items in the PR description:\n\n` +
+    requiredUpdates.map((text) => `- ${text}`).join("\n") +
+    "\n\nSelect one or more change types. Keep all four author confirmations exactly once, with their original wording, and check every confirmation. The check will run again when you update the description.";
 }
 
 async function notify(api, repository, number, template, expectedHead) {
@@ -143,7 +154,7 @@ async function notify(api, repository, number, template, expectedHead) {
       conclusion: !result.inScope ? "neutral" : result.checklistComplete ? "success" : "failure",
       output: {
         title: !result.inScope ? "Startup Advisor checklist not required" :
-          result.checklistComplete ? "Author confirmations complete" : "Awaiting author confirmation",
+          result.checklistComplete ? "PR checklist complete" : "PR checklist incomplete",
         summary: body,
       },
     });

@@ -5,7 +5,9 @@ const test = require("node:test");
 const { COMMENT_MARKER, checklistItems, evaluate, inspect, notify: runNotify } = require("./startup-advisor-pr-checklist.cjs");
 
 const template = readFileSync(resolve(__dirname, "../PULL_REQUEST_TEMPLATE/startup-advisor.md"), "utf8");
-const complete = template.replaceAll("- [ ]", "- [x]");
+const [typeSection, confirmationSection] = template.split("## Startup Advisor review checklist");
+const complete = typeSection.replace("- [ ] Bug fix", "- [x] Bug fix") +
+  "## Startup Advisor review checklist" + confirmationSection.replaceAll("- [ ]", "- [x]");
 const pluginFile = { filename: "plugins/aws-startup-advisor/README.md" };
 const repository = "example/toolkit";
 const pullEndpoint = `repos/${repository}/pulls/42`;
@@ -63,6 +65,46 @@ test("requires the four confirmations in the dedicated section", () => {
   }
 });
 
+test("one or multiple change types pass without selecting every type", () => {
+  for (const body of [complete, complete.replace("- [ ] Documentation update", "- [x] Documentation update")]) {
+    const result = evaluate(pull({ body }), [pluginFile], template);
+    assert.equal(result.changeTypeSelected, true);
+    assert.equal(result.checklistComplete, true);
+    assert.ok(body.includes("- [ ] New plugin"));
+  }
+  const body = complete.replace("- [x] Bug fix", "- [ ] Bug fix");
+  const result = evaluate(pull({ body }), [pluginFile], template);
+  assert.equal(result.changeTypeSelected, false);
+  assert.equal(result.checklistComplete, false);
+  assert.deepEqual(result.missing, []);
+});
+
+test("a change type must be a recognized option in its own visible section", () => {
+  const confirmations = complete.slice(complete.indexOf("## Startup Advisor review checklist"));
+  const selectedTypes = complete.slice(0, complete.indexOf("## Startup Advisor review checklist"));
+  for (const body of [
+    confirmations,
+    complete.replace("## Type of Change", "## Other section"),
+    complete.replace("- [x] Bug fix", "- [x] Unknown type"),
+    `\`\`\`markdown\n${selectedTypes}\n\`\`\`\n${confirmations}`,
+    `<!--\n${selectedTypes}\n-->\n${confirmations}`,
+    selectedTypes.split("\n").map((line) => `> ${line}`).join("\n") + "\n" + confirmations,
+  ]) {
+    const result = evaluate(pull({ body }), [pluginFile], template);
+    assert.equal(result.changeTypeSelected, false);
+    assert.equal(result.checklistComplete, false);
+  }
+});
+
+test("selecting every change type does not satisfy unchecked author confirmations", () => {
+  const body = typeSection.replaceAll("- [ ]", "- [x]") +
+    "## Startup Advisor review checklist" + confirmationSection;
+  const result = evaluate(pull({ body }), [pluginFile], template);
+  assert.equal(result.changeTypeSelected, true);
+  assert.equal(result.checklistComplete, false);
+  assert.equal(result.missing.length, 4);
+});
+
 test("accepts uppercase checks and CRLF, but excludes quoted, fenced, and commented examples", () => {
   assert.equal(evaluate(pull({ body: complete.replaceAll("[x]", "[X]").replaceAll("\n", "\r\n") }),
     [pluginFile], template).checklistComplete, true);
@@ -104,6 +146,7 @@ test("incomplete inventories and broken trusted templates fail closed", () => {
   assert.throws(() => evaluate(pull({ changed_files: 2 }), [pluginFile], template), /Incomplete/);
   assert.throws(() => evaluate(pull({ changed_files: 2 }), [pluginFile, pluginFile], template), /Incomplete/);
   assert.throws(() => evaluate(pull(), [pluginFile], ""), /four distinct/);
+  assert.throws(() => evaluate(pull(), [pluginFile], template.replace("## Type of Change", "## Other")), /change type/);
 });
 
 test("checklist inspection paginates and checks the expected head", async () => {
@@ -185,6 +228,23 @@ test("a completed checklist does not publish an unsolicited success comment", as
   await notify(f.api, repository, 42, template);
   assert.deepEqual(f.comments, []);
   assert.equal(f.writes.at(-1).body.conclusion, "success");
+});
+
+test("a missing change type gets a targeted reminder that clears after selection", async () => {
+  const f = fixture({ pr: pull({ body: complete.replace("- [x] Bug fix", "- [ ] Bug fix") }) });
+  await notify(f.api, repository, 42, template);
+  assert.equal(f.writes.at(-1).body.conclusion, "failure");
+  assert.match(f.comments[0].body, /Select at least one option under `Type of Change`/);
+  assert.ok(!f.comments[0].body.includes("- I have reviewed"));
+  f.pr.body = complete;
+  await notify(f.api, repository, 42, template);
+  assert.equal(f.writes.at(-1).body.conclusion, "success");
+  assert.equal(f.comments.length, 1);
+  assert.match(f.comments[0].body, /A change type is selected/);
+  f.pr.body = complete.replace("- [x] Bug fix", "- [ ] Bug fix");
+  await notify(f.api, repository, 42, template);
+  assert.equal(f.writes.at(-1).body.conclusion, "failure");
+  assert.equal(f.comments.length, 1);
 });
 
 test("only updates our GitHub Actions reminder, including on later comment pages", async () => {
