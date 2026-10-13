@@ -1,6 +1,8 @@
 # Startup Advisor PR checklist
 
 The bot checks that PRs changing `plugins/aws-startup-advisor/` include the required author confirmations from the [Startup Advisor PR template](PULL_REQUEST_TEMPLATE/startup-advisor.md).
+The template is a short author acknowledgment with four checkboxes.
+It has no questionnaire or required test-report fields.
 
 ## What the bot checks
 
@@ -16,7 +18,7 @@ Removing or unchecking an item makes the check fail again.
 Authors can use the dedicated template or copy its checklist into an existing PR description.
 Using the repository's default template alone is insufficient.
 The bot validates the description's content, not which creation link the author used.
-Summary, user impact, validation evidence, and other prose remain for reviewers to assess.
+Checkboxes record the author's declarations; CI and reviewers verify the actual changes.
 Checkboxes inside comments, quoted text, or code examples do not count.
 The same checks apply to Draft and ready PRs.
 
