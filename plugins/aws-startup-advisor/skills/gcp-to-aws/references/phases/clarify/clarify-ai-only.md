@@ -147,8 +147,8 @@ Interpret → `design_constraints.compliance` array (same format as the full flo
 | Answer   | Model Impact                                        |
 | -------- | --------------------------------------------------- |
 | Quality  | Claude Sonnet 5 primary; Opus 4.8 for hardest tasks |
-| Speed    | Claude Haiku 4.5; also Nova Micro/Lite              |
-| Cost     | Claude Haiku 4.5 or Nova Micro                      |
+| Speed    | Claude Haiku 5.5; also Nova Micro/Lite              |
+| Cost     | Claude Haiku 5.5 or Nova Micro                      |
 | Special  | Deferred to Q10                                     |
 | Balanced | Claude Sonnet 5                                     |
 
@@ -185,7 +185,7 @@ _Skip when:_ `models[].model_id` is populated in `ai-workload-profile.json` **wi
 
 | Source        | Baseline Recommendation        | Pricing Context                    |
 | ------------- | ------------------------------ | ---------------------------------- |
-| Gemini Flash  | Claude Haiku 4.5 ($1/$5)       | Strong savings                     |
+| Gemini Flash  | Claude Haiku 5.5 (<new price>)       | Even stronger savings                     |
 | Gemini Pro    | Claude Sonnet 5 ($2/$10)       | Comparable tier                    |
 | GPT-5.6 (any) | **Same model on Bedrock**      | ~10% over OpenAI std (DR tier)     |
 | GPT-5.5       | **Same model on Bedrock**      | ~10% over OpenAI std (DR tier)     |
