@@ -164,6 +164,28 @@ test("accepts uppercase checks and CRLF, but excludes quoted, fenced, and commen
   }
 });
 
+test("horizontal whitespace normalization does not change indentation or confirmation wording", () => {
+  const body = complete.replace("I have tested my changes", "I\thave tested my changes");
+  assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
+  const indented = complete.split("\n").map((line) => "\t" + line).join("\n");
+  assert.equal(evaluate(pull({ body: indented }), [pluginFile], template).checklistComplete, false);
+});
+
+test("GFM tables keep example headings and checkboxes out of the required sections", async () => {
+  const table = "| Example |\n| --- |\n" +
+    complete.split("\n").filter(Boolean).map((line) => `| ${line} |`).join("\n");
+  for (const [body, expected] of [[table, false], [table + "\n\n" + complete, true]]) {
+    const f = fixture({ pr: pull({ body }) });
+    assert.equal(evaluate(f.pr, f.files, template).checklistComplete, expected);
+    await notify(f.api, repository, 42, template);
+    assert.equal(f.writes.at(-1).body.conclusion, expected ? "success" : "failure");
+  }
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    const body = complete.replace(heading, `${heading}\n\n| Example |\n| --- |\n| ## Example only |\n`);
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true);
+  }
+});
+
 test("literal fenced and HTML examples cannot produce successful confirmations", async () => {
   for (const body of [
     "```markdown\nExample copied from documentation:\n```markdown\n" + complete + "\n```",

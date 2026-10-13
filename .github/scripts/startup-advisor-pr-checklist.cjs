@@ -2,7 +2,7 @@ const { spawn } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const { text } = require("node:stream/consumers");
-const MarkdownIt = require("markdown-it");
+const { lexer } = require("marked");
 
 const CHECK_NAME = "Startup Advisor author checklist";
 const COMMENT_MARKER = "<!-- startup-advisor-author-checklist -->";
@@ -10,27 +10,29 @@ const PLUGIN_PREFIX = "plugins/aws-startup-advisor/";
 const TEMPLATE_PATH = ".github/PULL_REQUEST_TEMPLATE/startup-advisor.md";
 const HEADING = "## Startup Advisor review checklist";
 const TYPE_HEADING = "## Type of Change";
-const markdown = new MarkdownIt({ html: true });
 
 function checklistItems(source, heading = HEADING) {
-  const lines = (source || "").split(/\r\n|\r|\n/);
+  // Marked's block rules expect spaces at line ends. Preserve indentation and item text.
+  const normalized = (source || "").replace(/\r\n|\r/g, "\n").replace(/\t(?=[ \t]*$)/gm, " ");
   const items = [];
   let inSection = false;
-  for (const token of markdown.parse(source || "", {})) {
-    if (token.type === "heading_open" && token.level === 0 && ["h1", "h2"].includes(token.tag)) {
-      const [start, end] = token.map;
+  // Only root headings and their direct task items can contain confirmations.
+  for (const token of lexer(normalized, { gfm: true })) {
+    if (token.type === "heading" && [1, 2].includes(token.depth)) {
       // Setext headings end a section; only the exact template syntax opens one.
-      inSection = token.tag === "h2" && end === start + 1 && lines[start].trimEnd() === heading;
+      inSection = token.depth === 2 && token.raw.trimEnd() === heading;
       continue;
     }
-    if (inSection && token.type === "list_item_open" && token.level === 1) {
-      const [start, end] = token.map;
-      const item = lines[start].match(/^- \[([ xX])\] (.+?)\s*$/);
-      if (item) items.push({
-        text: item[2],
-        checked: item[1].toLowerCase() === "x",
-        continued: lines.slice(start + 1, end).some((line) => !/^[ \t]*$/.test(line)),
-      });
+    if (inSection && token.type === "list") {
+      for (const entry of token.items) {
+        const [line, ...continuation] = entry.raw.split(/\r\n|\r|\n/);
+        const item = entry.task && line.match(/^- \[([ xX])\] (.+?)\s*$/);
+        if (item) items.push({
+          text: item[2],
+          checked: entry.checked === true,
+          continued: continuation.some((line) => !/^[ \t]*$/.test(line)),
+        });
+      }
     }
   }
   return items;
