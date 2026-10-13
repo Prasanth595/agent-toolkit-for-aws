@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
 const { resolve } = require("node:path");
 const test = require("node:test");
 const { COMMENT_MARKER, checklistItems, evaluate, inspect, notify: runNotify } = require("./startup-advisor-pr-checklist.cjs");
@@ -45,6 +47,49 @@ function fixture({ pr = pull(), files = [pluginFile], comments = [], mutate } = 
     throw new Error(`Unexpected API request: ${method} ${endpoint}`);
   };
   return { api, pr, files, comments, writes };
+}
+
+function runCli(t, { pr = pull(), files = [pluginFile], comments = [], failureEndpoint } = {}) {
+  const directory = mkdtempSync(resolve(tmpdir(), "startup-advisor-cli-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const input = resolve(directory, "fixture.json");
+  const log = resolve(directory, "requests.jsonl");
+  writeFileSync(input, JSON.stringify({ pr, files, comments, failureEndpoint }));
+  writeFileSync(log, "");
+  writeFileSync(resolve(directory, "gh"), `#!${process.execPath}
+const fs = require("node:fs");
+const fixture = JSON.parse(fs.readFileSync(process.env.FAKE_GH_FIXTURE, "utf8"));
+const args = process.argv.slice(2);
+if (args[0] !== "api" || args[1] !== "--method") throw new Error("Unexpected gh invocation");
+const method = args[2], endpoint = args[3];
+const body = args.includes("--input") ? JSON.parse(fs.readFileSync(0, "utf8")) : undefined;
+fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ method, endpoint, body }) + "\\n");
+if (fixture.failureEndpoint && endpoint.includes(fixture.failureEndpoint)) {
+  fs.writeFileSync(1, "[]");
+  fs.writeFileSync(2, "Simulated API failure");
+  process.exit(2);
+}
+let response;
+if (method === "POST" && endpoint.endsWith("/check-runs")) response = { id: 11 };
+else if (method !== "GET") response = {};
+else if (endpoint.endsWith("/pulls/42")) response = fixture.pr;
+else {
+  const page = Number(new URL("https://example.invalid/" + endpoint).searchParams.get("page"));
+  const rows = endpoint.includes("/files?") ? fixture.files : fixture.comments;
+  response = rows.slice((page - 1) * 100, page * 100);
+}
+fs.writeFileSync(1, JSON.stringify(response));
+`, { mode: 0o755 });
+  const child = spawnSync(process.execPath, [
+    resolve(__dirname, "startup-advisor-pr-checklist.cjs"), repository, "42", "a".repeat(40),
+  ], {
+    encoding: "utf8",
+    timeout: 15000,
+    env: { PATH: directory, FAKE_GH_FIXTURE: input, FAKE_GH_LOG: log },
+  });
+  assert.ifError(child.error);
+  const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  return { ...child, calls };
 }
 
 test("requires the four confirmations in the dedicated section", () => {
@@ -116,6 +161,50 @@ test("accepts uppercase checks and CRLF, but excludes quoted, fenced, and commen
     complete.split("\n").map((line) => `> ${line}`).join("\n"),
   ]) {
     assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
+  }
+});
+
+test("literal fenced and HTML examples cannot produce successful confirmations", async () => {
+  for (const body of [
+    "```markdown\nExample copied from documentation:\n```markdown\n" + complete + "\n```",
+    "<pre>\n" + complete + "\n</pre>",
+    "  <PRE class=\"example\">\n" + complete + "\n  </PRE>",
+    "<script>\n" + complete + "\n</script>",
+    "<style>\n" + complete + "\n</style>",
+    "<textarea>\n" + complete + "\n</textarea>",
+    "<div>\n" + complete + "\n</div>",
+    "<span>\n" + complete + "\n</span>",
+    "<span data-label=\"example>notes\">\n" + complete + "\n</span>",
+    "<?example\n" + complete + "\n?>",
+    "<!EXAMPLE\n" + complete + "\n>",
+    "<![CDATA[\n" + complete + "\n]]>",
+    complete.replace("## Type of Change", "<!-- Note -->## Type of Change"),
+    complete.replace("## Type of Change", "    ## Type of Change"),
+    "```markdown\n```<!--not a closing fence-->\n" + complete + "\n```",
+    "~~~markdown\n~~~markdown\n" + complete + "\n~~~",
+    "````markdown\n```\n" + complete + "\n````",
+    "```\n~~~\n" + complete + "\n```",
+  ]) {
+    const f = fixture({ pr: pull({ body }) });
+    assert.equal(evaluate(f.pr, f.files, template).checklistComplete, false, body);
+    assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, false, body);
+    assert.equal(f.writes.at(-1).body.conclusion, "failure");
+  }
+});
+
+test("real confirmations after closed examples remain valid and count exactly once", () => {
+  for (const prefix of [
+    "```markdown\n" + complete + "\n   ```` \t\n",
+    "~~~markdown\n" + complete + "\n~~~\t\n",
+    "<pre>\n" + complete + "\n</pre>\n",
+    "<!--\n" + complete + "\n-->\n",
+    "```\n<!-- this is literal code\n```\n",
+    "<pre>\n``` this is literal code\n</pre>\n",
+    "<pre>Example</pre>\n",
+    "An inline tag follows.\n<span>\n",
+  ]) {
+    const body = prefix + complete;
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true, body);
   }
 });
 
@@ -279,4 +368,40 @@ test("the checklist check behaves the same for Draft and ready PRs", async () =>
   f.pr.draft = false;
   assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, true);
   assert.equal(f.comments[0].body, completedReminder);
+});
+
+test("the real CLI reads a comment page above 1 MiB and updates a reminder on the next page", (t) => {
+  const comments = Array.from({ length: 100 }, (_, i) => ({
+    id: i + 100, body: "Detailed review notes. ".repeat(600), user: { login: "reviewer", type: "User" },
+  }));
+  assert.ok(Buffer.byteLength(JSON.stringify(comments)) > 1024 * 1024);
+  comments.push({ id: 999, body: `${COMMENT_MARKER}\nOld reminder`, user: { login: "github-actions[bot]", type: "Bot" } });
+  const child = runCli(t, { comments });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).checklistComplete, true);
+  assert.ok(child.calls.some((call) => call.endpoint.endsWith("/comments?per_page=100&page=2")));
+  assert.ok(child.calls.some((call) => call.method === "PATCH" && call.endpoint.endsWith("/issues/comments/999")));
+  assert.equal(child.calls.at(-1).body.conclusion, "success");
+});
+
+test("the real CLI reads a file page above 1 MiB and finds the plugin on the next page", (t) => {
+  const files = Array.from({ length: 100 }, (_, i) => ({
+    filename: `docs/${i}.md`, patch: "+file content\n".repeat(1100),
+  }));
+  assert.ok(Buffer.byteLength(JSON.stringify(files)) > 1024 * 1024);
+  files.push({ filename: "docs/moved.md", previous_filename: pluginFile.filename });
+  const child = runCli(t, { pr: pull({ changed_files: files.length }), files });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).inScope, true);
+  assert.ok(child.calls.some((call) => call.endpoint.endsWith("/files?per_page=100&page=2")));
+  assert.equal(child.calls.at(-1).body.conclusion, "success");
+});
+
+test("the real CLI still fails closed on API errors and incomplete inventories", (t) => {
+  for (const options of [{ failureEndpoint: "/comments?" }, { pr: pull({ changed_files: 2 }) }]) {
+    const child = runCli(t, options);
+    assert.equal(child.status, 1);
+    assert.equal(child.calls.at(-1).body.conclusion, "failure");
+    assert.ok(child.calls.every((call) => call.body?.conclusion !== "success"));
+  }
 });

@@ -1,6 +1,7 @@
-const { execFileSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
+const { text } = require("node:stream/consumers");
 
 const CHECK_NAME = "Startup Advisor author checklist";
 const COMMENT_MARKER = "<!-- startup-advisor-author-checklist -->";
@@ -9,23 +10,68 @@ const TEMPLATE_PATH = ".github/PULL_REQUEST_TEMPLATE/startup-advisor.md";
 const HEADING = "## Startup Advisor review checklist";
 const TYPE_HEADING = "## Type of Change";
 
+function htmlBlockEnd(line, paragraphOpen) {
+  if (/^ {0,3}<(?:pre|script|style|textarea)(?=[ \t>]|$)/i.test(line)) {
+    return /<\/(?:pre|script|style|textarea)>/i;
+  }
+  if (/^ {0,3}<!--/.test(line)) return /-->/;
+  if (/^ {0,3}<\?/.test(line)) return /\?>/;
+  if (/^ {0,3}<![A-Z]/.test(line)) return />/;
+  if (/^ {0,3}<!\[CDATA\[/.test(line)) return /\]\]>/;
+  if (/^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)/i.test(line)) {
+    return /^[ \t]*$/;
+  }
+  // Other complete HTML tags start a block only outside a paragraph.
+  if (!paragraphOpen && /^ {0,3}(?:<\/[a-z][a-z0-9-]*[ \t]*>|<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>)[ \t]*$/i.test(line)) {
+    return /^[ \t]*$/;
+  }
+  return null;
+}
+
 function checklistItems(markdown, heading = HEADING) {
   const items = [];
   let inSection = false;
   let fence = null;
-  for (const line of (markdown || "").replace(/<!--[\s\S]*?(?:-->|$)/g, "").split(/\r?\n/)) {
-    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      if (!fence) fence = fenceMatch[1];
-      else if (fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) fence = null;
+  let htmlEnd = null;
+  let paragraphOpen = false;
+  for (const line of (markdown || "").split(/\r?\n/)) {
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+      if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) fence = null;
       continue;
     }
-    if (fence) continue;
-    if (line.trim() === heading) {
-      inSection = true;
+    if (htmlEnd) {
+      if (htmlEnd.test(line)) htmlEnd = null;
       continue;
     }
-    if (/^ {0,3}#{1,2}\s/.test(line)) inSection = false;
+    htmlEnd = htmlBlockEnd(line, paragraphOpen);
+    if (htmlEnd) {
+      paragraphOpen = false;
+      if (htmlEnd.test(line)) htmlEnd = null;
+      continue;
+    }
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (opening && (opening[1][0] === "~" || !opening[2].includes("`"))) {
+      fence = opening[1];
+      paragraphOpen = false;
+      continue;
+    }
+    if (!line.trim()) {
+      paragraphOpen = false;
+      continue;
+    }
+    if (!paragraphOpen && /^(?: {4}|\t)/.test(line)) continue;
+    if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) {
+      if (line.trim() === heading) inSection = true;
+      else if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) inSection = false;
+      paragraphOpen = false;
+      continue;
+    }
+    if (/^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/.test(line)) {
+      paragraphOpen = false;
+      continue;
+    }
+    paragraphOpen = true;
     const item = inSection && line.match(/^ {0,3}- \[([ xX])\] (.+?)\s*$/);
     if (item) items.push({ text: item[2], checked: item[1].toLowerCase() === "x" });
   }
@@ -69,14 +115,22 @@ function unchanged(before, after) {
     before.body === after.body && before.changed_files === after.changed_files;
 }
 
-function githubApi(method, endpoint, body) {
+async function githubApi(method, endpoint, body) {
   const args = ["api", "--method", method, endpoint];
   if (body !== undefined) args.push("--input", "-");
-  return JSON.parse(execFileSync("gh", args, {
-    encoding: "utf8",
-    input: body === undefined ? undefined : JSON.stringify(body),
-    stdio: ["pipe", "pipe", "pipe"],
-  }));
+  const input = body === undefined ? undefined : JSON.stringify(body);
+  const child = spawn("gh", args, { stdio: ["pipe", "pipe", "pipe"] });
+  // Stream both pipes instead of imposing execFileSync's 1 MiB capture limit.
+  const completion = new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.stdin.on("error", reject);
+    child.once("close", (code, signal) => resolve({ code, signal }));
+  });
+  const output = Promise.all([text(child.stdout), text(child.stderr), completion]);
+  child.stdin.end(input);
+  const [stdout, stderr, { code, signal }] = await output;
+  if (code !== 0) throw new Error(`gh api failed (${signal || code}): ${stderr.trim()}`);
+  return JSON.parse(stdout);
 }
 
 async function pages(api, endpoint) {
