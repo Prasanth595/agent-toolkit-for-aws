@@ -17,13 +17,14 @@ def is_inference_profile(model_id: str) -> bool:
 
 
 def is_mantle_model(model_id: str) -> bool:
-    """True for OpenAI's proprietary GPT models, which are served only on the
-    bedrock-mantle endpoint. They need `bedrock-mantle:*` actions — a policy
+    """True for OpenAI's proprietary GPT models (GPT-5.5/5.4/5.6 and GPT-6
+    Astra/Sol/Luna/6.1 Sol), which are served only on the bedrock-mantle endpoint
+    in their bare id form. They need `bedrock-mantle:*` actions — a policy
     granting only `bedrock:InvokeModel` against a foundation-model ARN cannot
     authorize them, and they have no inference profile to scope to either.
     The open-weight gpt-oss models DO use bedrock-runtime and must not match."""
     mid = model_id.lower()
-    return mid.startswith("openai.gpt-5") and "oss" not in mid
+    return (mid.startswith("openai.gpt-5") or mid.startswith("openai.gpt-6")) and "oss" not in mid
 
 
 def mantle_project_arn(region: str, account_id: str) -> str:
@@ -41,6 +42,25 @@ def foundation_model_arn(model_id: str) -> str:
 def inference_profile_arn(model_id: str, region: str, account_id: str) -> str:
     """ARN for a cross-region inference profile."""
     return f"arn:aws:bedrock:{region}:{account_id}:inference-profile/{model_id}"
+
+
+def default_project_arn(region: str, account_id: str) -> str:
+    """ARN for the default Bedrock project, scoped to the account/region.
+
+    Required alongside the inference-profile ARN for a GPT-6 CRIS id on
+    bedrock-runtime: every GPT-6 model card's "Call the model" section grants
+    `bedrock:InvokeModel` on both the inference-profile ARN and this ARN."""
+    return f"arn:aws:bedrock:{region}:{account_id}:project/default"
+
+
+def is_gpt6_cris_model(model_id: str) -> bool:
+    """True for a geo-prefixed (CRIS) GPT-6 id, e.g. `us.openai.gpt-6-astra` or
+    `global.openai.gpt-6.1-sol`. A bare `openai.gpt-6-*` id (mantle) does NOT
+    match — that path is covered by `is_mantle_model`, not this predicate."""
+    if not is_inference_profile(model_id):
+        return False
+    base_id = _GEO_PREFIX.sub("", model_id).lower()
+    return base_id.startswith("openai.gpt-6")
 
 
 def generate_policy(model_ids: list[str], region: str, account_id: str) -> dict:
@@ -68,6 +88,12 @@ def generate_policy(model_ids: list[str], region: str, account_id: str) -> dict:
             resources.append(inference_profile_arn(mid, region, account_id))
             base_id = _GEO_PREFIX.sub("", mid)
             resources.append(foundation_model_arn(base_id))
+            # A GPT-6 CRIS id's model card "Call the model" section grants
+            # InvokeModel on the inference-profile ARN AND the default project
+            # ARN — both are required, neither replaces the other. GPT-5.6 CRIS
+            # ids and all other runtime targets keep the 2-ARN shape above.
+            if is_gpt6_cris_model(mid):
+                resources.append(default_project_arn(region, account_id))
         else:
             resources.append(foundation_model_arn(mid))
 
