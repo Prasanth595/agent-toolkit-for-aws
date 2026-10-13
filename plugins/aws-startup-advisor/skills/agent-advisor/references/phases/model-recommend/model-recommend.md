@@ -8,7 +8,7 @@ _input:
   - context-signals.json
 _knowledge:
   - { file: references/models/anthropic-bedrock-2026-07-21.json }
-  - { file: references/models/openai-bedrock-2026-08-21.json }
+  - { file: references/models/openai-bedrock-<new-date>.json }
 _assemble:
   _file: phases/model-recommend/model-recommend-assemble.md
 _produces:
