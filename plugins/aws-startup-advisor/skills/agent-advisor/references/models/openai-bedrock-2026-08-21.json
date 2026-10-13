@@ -267,7 +267,7 @@
       }
     },
     "anthropic_claude_haiku_4_5": {
-      "display_name": "Claude Haiku 4.5 (Converse tier match for GPT-5.6 Luna)",
+      "display_name": "Claude Haiku 5.5 (Converse tier match for GPT-5.6 Luna)",
       "family": "anthropic_claude",
       "generation": "bedrock_native",
       "version": "4.5",

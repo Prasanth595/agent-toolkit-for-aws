@@ -8,7 +8,7 @@ Verify all pricing against `references/shared/pricing-cache.md`.
 
 **Model lifecycle:** Before recommending any Bedrock model, check `references/vendored/ai/ai-model-lifecycle.md`. Do not recommend Legacy models as primary selections for new migrations. Legacy models are annotated below where they appear.
 
-**Recommend defaults (Sep 2026):** Claude Sonnet 5 (`anthropic.claude-sonnet-5`) for balanced/flagship; Claude Opus 4.8 for hardest reasoning; Claude Haiku 4.5 for cost/speed. Sonnet 5 is **$2/$10** — the launch rate became the standard price on Sep 1, 2026 (the scheduled increase to $3/$15 was cancelled); comparison tables below use $2/$10. Do not default to any Claude Fable / Mythos frontier model.
+**Recommend defaults (Sep 2026):** Claude Sonnet 5 (`anthropic.claude-sonnet-5`) for balanced/flagship; Claude Opus 4.8 for hardest reasoning; Claude Haiku 5.5 for cost/speed. Sonnet 5 is **$2/$10** — the launch rate became the standard price on Sep 1, 2026 (the scheduled increase to $3/$15 was cancelled); comparison tables below use $2/$10. Do not default to any Claude Fable / Mythos frontier model.
 
 ---
 
@@ -43,7 +43,7 @@ Gemini 3.5 Flash is now GA (May 2026) — the current flagship Flash model. Gemi
 | ---------------- | ------------------------------------------------------------------- | ---------- | ------ | ------- |
 | Claude Sonnet 5  | Agentic tasks, tool use                                             | High       | High   | 1M      |
 | Claude Opus 4.6  | Maximum reasoning                                                   | High       | Medium | 200K    |
-| Claude Haiku 4.5 | Simple + fast                                                       | Medium     | High   | 200K    |
+| Claude Haiku 5.5 | Simple + fast                                                       | Medium     | High   | 200K    |
 | Llama 4 Maverick | Cost-effective + multimodal                                         | Medium     | High   | 1M      |
 | Llama 4 Scout    | Ultra-long context, cheapest                                        | Medium     | Medium | 10M     |
 | Nova 2 Pro       | AWS flagship, multimodal                                            | High       | High   | 1M      |

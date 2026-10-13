@@ -147,8 +147,8 @@ Interpret → `design_constraints.compliance` array (same format as the full flo
 | Answer   | Model Impact                                        |
 | -------- | --------------------------------------------------- |
 | Quality  | Claude Sonnet 5 primary; Opus 4.8 for hardest tasks |
-| Speed    | Claude Haiku 4.5; also Nova Micro/Lite              |
-| Cost     | Claude Haiku 4.5 or Nova Micro                      |
+| Speed    | Claude Haiku 5.5; also Nova Micro/Lite              |
+| Cost     | Claude Haiku 5.5 or Nova Micro                      |
 | Special  | Deferred to Q10                                     |
 | Balanced | Claude Sonnet 5                                     |
 
@@ -185,12 +185,12 @@ _Skip when:_ `models[].model_id` is populated in `ai-workload-profile.json` **wi
 
 | Source        | Baseline Recommendation        | Pricing Context                    |
 | ------------- | ------------------------------ | ---------------------------------- |
-| Gemini Flash  | Claude Haiku 4.5 ($1/$5)       | Strong savings                     |
+| Gemini Flash  | Claude Haiku 5.5       | Strong savings (greater than before, since Haiku 5.5 is ~75% cheaper than Haiku 4.5)                     |
 | Gemini Pro    | Claude Sonnet 5 ($2/$10)       | Comparable tier                    |
 | GPT-5.6 (any) | **Same model on Bedrock**      | ~10% over OpenAI std (DR tier)     |
 | GPT-5.5       | **Same model on Bedrock**      | ~10% over OpenAI std (DR tier)     |
 | GPT-5.4       | **Same model on Bedrock**      | ~10% over OpenAI std (DR tier)     |
-| GPT-3.5 Turbo | GPT-5.6 Luna; or Haiku 4.5     | Luna 36% cheaper, 77% under Haiku  |
+| GPT-3.5 Turbo | GPT-5.6 Luna; or Haiku 5.5     | Luna vs. Haiku 5.5 cost comparison needs re-evaluation given Haiku 5.5's ~75% price cut over Haiku 4.5 |
 | GPT-4/4 Turbo | GPT-5.6 Terra; or Sonnet 5     | Not on Bedrock — offer both        |
 | GPT-4o        | GPT-5.6 Terra; or Sonnet 5     | Not on Bedrock — offer both        |
 | GPT-5.4 Mini  | GPT-5.6 Luna; or Nova Lite     | Mini not on Bedrock — offer both   |

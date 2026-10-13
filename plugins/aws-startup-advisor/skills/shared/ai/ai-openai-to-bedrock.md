@@ -161,7 +161,7 @@ Findings worth surfacing to users:
 - **The Aug 21, 2026 Sol price cut flips the Sol↔Opus comparison.** GPT-5.6 Sol is now ~12% cheaper blended
   than Claude Opus 4.8, where Opus was previously 20% cheaper — but the cut is promotional (through at least
   Nov 21, 2026), so do not present the saving as durable.
-- **GPT-5.6 Luna undercuts Claude Haiku 4.5 by ~75%.** For the fast/cheap tier, the OpenAI model is the cheaper
+- With Claude Haiku 5.5 now ~75% cheaper than Haiku 4.5, the price gap with GPT-5.6 Luna closes substantially; the cheaper-tier recommendation needs re-evaluation
   Bedrock option. Do not reflexively map a cheap OpenAI model to Haiku on cost grounds.
 - **Sonnet 5's now-permanent $2/$10 undercuts every same-family GPT tier except Luna.** It is ~20% cheaper than
   GPT-5.6 Terra and ~36% cheaper than GPT-5.4 blended; earlier revisions of this guide called Terra 19% cheaper and
@@ -222,7 +222,7 @@ This is the common case and needs no cost justification.
 
 - The source model is not on Bedrock (see the region and catalog lists in `shared/openai-on-bedrock.md`)
 - The user's priority is cost and they accept a model change — note that the cheapest option is often Nova, and that
-  GPT-5.6 Luna already beats Claude Haiku 4.5 on price
+  With Claude Haiku 5.5 now ~75% cheaper than Haiku 4.5, GPT-5.6 Luna's price advantage over Claude's Haiku tier is likely eliminated or reversed
 - Bedrock-native features are required that mantle does not expose (Guardrails, Knowledge Bases, invocation logging,
   Converse-based tooling) — these need a Bedrock-native model or gpt-oss
 
