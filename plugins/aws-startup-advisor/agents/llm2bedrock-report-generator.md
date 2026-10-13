@@ -182,6 +182,21 @@ written, extrapolating from the golden-dataset sample.** If the line is present,
   savings % computed against an incomplete source total overstates savings. If every
   contributing provider is `cost_unavailable`, skip the savings-percentage line entirely and
   state plainly that no source-side cost baseline exists for this run.
+- **`capture_warnings` — read this top-level array before presenting any savings/premium
+  percentage, independently of the two checks above.** A non-empty `capture_warnings` means
+  some usage was excluded, uncertain, or otherwise not fully accounted for when
+  `usage-baseline.json` was computed (e.g. a `"mixed"`-classified OpenRouter row excluded to
+  avoid double-counting BYOK traffic, per `SKILL.md` Step 1.5's mixed-row disclosure, or a
+  model whose cost_provenance resolved `"uncertain"`) — this can be true even when the window
+  is full (`monthly_cost_usd_is_blended_estimate: false`) and every provider's `cost_status` is
+  `"complete"`, since those two checks are about window length and dollar availability, not
+  about completeness of WHICH usage was included. When `capture_warnings` is non-empty:
+  surface every entry verbatim in the report's cost-comparison section (e.g. under a "Data
+  completeness note:" heading), and do NOT print an unqualified savings/premium percentage —
+  either omit the percentage line entirely and state why, or prefix it with "approximate,
+  based on incomplete usage data (see note above)". Do NOT attempt to infer or back out a
+  dollar/token adjustment from the warning text — same no-estimation rule as the
+  `cost_unavailable` bullet above; disclosure only.
 
 The migration plan may map multiple source models to multiple Bedrock models (e.g., `gpt-4o → claude-sonnet` for complex tasks, `gpt-4o-mini → nova-lite` for simple tasks). Each pair has different per-token prices AND likely different token volumes, so costs MUST be computed per pair, not once globally.
 
