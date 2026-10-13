@@ -213,6 +213,29 @@ surcharge to the portion of input tokens that exceeds 200K per request. If per-r
 counts are unknown, assume 50% of input tokens fall in the long-context tier as a conservative
 estimate.
 
+**OpenAI/GPT source-side long-context parity:** When comparing a GPT-5.x/GPT-6 source cost
+against its Bedrock target, both sides MUST use the same context tier. If `usage_by_model[]` or
+`ai-workload-profile.json` carries no per-request token-size data (so it is unknown whether any
+requests exceed 272K input), do NOT assume the short-context rate for the source side while the
+Bedrock side may be priced long-context (or vice versa) — flag the comparison
+`pricing_tier: "approximate — request-size distribution unknown"` and present both a
+short-context and a long-context scenario row rather than a single blended number. When
+request-size data IS available (e.g., `ai_workload_profile.json` → `workloads[].typical_request_tokens`
+or measured usage profile per-request stats), apply the GPT breakpoint at 272,000 input tokens on
+BOTH sides consistently: a request above the threshold reprices input, cache, and output
+2x/2x/1.5x on the OpenAI source row the same way it does on the Bedrock row (see
+`pricing-cache.md`'s GPT-6 breakpoint note). Measured source spend (Part 1's
+`current_costs`/usage-profile dollar figures) always takes precedence over this list-rate
+comparison when it exists.
+
+**Worked example:** 100 requests of GPT-6 Sol at 300,000 input / 10,000 output tokens each (30M
+input / 1M output total) is ABOVE the 272,000-token breakpoint on every request. Source cost at
+the flat ≤272K rate ($2.00/$10.00) is $70 — wrong, because it ignores the breakpoint. Source cost
+at the correct long-context rate ($4.00 input / $15.00 output, per `pricing-cache.md`'s GPT-6
+family — long context table, Global column) is $135. Bedrock Global CRIS long-context is $135
+(parity); Bedrock In-Region/Geo-CRIS long-context ($4.40 input / $16.50 output) is $148.50 — a
+~10% premium, not the 112% a flat-rate comparison would produce.
+
 **Comparison table columns:** Model, Bedrock Monthly, vs Source Provider ($ and %), vs Current
 Azure, Quality, Capabilities Match (checked against `ai_capabilities_required`).
 
@@ -266,10 +289,13 @@ Present the monthly and annual cost difference between current Azure AI spend an
 Bedrock cost:
 
 - **If the model is unchanged** (`model_change: false`): projected cost is **about 10% higher**,
-  not the same — Bedrock in-region is priced at OpenAI's data-residency tier, which is 1.10x
-  OpenAI / Azure OpenAI standard. Quote the increase plainly and make the case on non-cost
-  grounds. If any workload exceeds 272K context, price it at the long-context tier and show that
-  separately; it can dominate the comparison.
+  not the same, UNLESS the chosen path is Global CRIS (`migration_path: "runtime_openai_cris"`
+  with a `global.`-prefixed model ID) — Global CRIS is priced at OpenAI's standard list price,
+  i.e. cost PARITY with the source, not a premium. In-Region and Geo CRIS (and any GPT-5.5/GPT-5.4
+  move, which has no CRIS at all) remain at the 1.10x data-residency-tier premium over OpenAI /
+  Azure OpenAI standard. Quote whichever applies plainly and make the case on non-cost grounds. If
+  any workload exceeds 272K context, price it at the long-context tier and show that separately;
+  it can dominate the comparison.
 - **If Bedrock is cheaper:** present monthly and annual savings clearly.
 - **If Bedrock is more expensive:** state clearly, justify with non-cost benefits, or note "not
   justified if cost is the only priority".

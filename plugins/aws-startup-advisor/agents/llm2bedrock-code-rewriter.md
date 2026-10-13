@@ -37,7 +37,7 @@ Read from prompt context (forwarded from llm2bedrock-code-analyzer, llm2bedrock-
   - `files_to_modify` — list of `"<file>: <change>"`. §10 iterates over this exact list.
   - `dependencies_to_replace` — list of `"<old-pkg> -> <new-pkg>"`. §12 applies these to the manifest.
   - `behavior_deltas` — list of parameter-surface differences. The user ALREADY confirmed each one at the orchestration checkpoint; §9 applies the confirmed decisions.
-  - `same_model_family` — `true` when the model itself is unchanged: Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*`). Skip prompt adaptation in §10, and leave model parameters (`temperature`, penalties, stop sequences) untouched — they did not change.
+  - `same_model_family` — `true` when the model itself is unchanged: Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*` / `openai.gpt-6*`). Skip prompt adaptation in §10, and leave model parameters (`temperature`, penalties, stop sequences) untouched — they did not change.
   - `special_patterns` — `{streaming, function_calling, embeddings, vision}` booleans. Drives §8 examples to apply.
 - **From `llm2bedrock-prompt-evaluator`** (T2-4) — adapted prompts (if any) at `<repo>/.saws-migrate/eval-results/adapted_prompts.jsonl`. §10 step 2 injects these where applicable.
 - **`Confirmed behavior-delta decisions file (Read it):`** — a context line naming `<Phase results directory>/delta-decisions.json`. `Read` that file: a JSON array where each entry carries a behavior delta and the user's chosen resolution/option (`[]` = none). §9 applies these EXACTLY as decided.
@@ -156,7 +156,7 @@ The source SDK stays. Per client, change only three things:
 
   | Target model                             | base_url                                               |
   | ---------------------------------------- | ------------------------------------------------------ |
-  | Proprietary OpenAI GPT (`openai.gpt-5*`) | `https://bedrock-mantle.<REGION>.api.aws/openai/v1`    |
+  | Proprietary OpenAI GPT (`openai.gpt-5*` / `openai.gpt-6*`) | `https://bedrock-mantle.<REGION>.api.aws/openai/v1`    |
   | Other OpenAI-compatible targets          | `https://bedrock-mantle.<REGION>.api.aws/v1`           |
   | Anthropic SDK                            | `https://bedrock-mantle.<REGION>.api.aws/anthropic/v1` |
 
@@ -229,7 +229,7 @@ client = anthropic.Anthropic(
 
 Do NOT rewrite request/response parsing — the whole point of Mantle is that the source SDK's call and response shapes are preserved. The single exception is the Chat Completions → Responses reshape above, which applies only to proprietary GPT targets. After applying the changes above, skip the Converse-specific guidance in the rest of §8; the §9 behavior-delta application still applies normally.
 
-**Converse for a proprietary GPT target is family-dependent.** GPT-5.5 / GPT-5.4 (`openai.gpt-5.5`, `openai.gpt-5.4`) have no `bedrock-runtime` surface — a boto3 `converse()` call against them fails at runtime; if your context pairs one with the Converse path, stop and report the contradiction. GPT-5.6 DOES have a `bedrock-runtime` path via CRIS ids (`us.`/`in.`/`global.` prefixed): when the plan says `migration_path: runtime_openai_cris`, a Converse or Responses rewrite against the CRIS id is valid (base URL `bedrock-runtime.{region}.amazonaws.com/openai/v1` for the OpenAI-compatible APIs; note Guardrails are Converse-only and prompt caching Responses-only on runtime). For a Responses-based source app, the mantle express lane above remains the default and smallest change.
+**Converse for a proprietary GPT target is family-dependent.** GPT-5.5 / GPT-5.4 (`openai.gpt-5.5`, `openai.gpt-5.4`) have no `bedrock-runtime` surface — a boto3 `converse()` call against them fails at runtime; if your context pairs one with the Converse path, stop and report the contradiction. GPT-5.6 and GPT-6 (Astra, Sol, Luna, 6.1 Sol) DO have a `bedrock-runtime` path via CRIS ids (`us.`/`in.`/`global.` prefixed): when the plan says `migration_path: runtime_openai_cris`, a Converse or Responses rewrite against the CRIS id is valid (base URL `bedrock-runtime.{region}.amazonaws.com/openai/v1` for the OpenAI-compatible APIs; note Guardrails are Converse-only and prompt caching Responses-only on runtime). For a Responses-based source app, the mantle express lane above remains the default and smallest change.
 
 ### Converse rewrite (default)
 
