@@ -402,8 +402,6 @@ Bedrock pricing is provider-neutral and canonical in
 `references/vendored/ai/bedrock-pricing-cache.md`. Load that cache for every Bedrock
 model and service rate; this file intentionally does not duplicate those values.
 
----
-
 ## Source Provider Pricing (for Migration Comparison)
 
 Use alongside Bedrock pricing to calculate migration ROI.
