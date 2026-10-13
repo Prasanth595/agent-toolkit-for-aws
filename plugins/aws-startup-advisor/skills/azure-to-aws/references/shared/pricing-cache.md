@@ -1,6 +1,15 @@
 # Source-Provider AI Pricing Cache
 
-**Last updated:** 2026-10-05 (re-verified via the AWS Pricing MCP server, aws.amazon.com/bedrock/pricing, and the Bedrock model cards' Geo/Global inference ID tables — Claude Sonnet 5 $2/$10 (Global/base) / $2.20/$11 (Geo, `us.`-prefixed), Opus 4.8 $5/$25 (Global/base) / $5.50/$27.50 (Geo), Sonnet 4.6 $3/$15 (Global/base) / $3.30/$16.50 (Geo), Haiku 4.5 $1/$5 (Global/base) / $1.10/$5.50 (Geo), Opus 4.6 $5/$25, Opus 4.1 legacy $15/$75, Claude Fable 5 $10/$50, Llama 4 Maverick/Scout, Llama 3.3 70B, Nova 2 Lite/Pro/Lite/Micro, Mistral Large 3, DeepSeek-R1, gpt-oss-20b/120b, GPT-5.6/5.5/5.4 family, and the OpenAI/Azure OpenAI source-side table all confirmed unchanged; this refresh corrects the Geo-vs-Global pricing gap for the four Anthropic models that require a cross-Region inference profile — see the Geo vs. Global note below)
+**Last updated:** 2026-10-10 (added the GPT-6 family — GPT-6 Astra, GPT-6 Sol, GPT-6 Luna, GPT-6.1 Sol — sourced
+from each model's own AWS Bedrock model card and OpenAI's own API pricing page, fetched 2026-10-10; see
+`shared/openai-on-bedrock.md` for full citations. Prior refresh, 2026-10-05: re-verified via the AWS Pricing MCP
+server, aws.amazon.com/bedrock/pricing, and the Bedrock model cards' Geo/Global inference ID tables — Claude
+Sonnet 5 $2/$10 (Global/base) / $2.20/$11 (Geo, `us.`-prefixed), Opus 4.8 $5/$25 (Global/base) / $5.50/$27.50
+(Geo), Sonnet 4.6 $3/$15 (Global/base) / $3.30/$16.50 (Geo), Haiku 4.5 $1/$5 (Global/base) / $1.10/$5.50 (Geo),
+Opus 4.6 $5/$25, Opus 4.1 legacy $15/$75, Claude Fable 5 $10/$50, Llama 4 Maverick/Scout, Llama 3.3 70B, Nova 2
+Lite/Pro/Lite/Micro, Mistral Large 3, DeepSeek-R1, gpt-oss-20b/120b, GPT-5.6/5.5/5.4 family, and the OpenAI/Azure
+OpenAI source-side table all confirmed unchanged; this refresh corrects the Geo-vs-Global pricing gap for the four
+Anthropic models that require a cross-Region inference profile — see the Geo vs. Global note below)
 **Region:** us-east-1
 **Currency:** USD
 **Accuracy:** ±15-25% for source-provider AI models (sourced from public pricing pages)
@@ -20,6 +29,10 @@
 
 ---
 
+Bedrock pricing is provider-neutral and canonical in
+`references/vendored/ai/bedrock-pricing-cache.md`. Load that cache for every Bedrock
+model and service rate; this file intentionally does not duplicate those values.
+
 ## Source Provider Pricing (for Migration Comparison)
 
 Use alongside the Bedrock rates to compute migration ROI. This is the **source-side baseline** —
@@ -34,8 +47,19 @@ fallback when no measured spend exists, and the source side of the per-model "vs
 
 ### OpenAI / Azure OpenAI (Standard Tier)
 
-Prices per 1M tokens.
+Prices per 1M tokens. GPT-5.5 and GPT-5.5 Pro use the same breakpoint pricing structure as GPT-5.4
+at 272K input tokens. GPT-5.4 and GPT-5.4 Pro use **breakpoint pricing** at 272K input tokens:
+rates below are for <272K context; above 272K, input is 2x and output is 1.5x.
 
+GPT-6 Astra, GPT-6 Sol, GPT-6 Luna, and GPT-6.1 Sol use the same breakpoint shape at 272,000 input
+tokens: rows below are the short-context (≤272K) rate; above 272,000 input tokens, the entire
+request — input, cache, and output — is repriced at 2x input/cache and 1.5x output (see the
+"OpenAI on Bedrock — the same-model path" section above, or OpenAI's own GPT-6 pricing page, for
+the resulting rates).
+
+> GPT-6 rows below show the ≤272K short-context rate (the Standard-tier default range); 1.05M is
+> the model's maximum context window, not the rate's valid range — see the breakpoint note above.
+>
 > **Tier note — these are OpenAI STANDARD-tier rates.** Bedrock in-region for the same models is
 > the OpenAI _data-residency_ tier, exactly 1.10x these figures (see
 > `references/shared/openai-on-bedrock.md`). So a same-model move for GPT-5.6 Sol/Terra/Luna,
@@ -46,6 +70,10 @@ Prices per 1M tokens.
 
 | Model         | Input $/1M   | Output $/1M  | Context | Tier      |
 | ------------- | ------------ | ------------ | ------- | --------- |
+| GPT-6 Astra   | 10.00        | 50.00        | ≤272K*  | frontier  |
+| GPT-6.1 Sol   | 2.00         | 10.00        | ≤272K*  | flagship  |
+| GPT-6 Sol     | 2.00         | 10.00        | ≤272K*  | flagship  |
+| GPT-6 Luna    | 0.10         | 0.50         | ≤272K*  | fast      |
 | GPT-5.6 Sol   | _unverified_ | _unverified_ | 1M      | frontier  |
 | GPT-5.6 Terra | _unverified_ | _unverified_ | 1M      | flagship  |
 | GPT-5.6 Luna  | 0.20         | 1.20         | 1M      | fast      |
@@ -65,6 +93,8 @@ Prices per 1M tokens.
 | GPT-4o        | 2.50         | 10.00        | 128K    | flagship  |
 | o3            | 2.00         | 8.00         | 200K    | reasoning |
 | o4-mini       | 1.10         | 4.40         | 200K    | reasoning |
+
+*GPT-6 rows: 1.05M is the model's max window, not this rate's valid range. Requests >272,000 input tokens reprice input/cache 2x and output 1.5x — see the breakpoint note above and pricing-cache.md's long-context tables.
 
 > **Azure OpenAI note.** Azure lists the same models under Azure-specific deployment names
 > (e.g. `gpt-4o`, `gpt-4.1`) and bills per 1M tokens at rates that track the table above. Azure
