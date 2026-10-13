@@ -1,4 +1,4 @@
-const { execFileSync, spawnSync } = require("node:child_process");
+const { execFileSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 
@@ -37,7 +37,7 @@ function evaluate(pr, files, template) {
     throw new Error("The trusted template must contain four distinct confirmations.");
   }
   if (files.length !== pr.changed_files || new Set(files.map((file) => file.filename)).size !== files.length) {
-    throw new Error("Incomplete PR file inventory; review readiness is unknown.");
+    throw new Error("Incomplete PR file inventory; checklist requirements are unknown.");
   }
   const inScope = files.some((file) =>
     [file.filename, file.previous_filename].some((name) => name?.startsWith(PLUGIN_PREFIX)));
@@ -52,7 +52,6 @@ function evaluate(pr, files, template) {
     inScope,
     missing,
     checklistComplete: missing.length === 0,
-    reviewReady: inScope && pr.state === "open" && !pr.draft && missing.length === 0,
   };
 }
 
@@ -84,18 +83,11 @@ async function pages(api, endpoint) {
 async function inspect(api, repository, number, template, expectedHead) {
   const endpoint = `repos/${repository}/pulls/${number}`;
   const pr = await api("GET", endpoint);
-  if (expectedHead && pr.head.sha !== expectedHead) throw new Error("PR head changed before the review gate.");
+  if (expectedHead && pr.head.sha !== expectedHead) throw new Error("PR head changed before checklist inspection.");
   const files = await pages(api, `${endpoint}/files`);
   const current = await api("GET", endpoint);
-  if (!unchanged(pr, current)) throw new Error("PR changed during the review gate; retry with fresh data.");
+  if (!unchanged(pr, current)) throw new Error("PR changed during checklist inspection; retry with fresh data.");
   return { pr: current, result: evaluate(current, files, template) };
-}
-
-async function startReview(api, repository, number, template, expectedHead, launch) {
-  if (!/^[a-f0-9]{40}$/.test(expectedHead || "")) throw new Error("Review requires an expected commit SHA.");
-  const { result } = await inspect(api, repository, number, template, expectedHead);
-  if (!result.reviewReady) return { ...result, exitCode: 1 };
-  return { ...result, exitCode: await launch(result.head) };
 }
 
 function reminder(repository, result) {
@@ -105,15 +97,13 @@ function reminder(repository, result) {
   }
   if (result.checklistComplete) {
     return `${COMMENT_MARKER}\nAll four Startup Advisor author confirmations are complete.\n\n` +
-      (result.reviewReady
-        ? "This PR is eligible for the review queue. CI and reviewers still need to verify the change."
-        : "This PR is still a draft. Mark it ready for review when you want review to start.");
+      "The author checklist check now passes. CI and reviewers still need to verify the change.";
   }
   return `${COMMENT_MARKER}\nThis PR changes Startup Advisor and is awaiting author confirmation.\n\n` +
     `Add the checklist from [the Startup Advisor PR template](${templateUrl}) to the PR description, ` +
     "then complete the following confirmations there:\n\n" +
     result.missing.map((text) => `- ${text}`).join("\n") +
-    "\n\nAutomatic review must wait until these confirmations are complete and the PR is ready for review.";
+    "\n\nKeep the checklist heading and include each item exactly once, with its original wording. The check will run again when you update the description.";
 }
 
 async function notify(api, repository, number, template, expectedHead) {
@@ -130,7 +120,7 @@ async function notify(api, repository, number, template, expectedHead) {
       await api("PATCH", `repos/${repository}/check-runs/${check.id}`, {
         status: "completed",
         conclusion: "neutral",
-        output: { title: "PR closed", summary: "This PR is closed and is not eligible for review." },
+        output: { title: "PR closed", summary: "This PR is closed; no author checklist is required." },
       });
       return result;
     }
@@ -162,42 +152,21 @@ async function notify(api, repository, number, template, expectedHead) {
     await api("PATCH", `repos/${repository}/check-runs/${check.id}`, {
       status: "completed",
       conclusion: "failure",
-      output: { title: "Readiness could not be verified", summary: error.message },
+      output: { title: "Checklist could not be verified", summary: error.message },
     });
     throw error;
   }
 }
 
 async function main() {
-  const [mode, repository, number, expectedHead, separator, ...command] = process.argv.slice(2);
-  if (!["check", "notify", "review"].includes(mode) || !/^[\w.-]+\/[\w.-]+$/.test(repository || "") ||
-      !/^[1-9]\d*$/.test(number || "") || (expectedHead && !/^[a-f0-9]{40}$/.test(expectedHead)) ||
-      (mode === "notify" && !expectedHead) ||
-      (mode === "review" && (!expectedHead || separator !== "--" || !command.length)) ||
-      (mode !== "review" && separator !== undefined)) {
-    throw new Error("Usage: node startup-advisor-pr-checklist.cjs check <owner/repo> <pr-number> [expected-head]\n" +
-      "       node startup-advisor-pr-checklist.cjs notify <owner/repo> <pr-number> <event-head>\n" +
-      "       node startup-advisor-pr-checklist.cjs review <owner/repo> <pr-number> <expected-head> -- <command> [args...]");
+  const [repository, number, expectedHead, ...extra] = process.argv.slice(2);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repository || "") || !/^[1-9]\d*$/.test(number || "") ||
+      !/^[a-f0-9]{40}$/.test(expectedHead || "") || extra.length) {
+    throw new Error("Usage: node startup-advisor-pr-checklist.cjs <owner/repo> <pr-number> <event-head>");
   }
   const template = readFileSync(resolve(__dirname, "../PULL_REQUEST_TEMPLATE/startup-advisor.md"), "utf8");
-  if (mode === "review") {
-    const result = await startReview(githubApi, repository, Number(number), template, expectedHead, (head) => {
-      const child = spawnSync(command[0], command.slice(1), {
-        stdio: "inherit",
-        env: { ...process.env, STARTUP_ADVISOR_REVIEW_HEAD: head },
-      });
-      if (child.error) throw child.error;
-      return child.status ?? 1;
-    });
-    console.log(JSON.stringify(result));
-    process.exitCode = result.exitCode;
-    return;
-  }
-  const result = mode === "notify"
-    ? await notify(githubApi, repository, Number(number), template, expectedHead)
-    : (await inspect(githubApi, repository, Number(number), template, expectedHead)).result;
+  const result = await notify(githubApi, repository, Number(number), template, expectedHead);
   console.log(JSON.stringify(result));
-  if (mode === "check" && !result.reviewReady) process.exitCode = 1;
 }
 
 if (require.main === module) {
@@ -207,4 +176,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { CHECK_NAME, COMMENT_MARKER, checklistItems, evaluate, inspect, startReview, notify };
+module.exports = { CHECK_NAME, COMMENT_MARKER, checklistItems, evaluate, inspect, notify };

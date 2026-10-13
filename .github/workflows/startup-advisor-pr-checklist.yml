@@ -49,4 +49,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: node .github/scripts/startup-advisor-pr-checklist.cjs notify "$GITHUB_REPOSITORY" "$PR_NUMBER" "$PR_HEAD_SHA"
+        run: node .github/scripts/startup-advisor-pr-checklist.cjs "$GITHUB_REPOSITORY" "$PR_NUMBER" "$PR_HEAD_SHA"

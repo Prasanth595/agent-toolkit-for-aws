@@ -1,10 +1,8 @@
 const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
-const { tmpdir } = require("node:os");
+const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const test = require("node:test");
-const { COMMENT_MARKER, checklistItems, evaluate, inspect, startReview, notify: runNotify } = require("./startup-advisor-pr-checklist.cjs");
+const { COMMENT_MARKER, checklistItems, evaluate, inspect, notify: runNotify } = require("./startup-advisor-pr-checklist.cjs");
 
 const template = readFileSync(resolve(__dirname, "../PULL_REQUEST_TEMPLATE/startup-advisor.md"), "utf8");
 const complete = template.replaceAll("- [ ]", "- [x]");
@@ -48,9 +46,9 @@ function fixture({ pr = pull(), files = [pluginFile], comments = [], mutate } = 
 }
 
 test("requires the four confirmations in the dedicated section", () => {
-  assert.equal(evaluate(pull(), [pluginFile], template).reviewReady, true);
+  assert.equal(evaluate(pull(), [pluginFile], template).checklistComplete, true);
   for (const body of [null, "", template, complete.replace("## Startup Advisor review checklist", "## Other")]) {
-    assert.equal(evaluate(pull({ body }), [pluginFile], template).reviewReady, false);
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
   }
   for (const item of checklistItems(template)) {
     const checkedLine = `- [x] ${item.text}`;
@@ -60,14 +58,14 @@ test("requires the four confirmations in the dedicated section", () => {
       complete.replace(checkedLine, `${checkedLine}\n${checkedLine}`),
       complete.replace(checkedLine, `${checkedLine} (changed text)`),
     ]) {
-      assert.equal(evaluate(pull({ body }), [pluginFile], template).reviewReady, false);
+      assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
     }
   }
 });
 
 test("accepts uppercase checks and CRLF, but excludes quoted, fenced, and commented examples", () => {
   assert.equal(evaluate(pull({ body: complete.replaceAll("[x]", "[X]").replaceAll("\n", "\r\n") }),
-    [pluginFile], template).reviewReady, true);
+    [pluginFile], template).checklistComplete, true);
   for (const body of [
     `\`\`\`markdown\n${complete}\n\`\`\``,
     `~~~markdown\n${complete}\n~~~`,
@@ -75,13 +73,17 @@ test("accepts uppercase checks and CRLF, but excludes quoted, fenced, and commen
     `<!--\n${complete}`,
     complete.split("\n").map((line) => `> ${line}`).join("\n"),
   ]) {
-    assert.equal(evaluate(pull({ body }), [pluginFile], template).reviewReady, false);
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
   }
 });
 
-test("Draft and closed PRs never pass the review gate even with all confirmations", () => {
-  assert.equal(evaluate(pull({ draft: true }), [pluginFile], template).reviewReady, false);
-  assert.equal(evaluate(pull({ state: "closed" }), [pluginFile], template).reviewReady, false);
+test("the default template fails, but adding our completed checklist to it passes", () => {
+  const defaultTemplate = readFileSync(resolve(__dirname, "../pull_request_template.md"), "utf8")
+    .replaceAll("- [ ]", "- [x]");
+  assert.equal(evaluate(pull({ body: defaultTemplate }), [pluginFile], template).checklistComplete, false);
+  const section = complete.slice(complete.indexOf("## Startup Advisor review checklist")).split("\n\n*By submitting")[0];
+  const body = `${defaultTemplate}\n\n${section}\n\n## Additional context\nCustom author content.\n`;
+  assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true);
 });
 
 test("includes deletions, mixed PRs, and renames into or out of the plugin", () => {
@@ -91,7 +93,7 @@ test("includes deletions, mixed PRs, and renames into or out of the plugin", () 
     [{ filename: "docs/moved.md", previous_filename: pluginFile.filename }],
     [{ ...pluginFile, previous_filename: "docs/moved.md" }],
   ]) {
-    assert.equal(evaluate(pull({ changed_files: files.length }), files, template).reviewReady, true);
+    assert.equal(evaluate(pull({ changed_files: files.length }), files, template).inScope, true);
   }
   for (const filename of ["README.md", "plugins/another/README.md", "plugins/aws-startup-advisor-copy/README.md"]) {
     assert.equal(evaluate(pull(), [{ filename }], template).inScope, false);
@@ -104,16 +106,17 @@ test("incomplete inventories and broken trusted templates fail closed", () => {
   assert.throws(() => evaluate(pull(), [pluginFile], ""), /four distinct/);
 });
 
-test("the read-only review gate paginates and checks the expected head", async () => {
+test("checklist inspection paginates and checks the expected head", async () => {
   const files = Array.from({ length: 100 }, (_, i) => ({ filename: `docs/${i}.md` })).concat(pluginFile);
   const f = fixture({ pr: pull({ changed_files: files.length }), files });
   const { result } = await inspect(f.api, repository, 42, template, "a".repeat(40));
-  assert.equal(result.reviewReady, true);
+  assert.equal(result.inScope, true);
+  assert.equal(result.checklistComplete, true);
   assert.deepEqual(f.writes, []);
   await assert.rejects(inspect(f.api, repository, 42, template, "c".repeat(40)), /head changed/);
 });
 
-test("API errors and edits during inventory inspection cannot authorize review", async () => {
+test("API errors and edits during inventory inspection cannot produce a checklist result", async () => {
   await assert.rejects(inspect(async () => { throw new Error("API unavailable"); },
     repository, 42, template), /API unavailable/);
   for (const change of [
@@ -126,63 +129,6 @@ test("API errors and edits during inventory inspection cannot authorize review",
     const f = fixture({ mutate: (pr, reads) => { if (reads === 2) change(pr); } });
     await assert.rejects(inspect(f.api, repository, 42, template), /changed during/);
     assert.deepEqual(f.writes, []);
-  }
-});
-
-test("the review entrypoint never launches a reviewer before author confirmation", async () => {
-  for (const overrides of [{ body: null }, { body: template }, { draft: true }, { state: "closed" }]) {
-    const f = fixture({ pr: pull(overrides) });
-    let launches = 0;
-    const result = await startReview(f.api, repository, 42, template, "a".repeat(40), () => { launches++; });
-    assert.equal(result.exitCode, 1);
-    assert.equal(launches, 0);
-    assert.deepEqual(f.writes, []);
-  }
-});
-
-test("the review entrypoint launches only the checked head and propagates the review result", async () => {
-  const f = fixture();
-  const launchedHeads = [];
-  const result = await startReview(f.api, repository, 42, template, "a".repeat(40), (head) => {
-    launchedHeads.push(head);
-    return 7;
-  });
-  assert.deepEqual(launchedHeads, ["a".repeat(40)]);
-  assert.equal(result.exitCode, 7);
-  for (const head of [undefined, "c".repeat(40)]) {
-    await assert.rejects(startReview(f.api, repository, 42, template, head, () => {
-      assert.fail("The reviewer must not start for an unknown or stale head.");
-    }));
-  }
-});
-
-test("the CLI starts a real child process only after the checklist passes", () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "startup-advisor-checklist-"));
-  try {
-    const gh = resolve(directory, "gh");
-    writeFileSync(gh, `#!/usr/bin/env node
-const fixture = JSON.parse(process.env.CHECKLIST_TEST_FIXTURE);
-console.log(JSON.stringify(process.argv.at(-1).includes("/files?") ? fixture.files : fixture.pr));
-`, { mode: 0o755 });
-    for (const [index, pr] of [pull({ body: template }), pull(), pull({ draft: true })].entries()) {
-      const marker = resolve(directory, `review-${index}`);
-      const child = spawnSync(process.execPath, [
-        resolve(__dirname, "startup-advisor-pr-checklist.cjs"), "review", repository, "42", "a".repeat(40),
-        "--", process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], 'started')", marker,
-      ], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${directory}:${process.env.PATH}`,
-          CHECKLIST_TEST_FIXTURE: JSON.stringify({ pr, files: [pluginFile] }),
-        },
-      });
-      assert.equal(child.status, index === 1 ? 0 : 1, child.stderr);
-      assert.equal(existsSync(marker), index === 1);
-      assert.equal(JSON.parse(child.stdout).reviewReady, index === 1);
-    }
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
@@ -223,7 +169,7 @@ test("unchecked -> checked -> unchecked updates one reminder and the check outco
   for (const body of [template, template, complete, template]) {
     f.pr.body = body;
     const result = await notify(f.api, repository, 42, template);
-    outcomes.push(result.reviewReady);
+    outcomes.push(result.checklistComplete);
   }
   assert.deepEqual(outcomes, [false, false, true, false]);
   assert.equal(f.comments.length, 1);
@@ -262,15 +208,15 @@ test("a mid-run edit fails the check instead of publishing a stale success", asy
   }
 });
 
-test("draft confirmations pass the checklist check but keep review blocked", async () => {
+test("the checklist check behaves the same for Draft and ready PRs", async () => {
   const f = fixture({ pr: pull({ draft: true, body: template }) });
   await notify(f.api, repository, 42, template);
   f.pr.body = complete;
   const result = await notify(f.api, repository, 42, template);
   assert.equal(result.checklistComplete, true);
-  assert.equal(result.reviewReady, false);
-  assert.match(f.comments[0].body, /still a draft/);
+  assert.equal(f.writes.at(-1).body.conclusion, "success");
+  const completedReminder = f.comments[0].body;
   f.pr.draft = false;
-  assert.equal((await notify(f.api, repository, 42, template)).reviewReady, true);
-  assert.match(f.comments[0].body, /eligible for the review queue/);
+  assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, true);
+  assert.equal(f.comments[0].body, completedReminder);
 });
