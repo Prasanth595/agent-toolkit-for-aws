@@ -185,15 +185,42 @@ condition holds; otherwise skip silently:
 The sub-file's Step 0 consent gate is the single consent point for this source
 — do not pre-ask here; declining `[B]` exits cleanly and must not be re-asked
 this run. If `$MIGRATION_DIR/openrouter-capture/manifest.json` already exists (a
-resumed run), check its `/activity` entry's `status` first — `ok` means capture
-already happened cleanly, so execute from Step 3 (parse the existing captures)
-as before; a deliberate `skipped` means the user already abandoned this source
-for this run — exit cleanly with no output and no re-ask, exactly like a Step 0
-consent decline (there is no `activity.json` to parse; do NOT execute Step 3 on
-a `skipped` status); a `failed` status means the prior attempt did NOT complete
-(see `discover-openrouter-api.md` Step 2d's retry rule) — resume from Step 2's
-retry path, not Step 3, since there is no `activity.json` to parse yet. The
-merge SUMS OpenRouter spend with a genuinely
+resumed run), check its `/activity` entry's `status` first — a deliberate
+`skipped` means the user already abandoned this source for this run — exit
+cleanly with no output and no re-ask, exactly like a Step 0 consent decline
+(there is no `activity.json` to parse; do NOT execute Step 3 on a `skipped`
+status); a `failed` status means the prior attempt did NOT complete (see
+`discover-openrouter-api.md` Step 2d's retry rule) — resume from Step 2's
+retry path, not Step 3, since there is no `activity.json` to parse yet.
+**`/activity: ok` does NOT mean route straight to Step 3** — before doing
+that, also check the SAME manifest's `/analytics/query` entry (its resume
+handling is independent of `/activity`'s, per `discover-openrouter-api.md`
+Step 2d): if `/analytics/query` entry's `status` is `"failed"`, there is a
+pending Analytics-only retry — load `discover-openrouter-api.md` and resume
+from its Step 2 retry path for the Analytics row only (reusing the
+already-good `/activity.json`, per that file's own rule), then proceed to
+Step 3 once Analytics reaches a terminal state (`ok` or `skipped`). **A manifest with an `/activity` entry but NO `/analytics/query` entry at all** (an old
+manifest captured before this skill added the Analytics row — three entries:
+`/credits`, `/activity: ok`, `/key`) is PERMANENTLY `cost_provenance: "unknown"` —
+do NOT attempt to upgrade it to Analytics-backed data, and make NO new request of any
+kind (no retry, no `/analytics/query` call, no key re-intake). The consent that produced
+this old manifest predates the `/analytics/query` POST's existence in Step 0's disclosure
+text, so it cannot have covered that call — attempting it now without re-asking would be a
+live request the user never actually consented to, and by this point the capture's key file
+has already been deleted (this manifest's `/activity: ok` with no Analytics row at all can
+only exist from a run whose Step 4 cleanup already ran under a pre-Analytics version of this
+skill) and the manifest has no `window_start_utc`/`window_end_utc` to supply a retry's
+`time_range` either way. Route this case into `discover-openrouter-api.md`'s EXISTING
+unknown-provenance handling instead: load `discover-openrouter-api.md` and execute from its
+Step 3 directly (parse the existing, already-captured `activity.json` — never re-captured),
+treating the ABSENT `/analytics/query` entry exactly as Step 3's own rollup rule already
+treats a `failed`/`skipped` Analytics row — `cost_provenance: "unknown"` for every model, with
+the matching `metadata.capture_warnings` entry Step 3 already appends for that case. This does
+not re-ask Step 0 consent (no new request means nothing new to consent to), and it does not
+proceed through Step 2 at all for this manifest. Only when
+the `/analytics/query` entry is already `"ok"` or `"skipped"` does `/activity:
+ok` mean execute straight from Step 3 (parse the existing captures) as
+before. The merge SUMS OpenRouter spend with a genuinely
 separate provider's spend (e.g. a Vertex billing CSV, or OpenAI-direct usage that
 did NOT flow through OpenRouter) into `source: "mixed"`. What it must NOT do is add
 a second line for traffic already inside the OpenRouter usage figure — OpenRouter
