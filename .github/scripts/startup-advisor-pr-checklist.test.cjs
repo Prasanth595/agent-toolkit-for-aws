@@ -70,7 +70,7 @@ test("one or multiple change types pass without selecting every type", () => {
     const result = evaluate(pull({ body }), [pluginFile], template);
     assert.equal(result.changeTypeSelected, true);
     assert.equal(result.checklistComplete, true);
-    assert.ok(body.includes("- [ ] New plugin"));
+    assert.ok(body.includes("- [ ] New skill"));
   }
   const body = complete.replace("- [x] Bug fix", "- [ ] Bug fix");
   const result = evaluate(pull({ body }), [pluginFile], template);

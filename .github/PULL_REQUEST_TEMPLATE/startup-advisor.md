@@ -2,7 +2,6 @@
 
 Select at least one.
 
-- [ ] New plugin
 - [ ] New skill
 - [ ] Bug fix
 - [ ] Documentation update
