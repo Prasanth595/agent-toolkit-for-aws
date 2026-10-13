@@ -1,6 +1,6 @@
 # AI Pricing Cache (Bedrock + source-provider)
 
-**Last updated:** 2026-10-05 (re-verified via the AWS Pricing MCP server, aws.amazon.com/bedrock/pricing, and the Bedrock model cards' Geo/Global inference ID tables — Claude Sonnet 5 $2/$10 (Global/base) / $2.20/$11 (Geo, `us.`-prefixed), Opus 4.8 $5/$25 (Global/base) / $5.50/$27.50 (Geo), Sonnet 4.6 $3/$15 (Global/base) / $3.30/$16.50 (Geo), Haiku 4.5 $1/$5 (Global/base) / $1.10/$5.50 (Geo), Opus 4.6 $5/$25, Opus 4.1 legacy $15/$75, Claude Fable 5 $10/$50, Llama 4 Maverick/Scout, Llama 3.3 70B, Nova 2 Lite/Pro/Lite/Micro, Mistral Large 3, DeepSeek-R1, gpt-oss-20b/120b, GPT-5.6/5.5/5.4 family, and the OpenAI/Azure OpenAI source-side table all confirmed unchanged; this refresh corrects the Geo-vs-Global pricing gap for the four Anthropic models that require a cross-Region inference profile — see the Geo vs. Global note below)
+**Last updated:** 2026-10-05 (re-verified via the AWS Pricing MCP server, aws.amazon.com/bedrock/pricing, and the Bedrock model cards' Geo/Global inference ID tables — Claude Sonnet 5 $2/$10 (Global/base) / $2.20/$11 (Geo, `us.`-prefixed), Opus 4.8 $5/$25 (Global/base) / $5.50/$27.50 (Geo), Sonnet 4.6 $3/$15 (Global/base) / $3.30/$16.50 (Geo), pricing cache should add/update Haiku 5.5 entry alongside existing Haiku 4.5 pricing, Opus 4.6 $5/$25, Opus 4.1 legacy $15/$75, Claude Fable 5 $10/$50, Llama 4 Maverick/Scout, Llama 3.3 70B, Nova 2 Lite/Pro/Lite/Micro, Mistral Large 3, DeepSeek-R1, gpt-oss-20b/120b, GPT-5.6/5.5/5.4 family, and the OpenAI/Azure OpenAI source-side table all confirmed unchanged; this refresh corrects the Geo-vs-Global pricing gap for the four Anthropic models that require a cross-Region inference profile — see the Geo vs. Global note below)
 **Region:** us-east-1
 **Currency:** USD
 **Accuracy:** ±15-25% for AI models (sourced from public pricing pages)
@@ -25,7 +25,7 @@
 **Anthropic Claude (Standard on-demand)** figures match **US East (N. Virginia)** on
 [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) as of cache refresh.
 **Recommend defaults (new migrations):** Claude Sonnet 5 (flagship), Claude Opus 4.8 (hardest
-reasoning), Claude Haiku 4.5 (cost/speed). Do not default to Claude Fable 5 (frontier). Long-context
+reasoning), Claude Haiku 5.5 (cost/speed). Do not default to Claude Fable 5 (frontier). Long-context
 SKUs do not all use the same multiplier; confirm batch/cache and cross-region rows per model on
 that page. See `references/vendored/ai/ai-model-lifecycle.md` for lifecycle detail — **do not
 recommend Legacy/excluded models for new migrations.**
@@ -48,7 +48,7 @@ recommend Legacy/excluded models for new migrations.**
 > table's bare-id rows below are the **Global/base** rate; for a **Geo** (`us.`-prefixed, the
 > common choice for US-only data residency) deployment, multiply input/output by 1.10 — e.g.
 > Sonnet 5 Geo is $2.20/$11.00, Opus 4.8 Geo is $5.50/$27.50, Sonnet 4.6 Geo is $3.30/$16.50,
-> Haiku 4.5 Geo is $1.10/$5.50. `bedrock_pricing.py`'s `STATIC_FALLBACK` table keys the `us.`
+> Haiku 4.5 Geo is $1.10/$5.50 (now superseded by Haiku 5.5, ~75% cheaper than Haiku 4.5 for most tasks). `bedrock_pricing.py`'s `STATIC_FALLBACK` table keys the `us.`
 > id to the Geo rate and the bare id to the Global/base rate — read from that table, not this
 > one, when a migration plan pins a specific inference profile.
 
@@ -61,7 +61,7 @@ recommend Legacy/excluded models for new migrations.**
 | Claude Opus 4.8   | anthropic.claude-opus-4-8                | Anthropic | 5.00       | 25.00       | 200K    | premium   | active                                                                                         |
 | Claude Sonnet 4.6 | anthropic.claude-sonnet-4-6              | Anthropic | 3.00       | 15.00       | 200K    | flagship  | active                                                                                         |
 | Claude Opus 4.6   | anthropic.claude-opus-4-6-v1             | Anthropic | 5.00       | 25.00       | 200K    | premium   | active                                                                                         |
-| Claude Haiku 4.5  | anthropic.claude-haiku-4-5-20251001-v1:0 | Anthropic | 1.00       | 5.00        | 200K    | fast      | active                                                                                         |
+| Claude Haiku 5.5  | anthropic.claude-haiku-5-5-... | Anthropic | <new price>       | <new price>        | 200K    | fast      | active                                                                                         |
 | Claude Opus 4.1   | anthropic.claude-opus-4-1-20250805-v1:0  | Anthropic | 15.00      | 75.00       | 200K    | premium   | legacy (EOL Jan 8, 2027)                                                                       |
 | Llama 4 Maverick  | meta.llama4-maverick-17b-instruct-v1:0   | Meta      | 0.24       | 0.97        | 1M      | mid       | active                                                                                         |
 | Llama 4 Scout     | meta.llama4-scout-17b-instruct-v1:0      | Meta      | 0.17       | 0.66        | 10M     | efficient | active                                                                                         |
@@ -129,7 +129,7 @@ Per 1M tokens unless noted.
 | Claude Sonnet 5   | 1.00 ‡   | 5.00 ‡    | 2.50           | 4.00           | 0.20       |
 | Claude Opus 4.8   | 2.50 ‡   | 12.50 ‡   | 6.25           | 10.00          | 0.50       |
 | Claude Sonnet 4.6 | 1.50     | 7.50      | 3.75           | 6.00           | 0.30       |
-| Claude Haiku 4.5  | 0.50     | 2.50      | 1.25           | 2.00           | 0.10       |
+| Claude Haiku 5.5  | <new rates ~75% lower>     | <new rates>      | <new>           | <new>           | <new>       |
 
 ‡ Not listed on the [batch-supported models table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html)
 as of 2026-10-05 — the figure above is the standard 50%-of-on-demand projection, not a confirmed
