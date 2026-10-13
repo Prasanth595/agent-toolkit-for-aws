@@ -82,8 +82,8 @@ STATIC_FALLBACK = {
     "amazon.nova-lite-v1:0":                        {"input_per_1k_usd": 0.00006, "output_per_1k_usd": 0.00024},
     "amazon.nova-pro-v1:0":                         {"input_per_1k_usd": 0.0008, "output_per_1k_usd": 0.0032},
     # OpenAI proprietary GPT models, SHORT-CONTEXT (272K) tier. Read off the model
-    # cards 2026-08-21. The PriceList API carries no GPT-5.x rows, so this table is
-    # the ONLY source. Pricing has an inference-option dimension:
+    # cards 2026-08-21. The PriceList API carries no GPT-5.x/GPT-6 rows, so this
+    # table is the ONLY source. Pricing has an inference-option dimension:
     #   - bare mantle ids and Geo CRIS (us./in. prefixed): 1.10x OpenAI's standard
     #     list price (parity with OpenAI's *data residency* tier)
     #   - Global CRIS (global. prefixed, GPT-5.6 only): OpenAI's standard list
@@ -106,14 +106,36 @@ STATIC_FALLBACK = {
     "global.openai.gpt-5.6-sol":                    {"input_per_1k_usd": 0.004, "output_per_1k_usd": 0.020},
     "global.openai.gpt-5.6-terra":                  {"input_per_1k_usd": 0.002, "output_per_1k_usd": 0.012},
     "global.openai.gpt-5.6-luna":                   {"input_per_1k_usd": 0.0002, "output_per_1k_usd": 0.0012},
+    # GPT-6 family (Astra, Sol, Luna, 6.1 Sol), SHORT-CONTEXT (272K) tier. Read off
+    # skills/azure-to-aws/references/shared/openai-on-bedrock.md's GPT-6 short-context
+    # table (verified 2026-10-10). Same inference-option shape as GPT-5.6: bare mantle
+    # id and Geo CRIS (us. prefixed) carry the 1.10x data-residency premium; Global
+    # CRIS (global. prefixed) is OpenAI's standard list price — cost parity.
+    "openai.gpt-6-astra":                           {"input_per_1k_usd": 0.011, "output_per_1k_usd": 0.055},
+    "openai.gpt-6-sol":                             {"input_per_1k_usd": 0.0022, "output_per_1k_usd": 0.011},
+    "openai.gpt-6-luna":                             {"input_per_1k_usd": 0.00011, "output_per_1k_usd": 0.00055},
+    "openai.gpt-6.1-sol":                            {"input_per_1k_usd": 0.0022, "output_per_1k_usd": 0.011},
+    # GPT-6 CRIS profile ids (bedrock-runtime). Geo = data-residency tier (1.10x);
+    # Global = standard-price parity. No `in.`-prefixed form is published for any
+    # GPT-6 model (per openai-on-bedrock.md's regional-availability table) — do not
+    # add one without re-verifying.
+    "us.openai.gpt-6-astra":                        {"input_per_1k_usd": 0.011, "output_per_1k_usd": 0.055},
+    "us.openai.gpt-6-sol":                          {"input_per_1k_usd": 0.0022, "output_per_1k_usd": 0.011},
+    "us.openai.gpt-6-luna":                         {"input_per_1k_usd": 0.00011, "output_per_1k_usd": 0.00055},
+    "us.openai.gpt-6.1-sol":                        {"input_per_1k_usd": 0.0022, "output_per_1k_usd": 0.011},
+    "global.openai.gpt-6-astra":                    {"input_per_1k_usd": 0.010, "output_per_1k_usd": 0.050},
+    "global.openai.gpt-6-sol":                      {"input_per_1k_usd": 0.0020, "output_per_1k_usd": 0.010},
+    "global.openai.gpt-6-luna":                     {"input_per_1k_usd": 0.00010, "output_per_1k_usd": 0.00050},
+    "global.openai.gpt-6.1-sol":                    {"input_per_1k_usd": 0.0020, "output_per_1k_usd": 0.010},
 }
 
 
 def is_mantle_gpt(model_id: str) -> bool:
-    """Pure: OpenAI's proprietary GPT models, which the AWS PriceList API does not
-    carry. The open-weight gpt-oss models ARE in the PriceList API and must not match."""
+    """Pure: OpenAI's proprietary GPT models (GPT-5.5/5.4/5.6 and GPT-6
+    Astra/Sol/Luna/6.1 Sol), which the AWS PriceList API does not carry. The
+    open-weight gpt-oss models ARE in the PriceList API and must not match."""
     mid = model_id.lower()
-    return mid.startswith("openai.gpt-5") and "oss" not in mid
+    return (mid.startswith("openai.gpt-5") or mid.startswith("openai.gpt-6")) and "oss" not in mid
 
 
 def unavailable(note: str) -> dict:
@@ -131,7 +153,7 @@ def _static_fallback(model_id: str) -> dict | None:
     # different price points, and the inference options differ by prefix at a 10%
     # spread — a partial match on e.g. `openai.gpt-5.6` or `us.openai.gpt-5.6`
     # would silently bill one tier or option at another's rate.
-    if is_mantle_gpt(model_id) or re.match(r"^(us|in|global)\.openai\.gpt-5", model_id):
+    if is_mantle_gpt(model_id) or re.match(r"^(us|in|global)\.openai\.gpt-[56]", model_id):
         return None
     # Try stripping the version suffix for a partial match (e.g. us.anthropic.claude-sonnet-5)
     base = model_id.rsplit("-v", 1)[0] if "-v" in model_id else model_id
