@@ -11,7 +11,7 @@
 | Series A / Steady traffic | ECS Fargate                       | Predictable costs at steady-state; Savings Plans eligible                                                                                                                    |
 | Series B+ / Team has K8s  | EKS only if team already knows it | Never adopt K8s as a startup unless you're hiring K8s engineers                                                                                                              |
 
-**Counterintuitive**: ECS Fargate at seed stage feels heavy, but the ALB + target group + task definition setup is a one-time cost (~1 day). You avoid a forced re-platform when you outgrow Lambda's 15-minute timeout or need persistent connections. For simpler cases, Lambda function URLs with response streaming can bridge the gap without a full container deploy.
+**Counterintuitive**: ECS Fargate at seed stage feels heavy, but the ALB + target group + task definition setup is a one-time cost (~1 day). You avoid a forced re-platform when you outgrow Lambda's 15-minute timeout or need persistent connections — though for genuinely long-lived HTTP/server workloads, Lambda Web Functions (new) may now bridge this gap without moving to ECS Fargate at all. For simpler cases, Lambda function URLs with response streaming can bridge the gap without a full container deploy.
 
 ### Database — The Startup Trap
 
