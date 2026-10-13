@@ -950,6 +950,20 @@ resulting rates).
 
 *GPT-6 rows: 1.05M is the model's max window, not this rate's valid range. Requests >272,000 input tokens reprice input/cache 2x and output 1.5x — see the breakpoint note above and pricing-cache.md's long-context tables.
 
+### Anthropic (Standard Tier, 1P API)
+
+Prices per 1M tokens. Source: [claude.com/pricing](https://claude.com/pricing), verified October 2026.
+
+| Model              | Input $/1M | Output $/1M | Context | Tier     |
+| ------------------ | ---------- | ----------- | ------- | -------- |
+| Claude Haiku 4.5   | 1.00       | 5.00        | 200K    | fast     |
+| Claude Sonnet 4.5  | 3.00       | 15.00       | 200K    | flagship |
+| Claude Sonnet 5    | 2.00       | 10.00       | 1M      | flagship |
+
+> These first-party rates match Bedrock's Global/base rate for the same models, and a Bedrock
+> `us.`-prefixed Geo inference profile runs about 10% higher (see the Geo vs. Global note in the
+> Bedrock Models section).
+
 ## Security Baseline
 
 **Per-unit rates verified via AWS Pricing API for us-east-1 on 2026-05-04.**

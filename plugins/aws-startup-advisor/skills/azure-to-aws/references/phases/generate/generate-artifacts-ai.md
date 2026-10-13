@@ -29,7 +29,7 @@ Read `aws-design-ai.json → ai_architecture.code_migration.migration_path` and
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `mantle_openai_responses`                                         | `ai-migration/migrate_to_mantle.sh` — **skip the provider adapter**       |
 | `runtime_openai_cris`                                              | `ai-migration/migrate_to_mantle.sh` (CRIS variant — `bedrock-runtime` base URL + CRIS id) — skip the provider adapter |
-| `direct` (or absent)                                              | `ai-migration/provider_adapter.{py,js,go}`                                |
+| `direct` (or absent) or `converse`                                | `ai-migration/provider_adapter.{py,js,go}` — `converse` is a Converse client swap, not a Mantle script |
 | `gpt-oss`                                                         | `ai-migration/provider_adapter.{py,js,go}` targeting gpt-oss via Converse |
 | gateway (`llm_router`/`api_gateway`/`voice_platform`/`framework`) | `ai-migration/gateway_config.{yaml,py,json}` — skip the adapter           |
 | agentic `migration_approach == harness`                           | `ai-migration/harness.json`, `ai-migration/deploy_harness.sh`             |
