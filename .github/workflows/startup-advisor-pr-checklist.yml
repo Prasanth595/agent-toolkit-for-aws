@@ -10,6 +10,8 @@ on:
       - .github/workflows/startup-advisor-pr-checklist.yml
   pull_request_target:
     branches: [main]
+    paths:
+      - plugins/aws-startup-advisor/**
     types: [opened, edited, synchronize, reopened, ready_for_review, converted_to_draft]
 
 concurrency:
