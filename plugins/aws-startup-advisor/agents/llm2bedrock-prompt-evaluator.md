@@ -39,12 +39,12 @@ Read from prompt context (forwarded from llm2bedrock-code-analyzer, llm2bedrock-
 
 - **`<GOLDEN_DATASET_PATH>`** — `<repo>/.saws-migrate/golden-dataset/prompts.jsonl` (from T2-2). May be empty if T2-2 took the abort / paste / vision-no-images / embeddings path.
 - **`<TEMPLATE_PATH>`** — `<repo>/.saws-migrate/golden-dataset/templates/prompt_template.txt` (from T2-2).
-- **`<TARGET_MODEL_ID>`** — Bedrock target model ID from the migration plan, validated by llm2bedrock-code-analyzer §10. Substitute it in every Bedrock call below. **It also selects the API path:** a bare `openai.gpt-5*` id (excluding `-oss`) is mantle-served and must use the Responses client in §6a; a `us.`/`in.`/`global.`-prefixed `openai.gpt-5.6-*` CRIS id is a `bedrock-runtime` target and uses `boto3.converse` like any other profile; everything else uses `boto3.converse`. See the table at the top of §6.
+- **`<TARGET_MODEL_ID>`** — Bedrock target model ID from the migration plan, validated by llm2bedrock-code-analyzer §10. Substitute it in every Bedrock call below. **It also selects the API path:** a bare `openai.gpt-5*` / `openai.gpt-6*` id (excluding `-oss`) is mantle-served and must use the Responses client in §6a; a `us.`/`in.`/`global.`-prefixed `openai.gpt-5.6-*` / `openai.gpt-6*` CRIS id is a `bedrock-runtime` target and uses `boto3.converse` like any other profile; everything else uses `boto3.converse`. See the table at the top of §6.
 - **`<REGION>`** — AWS region for Bedrock (the `AWS region:` line in your context).
 - **From `llm2bedrock-code-analyzer` (`AiAnalysisData`)** — key fields:
   - `source_provider` — `openai` / `anthropic` / `google` / `cohere` / `custom`. Drives §9 baseline gating. (Vertex AI customers are emitted as `google` here; the analyzer's `errors` field carries the `vertex AI auth detected` signal that gates baseline collection upstream — by the time you reach §9, `source_baseline_available` already reflects that.)
   - `source_models` — list of source-model IDs. Pass `<SOURCE_MODEL_ID>` to the §9 baseline skill verbatim.
-  - `same_model_family` — `true` when the model is unchanged: Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*`). Triggers the §8 short-circuit.
+  - `same_model_family` — `true` when the model is unchanged: Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*` / `openai.gpt-6*`). Triggers the §8 short-circuit.
   - `source_baseline_available` — `true` iff the user supplied a source-provider API key (orchestration skill Phase B3) and it was written to `<repo>/.saws-migrate/.source-provider-env`. When `false`, §9 skips and the report banner will note the gap.
   - `special_patterns` — `{streaming, function_calling, embeddings, vision}` booleans. Drives §5 layer selection.
   - `bedrock_provider_available` — informational ONLY. This is a rewrite-strategy flag for T2-5, NOT an account-capability flag. Do NOT use it to decide whether your Bedrock calls will work — Step §6 verifies that directly.
@@ -132,8 +132,8 @@ call in §6, §9.5 and §10:**
 
 | `<TARGET_MODEL_ID>` matches                       | API path         | Connectivity | Vision smoke | Golden eval              |
 | ------------------------------------------------- | ---------------- | ------------ | ------------ | ------------------------ |
-| bare `openai.gpt-5*` (not `-oss`)                 | Mantle Responses | §6a          | §9.5a        | §8 loop (same-model)     |
-| `us.`/`in.`/`global.` + `openai.gpt-5.6-*` (CRIS) | `boto3.converse` | §6           | §9.5         | §8 loop (same-model)     |
+| bare `openai.gpt-5*` / `openai.gpt-6*` (not `-oss`)              | Mantle Responses | §6a          | §9.5a        | §8 loop (same-model)     |
+| `us.`/`in.`/`global.` + `openai.gpt-5.6-*` / `openai.gpt-6*` (CRIS) | `boto3.converse` | §6           | §9.5         | §8 loop (same-model)     |
 | anything else (Claude, Nova, `openai.gpt-oss-*`)  | `boto3.converse` | §6           | §9.5         | §10, or §8 if same-model |
 
 The proprietary OpenAI GPT models are served ONLY on the `bedrock-mantle`
@@ -187,7 +187,7 @@ Interpret the result:
 
 # 6a. Mantle connectivity check (proprietary OpenAI GPT targets)
 
-Use this INSTEAD of §6 when `<TARGET_MODEL_ID>` matches `openai.gpt-5*` (excluding
+Use this INSTEAD of §6 when `<TARGET_MODEL_ID>` matches `openai.gpt-5*` / `openai.gpt-6*` (excluding
 `-oss`). Same purpose, different endpoint and SDK.
 
 ```bash
@@ -249,11 +249,11 @@ If `total_golden_cases == 0` (T2-2 abort / paste / vision-no-images / embeddings
 
 # 8. Same-model-family short-circuit
 
-If `same_model_family: true` — either Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*`):
+If `same_model_family: true` — either Anthropic 1P → Bedrock Claude, or OpenAI → the same GPT model on Bedrock (`openai.gpt-5*` / `openai.gpt-6*`):
 
 - Skip rubric generation and scoring (no parameter-surface drift to score against).
 - Just verify each prompt works on Bedrock (connectivity + response format): run each prompt, check for errors, verify response is non-empty.
-- **Use the API path §6 selected, not §10's script.** For an Anthropic 1P → Claude run that is `boto3.converse`. For an `openai.gpt-5*` run it is the Mantle Responses client from §6a — `client.responses.create(model='<TARGET_MODEL_ID>', input=<prompt>, max_output_tokens=<n>, store=False)`, reading `r.output_text`. §10's script is Converse-only and will fail against a mantle target; do not call it here.
+- **Use the API path §6 selected, not §10's script.** For an Anthropic 1P → Claude run that is `boto3.converse`. For an `openai.gpt-5*` / `openai.gpt-6*` run it is the Mantle Responses client from §6a — `client.responses.create(model='<TARGET_MODEL_ID>', input=<prompt>, max_output_tokens=<n>, store=False)`, reading `r.output_text`. §10's script is Converse-only and will fail against a mantle target; do not call it here.
 - Output pass / fail per prompt; count successes as `success_count`.
 - Compute `pass_rate = success_count / total_cases` (connectivity-only ratio) and write `failures = total_cases - success_count`.
 - In §14, set `live_source_baseline: false` (no live comparison ran) and add `notes` prefix `same_model_family: true — connectivity-only verification, no rubric scoring`. T2-6 reads that prefix to render the report banner with "connectivity verified" instead of "judge scored X/Y prompts". Set `source_baseline_quality: 'unknown'` (no live baseline ran).
@@ -364,7 +364,7 @@ If `special_patterns.vision == false`, SKIP this section.
 
 **This section runs for same-model migrations too** (both Anthropic 1P → Claude and OpenAI → the same GPT model). §8 short-circuits scoring, not image verification: it is the only gate that proves image input works before per-case image calls, so skipping it would let a vision migration pass without ever sending an image.
 
-**Pick the API path exactly as §6 did.** The script below uses `boto3.converse` and is valid for Converse targets. For a mantle-only `openai.gpt-5*` target use §9.5a instead — the GPT-5.x model cards list image input as supported, but it goes through the Responses API, not Converse.
+**Pick the API path exactly as §6 did.** The script below uses `boto3.converse` and is valid for Converse targets. For a mantle-only `openai.gpt-5*` / `openai.gpt-6*` target use §9.5a instead — the GPT-5.x/GPT-6 model cards list image input as supported, but it goes through the Responses API, not Converse.
 
 Otherwise, run a one-shot Bedrock call against a public Wikipedia image to prove the SDK accepts image input before §10 attempts it on every golden prompt. If the public CDN isn't reachable, the smoke is INCONCLUSIVE — do NOT attempt an inline-fixture fallback (tiny synthetic JPEGs trip Claude's minimum-dimension validators and produce false `VISION_FAIL` even when the SDK is fine):
 
@@ -406,7 +406,7 @@ Outcomes:
 
 # 9.5a Mantle vision smoke test (proprietary OpenAI GPT targets)
 
-Use this INSTEAD of §9.5 when `<TARGET_MODEL_ID>` matches `openai.gpt-5*` (excluding `-oss`) AND `special_patterns.vision == true`. Same purpose and same three outcomes; the image travels as a base64 data URL on the Responses API rather than as Converse image bytes.
+Use this INSTEAD of §9.5 when `<TARGET_MODEL_ID>` matches `openai.gpt-5*` / `openai.gpt-6*` (excluding `-oss`) AND `special_patterns.vision == true`. Same purpose and same three outcomes; the image travels as a base64 data URL on the Responses API rather than as Converse image bytes.
 
 ```bash
 AWS_REGION=<REGION> <prepend AWS_PROFILE=<profile> when your context has an `AWS profile` line> uv run --project <scriptsDir> python - <<'PY'
@@ -453,7 +453,7 @@ Outcomes are the same as §9.5: `VISION_OK` → proceed; `VISION_INFRA_SKIPPED` 
 # 10. Run golden prompt evaluation
 
 > **Converse-only.** The script below calls `boto3.converse` and is valid only for
-> the API path §6 selected. A `openai.gpt-5*` target never reaches this section —
+> the API path §6 selected. A `openai.gpt-5*` / `openai.gpt-6*` target never reaches this section —
 > §8's same-model short-circuit fires first and verifies prompts through the Mantle
 > Responses client from §6a. If you somehow arrive here with a mantle target,
 > stop and report the contradiction rather than running a call that cannot work.
