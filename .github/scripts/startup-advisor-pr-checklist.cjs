@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 const { text } = require("node:stream/consumers");
+const MarkdownIt = require("markdown-it");
 
 const CHECK_NAME = "Startup Advisor author checklist";
 const COMMENT_MARKER = "<!-- startup-advisor-author-checklist -->";
@@ -9,105 +10,27 @@ const PLUGIN_PREFIX = "plugins/aws-startup-advisor/";
 const TEMPLATE_PATH = ".github/PULL_REQUEST_TEMPLATE/startup-advisor.md";
 const HEADING = "## Startup Advisor review checklist";
 const TYPE_HEADING = "## Type of Change";
+const markdown = new MarkdownIt({ html: true });
 
-function htmlBlockEnd(line, paragraphOpen) {
-  if (/^ {0,3}<(?:pre|script|style|textarea)(?=[ \t>]|$)/i.test(line)) {
-    return /<\/(?:pre|script|style|textarea)>/i;
-  }
-  if (/^ {0,3}<!--/.test(line)) return /-->/;
-  if (/^ {0,3}<\?/.test(line)) return /\?>/;
-  if (/^ {0,3}<![A-Z]/.test(line)) return />/;
-  if (/^ {0,3}<!\[CDATA\[/.test(line)) return /\]\]>/;
-  if (/^ {0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[ \t/>]|$)/i.test(line)) {
-    return /^[ \t]*$/;
-  }
-  // Other complete HTML tags start a block only outside a paragraph.
-  if (!paragraphOpen && /^ {0,3}(?:<\/[a-z][a-z0-9-]*[ \t]*>|<[a-z][a-z0-9-]*(?:[ \t]+[a-z_:][a-z0-9_.:-]*(?:[ \t]*=[ \t]*(?:[^ \t"'=<>`]+|'[^']*'|"[^"]*"))?)*[ \t]*\/?>)[ \t]*$/i.test(line)) {
-    return /^[ \t]*$/;
-  }
-  return null;
-}
-
-function columnAfter(value, column = 0) {
-  for (const character of value) column += character === "\t" ? 4 - column % 4 : 1;
-  return column;
-}
-
-function checklistItems(markdown, heading = HEADING) {
+function checklistItems(source, heading = HEADING) {
+  const lines = (source || "").split(/\r\n|\r|\n/);
   const items = [];
   let inSection = false;
-  let fence = null;
-  let htmlEnd = null;
-  let paragraphOpen = false;
-  let listItem = null;
-  // Accept the template's top-level headings and single-line task items only.
-  for (const line of (markdown || "").split(/\r\n|\r|\n/)) {
-    if (fence) {
-      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
-      if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) fence = null;
+  for (const token of markdown.parse(source || "", {})) {
+    if (token.type === "heading_open" && token.level === 0 && ["h1", "h2"].includes(token.tag)) {
+      const [start, end] = token.map;
+      // Setext headings end a section; only the exact template syntax opens one.
+      inSection = token.tag === "h2" && end === start + 1 && lines[start].trimEnd() === heading;
       continue;
     }
-    if (htmlEnd) {
-      if (htmlEnd.test(line)) htmlEnd = null;
-      continue;
-    }
-    if (/^[ \t]*$/.test(line)) {
-      if (listItem) listItem.separated = true;
-      paragraphOpen = false;
-      continue;
-    }
-    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    const opensFence = opening && (opening[1][0] === "~" || !opening[2].includes("`"));
-    const isHeading = /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line);
-    const isDivider = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/.test(line);
-    const marker = line.match(/^( {0,3})([-+*]|\d{1,9}[.)])([ \t]+|$)/);
-    if (listItem) {
-      const indent = columnAfter(line.match(/^[ \t]*/)[0]);
-      const interrupts = isHeading || isDivider || marker || opensFence || /^ {0,3}>/.test(line) ||
-        htmlBlockEnd(line, listItem.item ? true : paragraphOpen);
-      if (indent >= listItem.indent || (!listItem.separated && !interrupts)) {
-        if (listItem.item) listItem.item.continued = true;
-        listItem.separated = false;
-        continue;
-      }
-      listItem = null;
-    }
-    htmlEnd = htmlBlockEnd(line, paragraphOpen);
-    if (htmlEnd) {
-      paragraphOpen = false;
-      if (htmlEnd.test(line)) htmlEnd = null;
-      continue;
-    }
-    if (opensFence) {
-      fence = opening[1];
-      paragraphOpen = false;
-      continue;
-    }
-    if (!paragraphOpen && /^(?: {4}|\t)/.test(line)) continue;
-    if (isHeading) {
-      if (line.trimEnd() === heading) inSection = true;
-      else if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) inSection = false;
-      paragraphOpen = false;
-      continue;
-    }
-    if (isDivider) {
-      paragraphOpen = false;
-      continue;
-    }
-    paragraphOpen = true;
-    if (marker) {
-      const markerEnd = marker[1].length + marker[2].length;
-      const spacing = columnAfter(marker[3], markerEnd) - markerEnd;
-      listItem = { indent: markerEnd + (spacing >= 1 && spacing <= 4 ? spacing : 1), separated: false };
-      const item = inSection && line.match(/^- \[([ xX])\] (.+?)\s*$/);
-      if (item) {
-        listItem.item = { text: item[2], checked: item[1].toLowerCase() === "x", continued: false };
-        items.push(listItem.item);
-      }
-      const content = line.slice(marker[0].length);
-      const contentFence = content.match(/^(`{3,}|~{3,})(.*)$/);
-      if ((contentFence && (contentFence[1][0] === "~" || !contentFence[2].includes("`"))) ||
-          htmlBlockEnd(content, false)) paragraphOpen = false;
+    if (inSection && token.type === "list_item_open" && token.level === 1) {
+      const [start, end] = token.map;
+      const item = lines[start].match(/^- \[([ xX])\] (.+?)\s*$/);
+      if (item) items.push({
+        text: item[2],
+        checked: item[1].toLowerCase() === "x",
+        continued: lines.slice(start + 1, end).some((line) => !/^[ \t]*$/.test(line)),
+      });
     }
   }
   return items;

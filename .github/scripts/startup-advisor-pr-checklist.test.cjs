@@ -291,6 +291,84 @@ test("unrelated content outside a confirmation item does not invalidate it", asy
   assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true);
 });
 
+test("Setext H1/H2 boundaries exclude items from both required sections like ATX boundaries", async () => {
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    for (const boundary of [
+      "# Example only", "## Example only",
+      "Example only\n=", "Example only\n============",
+      "Example only\n-", "Example only\n--", "Example only\n------------",
+      "Example only\n   === \t", "Example only\n   --- \t",
+      "- ```markdown\n  A literal example.\n  ```\nExample only\n---",
+      "- ```markdown\n  A literal example.\n  ```\nExample only\n===",
+    ]) {
+      const body = complete.replace(heading, `${heading}\n\n${boundary}`);
+      const f = fixture({ pr: pull({ body }) });
+      const result = evaluate(f.pr, f.files, template);
+      assert.equal(result.checklistComplete, false, body);
+      if (heading === "## Type of Change") {
+        assert.equal(result.changeTypeSelected, false);
+        assert.deepEqual(result.missing, []);
+      } else {
+        assert.equal(result.changeTypeSelected, true);
+        assert.equal(result.missing.length, 4);
+      }
+      await notify(f.api, repository, 42, template);
+      assert.equal(f.writes.at(-1).body.conclusion, "failure", body);
+    }
+  }
+});
+
+test("a later exact required heading reopens a section after Setext or ATX boundaries", async () => {
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    const fields = heading === "## Type of Change" ? "- [x] Bug fix" :
+      checklistItems(template).map((item) => `- [x] ${item.text}`).join("\n");
+    for (const boundary of ["Example only\n====", "Example only\n----", "# Example only", "## Example only"]) {
+      const misplaced = complete.replace(heading, `${heading}\n\n${boundary}`);
+      const body = `${misplaced}\n\n${heading}\n\n${fields}\n`;
+      const f = fixture({ pr: pull({ body }) });
+      assert.equal(evaluate(f.pr, f.files, template).checklistComplete, true, body);
+      await notify(f.api, repository, 42, template);
+      assert.equal(f.writes.at(-1).body.conclusion, "success", body);
+    }
+  }
+});
+
+test("Setext syntax cannot replace the exact required template headings", () => {
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    for (const underline of ["===", "---"]) {
+      const body = complete.replace(heading, `${heading.slice(3)}\n${underline}`);
+      assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false, body);
+    }
+  }
+});
+
+test("thematic breaks and literal Setext examples do not close required sections", () => {
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    for (const note of [
+      "---", "A separate note.\n\n---", "A separate note.\n- - -", "> A separate note.\n---",
+      "A separate note.\n    ---",
+      "```markdown\nExample only\n---\n```",
+      "<pre>\nExample only\n===\n</pre>",
+      "- ```markdown\n  Example only\n  ---\n  ```",
+    ]) {
+      const body = complete.replace(heading, `${heading}\n\n${note}\n`);
+      assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true, body);
+    }
+  }
+});
+
+test("a blockquote with lazy continuation followed by an HR keeps the required section open", async () => {
+  for (const heading of ["## Type of Change", "## Startup Advisor review checklist"]) {
+    for (const note of ["> A quoted note\ncontinued quote\n---", "> A quoted note\ncontinued quote\nand another continuation\n---"]) {
+      const body = complete.replace(heading, `${heading}\n\n${note}\n`);
+      const f = fixture({ pr: pull({ body }) });
+      assert.equal(evaluate(f.pr, f.files, template).checklistComplete, true, body);
+      await notify(f.api, repository, 42, template);
+      assert.equal(f.writes.at(-1).body.conclusion, "success", body);
+    }
+  }
+});
+
 test("the default template fails, but adding our completed checklist to it passes", () => {
   const defaultTemplate = readFileSync(resolve(__dirname, "../pull_request_template.md"), "utf8")
     .replaceAll("- [ ]", "- [x]");
