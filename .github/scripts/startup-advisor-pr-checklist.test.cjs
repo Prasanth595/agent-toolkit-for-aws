@@ -208,6 +208,89 @@ test("real confirmations after closed examples remain valid and count exactly on
   }
 });
 
+test("list-contained literal examples are excluded without hiding a real checklist after them", async () => {
+  const examples = [];
+  for (const marker of ["-", "+", "*", "1.", "12.", "1)"]) {
+    const indent = " ".repeat(marker.length + 1);
+    const nested = complete.split("\n").map((line) => indent + line).join("\n");
+    examples.push(`${marker} \`\`\`markdown\n${nested}\n${indent}\`\`\``);
+    examples.push(`${marker} <pre>\n${nested}\n${indent}</pre>`);
+  }
+  examples.push("- Outer list\n  - ```markdown\n" +
+    complete.split("\n").map((line) => "    " + line).join("\n") + "\n    ```");
+  examples.push("-\t```markdown\n" +
+    complete.split("\n").map((line) => "\t" + line).join("\n") + "\n\t```");
+  for (const example of examples) {
+    for (const [body, expected] of [
+      [example, false], [example + "\n" + complete, true], [example + "\n\n" + complete, true],
+    ]) {
+      const f = fixture({ pr: pull({ body }) });
+      assert.equal(evaluate(f.pr, f.files, template).checklistComplete, expected, body);
+      assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, expected, body);
+      assert.equal(f.writes.at(-1).body.conclusion, expected ? "success" : "failure");
+    }
+  }
+});
+
+test("accepted checklist headings and task items must be unindented", () => {
+  for (const spaces of [1, 2, 3]) {
+    const body = complete.split("\n").map((line) => " ".repeat(spaces) + line).join("\n");
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, false);
+  }
+});
+
+test("same-line and multiline changes invalidate the entire required confirmation", async () => {
+  for (const item of checklistItems(template)) {
+    const checkedLine = `- [x] ${item.text}`;
+    for (const extension of [
+      " This is only an example; I have not tested anything.",
+      "\n  This is only an example; I have not tested anything.",
+      "\nThis is only an example; I have not tested anything.",
+      "\n\n  This is only an example; I have not tested anything.",
+      "\n  - This is only an example; I have not tested anything.",
+      "\n  ```\n  This is only an example; I have not tested anything.\n  ```",
+    ]) {
+      const body = complete.replace(checkedLine, checkedLine + extension);
+      const f = fixture({ pr: pull({ body }) });
+      const result = evaluate(f.pr, f.files, template);
+      assert.equal(result.changeTypeSelected, true);
+      assert.equal(result.checklistComplete, false, body);
+      assert.ok(result.missing.includes(item.text), body);
+      assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, false, body);
+      assert.equal(f.writes.at(-1).body.conclusion, "failure");
+    }
+  }
+});
+
+test("continuation text also invalidates a change-type selection", () => {
+  const body = complete.replace("- [x] Bug fix", "- [x] Bug fix\n  This is not a bug fix.");
+  const result = evaluate(pull({ body }), [pluginFile], template);
+  assert.equal(result.changeTypeSelected, false);
+  assert.equal(result.checklistComplete, false);
+});
+
+test("unrelated content outside a confirmation item does not invalidate it", async () => {
+  const last = checklistItems(template).at(-1);
+  const checkedLine = `- [x] ${last.text}`;
+  for (const suffix of [
+    "\n\nA separate paragraph.",
+    "\n## Additional context\nA separate section.",
+    "\n> A separate blockquote.",
+    "\n- An unrelated sibling item.",
+    "\n\n```\nA separate code example.\n```",
+    "\n\n<pre>A separate code example.</pre>",
+  ]) {
+    const body = complete.replace(checkedLine, checkedLine + suffix);
+    const f = fixture({ pr: pull({ body }) });
+    assert.equal(evaluate(f.pr, f.files, template).checklistComplete, true, body);
+    assert.equal((await notify(f.api, repository, 42, template)).checklistComplete, true, body);
+    assert.equal(f.writes.at(-1).body.conclusion, "success");
+  }
+  const firstLine = `- [x] ${checklistItems(template)[0].text}`;
+  const body = complete.replace(firstLine, firstLine + "\n\nA separate paragraph between confirmations.\n");
+  assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true);
+});
+
 test("the default template fails, but adding our completed checklist to it passes", () => {
   const defaultTemplate = readFileSync(resolve(__dirname, "../pull_request_template.md"), "utf8")
     .replaceAll("- [ ]", "- [x]");

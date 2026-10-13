@@ -28,13 +28,20 @@ function htmlBlockEnd(line, paragraphOpen) {
   return null;
 }
 
+function columnAfter(value, column = 0) {
+  for (const character of value) column += character === "\t" ? 4 - column % 4 : 1;
+  return column;
+}
+
 function checklistItems(markdown, heading = HEADING) {
   const items = [];
   let inSection = false;
   let fence = null;
   let htmlEnd = null;
   let paragraphOpen = false;
-  for (const line of (markdown || "").split(/\r?\n/)) {
+  let listItem = null;
+  // Accept the template's top-level headings and single-line task items only.
+  for (const line of (markdown || "").split(/\r\n|\r|\n/)) {
     if (fence) {
       const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
       if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) fence = null;
@@ -44,48 +51,78 @@ function checklistItems(markdown, heading = HEADING) {
       if (htmlEnd.test(line)) htmlEnd = null;
       continue;
     }
+    if (/^[ \t]*$/.test(line)) {
+      if (listItem) listItem.separated = true;
+      paragraphOpen = false;
+      continue;
+    }
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const opensFence = opening && (opening[1][0] === "~" || !opening[2].includes("`"));
+    const isHeading = /^ {0,3}#{1,6}(?:[ \t]|$)/.test(line);
+    const isDivider = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/.test(line);
+    const marker = line.match(/^( {0,3})([-+*]|\d{1,9}[.)])([ \t]+|$)/);
+    if (listItem) {
+      const indent = columnAfter(line.match(/^[ \t]*/)[0]);
+      const interrupts = isHeading || isDivider || marker || opensFence || /^ {0,3}>/.test(line) ||
+        htmlBlockEnd(line, listItem.item ? true : paragraphOpen);
+      if (indent >= listItem.indent || (!listItem.separated && !interrupts)) {
+        if (listItem.item) listItem.item.continued = true;
+        listItem.separated = false;
+        continue;
+      }
+      listItem = null;
+    }
     htmlEnd = htmlBlockEnd(line, paragraphOpen);
     if (htmlEnd) {
       paragraphOpen = false;
       if (htmlEnd.test(line)) htmlEnd = null;
       continue;
     }
-    const opening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (opening && (opening[1][0] === "~" || !opening[2].includes("`"))) {
+    if (opensFence) {
       fence = opening[1];
       paragraphOpen = false;
       continue;
     }
-    if (!line.trim()) {
-      paragraphOpen = false;
-      continue;
-    }
     if (!paragraphOpen && /^(?: {4}|\t)/.test(line)) continue;
-    if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) {
-      if (line.trim() === heading) inSection = true;
+    if (isHeading) {
+      if (line.trimEnd() === heading) inSection = true;
       else if (/^ {0,3}#{1,2}(?:[ \t]|$)/.test(line)) inSection = false;
       paragraphOpen = false;
       continue;
     }
-    if (/^ {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$/.test(line)) {
+    if (isDivider) {
       paragraphOpen = false;
       continue;
     }
     paragraphOpen = true;
-    const item = inSection && line.match(/^ {0,3}- \[([ xX])\] (.+?)\s*$/);
-    if (item) items.push({ text: item[2], checked: item[1].toLowerCase() === "x" });
+    if (marker) {
+      const markerEnd = marker[1].length + marker[2].length;
+      const spacing = columnAfter(marker[3], markerEnd) - markerEnd;
+      listItem = { indent: markerEnd + (spacing >= 1 && spacing <= 4 ? spacing : 1), separated: false };
+      const item = inSection && line.match(/^- \[([ xX])\] (.+?)\s*$/);
+      if (item) {
+        listItem.item = { text: item[2], checked: item[1].toLowerCase() === "x", continued: false };
+        items.push(listItem.item);
+      }
+      const content = line.slice(marker[0].length);
+      const contentFence = content.match(/^(`{3,}|~{3,})(.*)$/);
+      if ((contentFence && (contentFence[1][0] === "~" || !contentFence[2].includes("`"))) ||
+          htmlBlockEnd(content, false)) paragraphOpen = false;
+    }
   }
   return items;
 }
 
 function evaluate(pr, files, template) {
-  const expected = checklistItems(template).map((item) => item.text);
-  if (expected.length !== 4 || new Set(expected).size !== expected.length) {
-    throw new Error("The trusted template must contain four distinct confirmations.");
+  const confirmations = checklistItems(template);
+  const expected = confirmations.map((item) => item.text);
+  if (expected.length !== 4 || new Set(expected).size !== expected.length || confirmations.some((item) => item.continued)) {
+    throw new Error("The trusted template must contain four distinct single-line confirmations.");
   }
-  const changeTypes = checklistItems(template, TYPE_HEADING).map((item) => item.text);
-  if (!changeTypes.length || new Set(changeTypes).size !== changeTypes.length) {
-    throw new Error("The trusted template must contain distinct change type options.");
+  const options = checklistItems(template, TYPE_HEADING);
+  const changeTypes = options.map((item) => item.text);
+  if (!changeTypes.length || new Set(changeTypes).size !== changeTypes.length || options.some((item) => item.continued)) {
+    throw new Error("The trusted template must contain distinct single-line change type options.");
   }
   if (files.length !== pr.changed_files || new Set(files.map((file) => file.filename)).size !== files.length) {
     throw new Error("Incomplete PR file inventory; checklist requirements are unknown.");
@@ -95,10 +132,10 @@ function evaluate(pr, files, template) {
   const items = checklistItems(pr.body);
   const missing = expected.filter((text) => {
     const matches = items.filter((item) => item.text === text);
-    return matches.length !== 1 || !matches[0].checked;
+    return matches.length !== 1 || !matches[0].checked || matches[0].continued;
   });
   const changeTypeSelected = checklistItems(pr.body, TYPE_HEADING)
-    .some((item) => item.checked && changeTypes.includes(item.text));
+    .some((item) => item.checked && !item.continued && changeTypes.includes(item.text));
   return {
     number: pr.number,
     head: pr.head.sha,
@@ -168,7 +205,9 @@ function reminder(repository, result) {
   return `${COMMENT_MARKER}\nThis PR changes Startup Advisor and is awaiting author confirmation.\n\n` +
     `Use [the Startup Advisor PR template](${templateUrl}) to update the following items in the PR description:\n\n` +
     requiredUpdates.map((text) => `- ${text}`).join("\n") +
-    "\n\nSelect one or more change types. Keep all four author confirmations exactly once, with their original wording, and check every confirmation. The check will run again when you update the description.";
+    "\n\nSelect one or more change types. Keep all four author confirmations exactly once, with their original wording, and check every confirmation. " +
+    "Paste the headings and checkbox lines without indentation, and keep each checkbox on one line. " +
+    "Put notes in a separate unindented paragraph after a blank line. The check will run again when you update the description.";
 }
 
 async function notify(api, repository, number, template, expectedHead) {
