@@ -152,10 +152,79 @@ def strip_jsonc(text: str) -> Tuple[str, Dict[int, str], Dict[int, str]]:
         if idx is not None:
             comments[i] = line[idx + 2:].strip()
             line = line[:idx].rstrip()
-        # the key a trailing comment annotates is the LAST `"key":` opened on the line
-        key_matches = re.findall(r'"((?:[^"\\]|\\.)*)"\s*:', line)
-        if key_matches:
-            keys[i] = key_matches[-1]
+        # The key a trailing comment annotates is the LAST `"key":` opened on the line
+        # WHOSE OWN NESTING DEPTH MATCHES THE DEPTH AT THE END OF THE LINE — i.e. a key
+        # that is still "current" by the time the comment is reached, not merely the
+        # last key-like string that happens to appear earliest in the text. Two cases
+        # must resolve differently and both are exercised by tests:
+        #   - `"routing_provenance": "table", // REQUIRED` (depth stays open on this
+        #     key's own value, never closed back out before the comment) → the comment
+        #     belongs to `routing_provenance` itself, the last key opened, matching the
+        #     original design for a key immediately followed by its own `// REQUIRED`.
+        #   - `"call_sites": [{ "file": "app.py", "line": 1 }], // REQUIRED` (the inline
+        #     array/object value is fully opened AND closed before the comment, so depth
+        #     returns to the level `call_sites` itself was opened at) → the comment
+        #     belongs to `call_sites`, the enclosing field, not to `line` (a key nested
+        #     inside that value, whose own depth no longer matches the end-of-line depth).
+        # Tracking bracket depth while re-scanning the comment-stripped line, and keeping
+        # the LAST key seen at each depth, implements this without changing the plain
+        # same-depth case (several flat `"a": 1, "b": 2 // REQUIRED` siblings still
+        # resolve to the last one, `b`, because nothing nests and depth never changes).
+        depth = 0
+        last_key_at_depth: Dict[int, str] = {}
+        k_in_str = False
+        k_esc = False
+        pos = 0
+        key_start: Optional[int] = None
+        string_open_pos = 0
+        while pos < len(line):
+            ch = line[pos]
+            if k_in_str:
+                if k_esc:
+                    k_esc = False
+                elif ch == "\\":
+                    k_esc = True
+                elif ch == '"':
+                    k_in_str = False
+                    key_start = pos  # candidate string just closed at `pos`
+                pos += 1
+                continue
+            if ch == '"':
+                k_in_str = True
+                string_open_pos = pos
+                pos += 1
+                continue
+            if ch in "{[":
+                depth += 1
+                pos += 1
+                continue
+            if ch in "}]":
+                depth -= 1
+                pos += 1
+                continue
+            if ch == ":" and key_start is not None:
+                # the string that just closed, immediately followed by `:` (ignoring
+                # whitespace), is a key opened at the CURRENT depth (before this colon's
+                # value opens any further nesting of its own)
+                between = line[key_start + 1:pos]
+                if between.strip() == "":
+                    last_key_at_depth[depth] = line[string_open_pos + 1:key_start]
+                key_start = None
+            elif ch not in '"' and not ch.isspace():
+                # Whitespace/tabs between a closed key string and its `:` must NOT drop
+                # the pending key (`"priority" : ...` is still a key, just spaced out) —
+                # only a genuinely different, non-whitespace character invalidates it.
+                key_start = None
+            pos += 1
+        # A key's value can legitimately still be OPEN at end-of-line (e.g.
+        # `"workloads": [ // REQUIRED` whose `]` closes on a later line) — that key was
+        # recorded one level shallower than `depth` (the depth its own `[`/`{` pushed to).
+        # Prefer an exact depth match (the fully-closed-on-this-line case); fall back to
+        # `depth - 1` (the still-open-at-end-of-line case) only when no exact match exists.
+        if depth in last_key_at_depth:
+            keys[i] = last_key_at_depth[depth]
+        elif (depth - 1) in last_key_at_depth:
+            keys[i] = last_key_at_depth[depth - 1]
         out_lines.append(line)
     joined = "\n".join(out_lines)
     # bare `...` ellipses in arrays/objects (`["Q1", "Q2", ...]`) → a placeholder string
@@ -890,6 +959,9 @@ class Contract:
     shape: Optional[ShapeContract] = None
     json_schema: Optional[Dict[str, Any]] = None
     json_schema_path: str = ""
+    # (json path, expected value, shape). The first match replaces the default shape,
+    # so requiredness follows the producer route that wrote the file.
+    routes: List[Tuple[str, Any, ShapeContract]] = field(default_factory=list)
 
 
 def load_manifest(path: Path) -> Dict[str, Any]:
@@ -947,10 +1019,11 @@ def _admit_schema_properties(node: Node, schema: Any, source: str) -> None:
             _admit_schema_properties(node.keys[k], sub, source)
 
 
-def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding]) -> List[Contract]:
+def build_contracts(manifest: Dict[str, Any], skill: Optional[str], findings: List[Finding]) -> List[Contract]:
     specs: Dict[str, Any] = {}
     specs.update(manifest.get("shared", {}))
-    specs.update(manifest.get("skills", {}).get(skill, {}))
+    if skill is not None:
+        specs.update(manifest.get("skills", {}).get(skill, {}))
     contracts: List[Contract] = []
     for glob_, spec in specs.items():
         c = Contract(artifact_glob=glob_)
@@ -972,8 +1045,21 @@ def build_contracts(manifest: Dict[str, Any], skill: str, findings: List[Finding
             c.shape = build_shape_contract(spec, findings)
         if c.shape is not None and c.json_schema is not None:
             _admit_schema_properties(c.shape.root, c.json_schema, c.json_schema_path)
+        for route in spec.get("route_shapes", []):
+            built = build_shape_contract(route, findings)
+            if built is not None:
+                c.routes.append((route["when_path"], route.get("when_value"), built))
         contracts.append(c)
     return contracts
+
+
+def _value_at(value: Any, dotted: str) -> Any:
+    cur = value
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return None
+        cur = cur[part]
+    return cur
 
 
 def artifact_name(p: Path) -> str:
@@ -998,7 +1084,7 @@ def find_artifacts(run_dir: Path) -> List[Path]:
     return out
 
 
-def validate_run_dir(run_dir: Path, skill: str, manifest: Dict[str, Any], findings: List[Finding]) -> int:
+def validate_run_dir(run_dir: Path, skill: Optional[str], manifest: Dict[str, Any], findings: List[Finding]) -> int:
     contracts = build_contracts(manifest, skill, findings)
     checked = 0
     for p in find_artifacts(run_dir):
@@ -1006,7 +1092,8 @@ def validate_run_dir(run_dir: Path, skill: str, manifest: Dict[str, Any], findin
         matched = [c for c in contracts if fnmatch.fnmatch(name, c.artifact_glob)]
         rel = _rel(p)
         if not matched:
-            findings.append(Finding("NO_CONTRACT", rel, "", f"no contract covers '{name}' for skill {skill}", ""))
+            if skill is not None:
+                findings.append(Finding("NO_CONTRACT", rel, "", f"no contract covers '{name}' for skill {skill}", ""))
             continue
         try:
             value = json.loads(p.read_text(encoding="utf-8"))
@@ -1017,8 +1104,13 @@ def validate_run_dir(run_dir: Path, skill: str, manifest: Dict[str, Any], findin
         for c in matched:
             if c.json_schema is not None:
                 validate_json_schema(c.json_schema, value, "", rel, c.json_schema_path, findings)
-            if c.shape is not None:
-                validate_shape(c.shape.root, value, "", rel, c.shape.label, findings)
+            shape = c.shape
+            for path, expect, route in c.routes:
+                if _value_at(value, path) == expect:
+                    shape = route
+                    break
+            if shape is not None:
+                validate_shape(shape.root, value, "", rel, shape.label, findings)
     return checked
 
 
@@ -1091,8 +1183,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         fixtures_root = PLUGIN_ROOT / "fixtures"
         for d in sorted(p for p in fixtures_root.iterdir() if p.is_dir()):
             skill = skill_for_fixture(d.name, manifest)
-            if skill is None:
-                continue
             checked += validate_run_dir(d, skill, manifest, findings)
     else:
         if not args.skill:

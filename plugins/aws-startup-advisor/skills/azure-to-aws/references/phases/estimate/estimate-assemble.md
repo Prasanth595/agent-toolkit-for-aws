@@ -32,6 +32,23 @@ _knowledge:
    AI-only postcondition no longer requires `estimation-infra.json` on this
    route. The decision gate in Step 2 still presents, built from
    `estimation-ai.json` alone.
+0a. **Invalidate a stale sibling-route artifact before assembling or exporting.**
+   This run's active route is determined by which inputs exist right now
+   (`azure-resource-inventory.json` for infra, `ai-workload-profile.json` for AI)
+   — not by what a prior pass of this phase wrote. If the **AI fragment did not
+   run this pass** (`ai-workload-profile.json` is absent) but
+   `$MIGRATION_DIR/estimation-ai.json` exists on disk from an earlier pass,
+   delete it before proceeding — a confirmed re-entry (mixed → infra-only) must
+   not let the writer later resurrect a stale AI figure into a `FULL` scope it
+   no longer represents. Symmetrically, if the **infra fragment did not run this
+   pass** (`azure-resource-inventory.json` is absent — an AI-only route) but
+   `$MIGRATION_DIR/estimation-infra.json` exists on disk from an earlier pass,
+   delete it — the writer's base-route precedence (infra over billing) would
+   otherwise pick up a stale infra figure for a route that no longer prices
+   infrastructure at all. Do **not** delete either file when its corresponding
+   fragment DID run this pass (that is a legitimate same-route resume or genuine
+   mixed run, not a route change) — this check only fires on the fragment-absent
+   side.
 1. Merge the cost-engine contribution into `estimation-infra.json` per
    `references/vendored/estimate/estimation-infra.schema.json`. That schema has
    no `additionalProperties: false`, so the azure-specific keys the cost engine
@@ -214,7 +231,7 @@ no shared schema change.
 
 | Choice                   | `run_mode`             | `current_phase`    | `phases.workshop`        | Then                                                                                                                                                                                           |
 | ------------------------ | ---------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A** — done for now     | `"decide"`             | `"complete"`       | `"completed"` (declined) | **Write `DECISION.md` (Step 3a below)**, then close out. `phases.generate` **stays** `"pending"`: that combination means "decision complete, execution available on request"                   |
+| **A** — done for now     | `"decide"`             | `"complete"`       | `"completed"` (declined) | **Write `DECISION.md` (Step 3a below)**, then close out. `estimate.md`'s own phase-level step writes `plan.json`, fail-open, after `HANDOFF_OK`. `phases.generate` **stays** `"pending"`: that combination means "decision complete, execution available on request" |
 | **B** — what-if workshop | `"decide"`             | stays `"estimate"` | `"in_progress"`          | Enter the `workshop` sidebar. **Re-present this gate when the sidebar resolves** (options A and C; the active scenario carries into either). Never advance to Generate from inside the sidebar |
 | **C** — generate         | `"decide_and_execute"` | `"generate"`       | `"completed"` (declined) | **Run Step 3b first** (confirm deferred execution choices), then continue to Generate                                                                                                           |
 
@@ -382,6 +399,19 @@ Content (match gcp-to-aws's `DECISION.md` twin — same shape, Azure wording):
 > marker and stands alone as plain Markdown; the HTML report is a presentation upgrade, not
 > the handoff signal.
 
+After `DECISION.md` is written, run the post-gate feedback checkpoint per
+`SKILL.md`. **Do not emit a close/completion message here.** The single
+close for Option A — authored once, with the `PLAN_OK`/`PLAN_SKIP`
+knowledge needed to pick its wording — belongs to `estimate.md`'s own
+post-`HANDOFF_OK` "Run the phase" step 4, which runs after this step
+returns. Emitting a sentence here would duplicate that step's close on
+every normal Azure Option A run (PR #435 review, databaseId 4242622224).
+The web-handoff summary (`plan.json`) is likewise **not** written here —
+it is deferred to that same step 4, which runs only after
+`_postconditions`/`HANDOFF_OK` has passed (matching Generate's ordering
+exactly; see PR #435 review, databaseId 4240400327). Do not write
+`plan.json` or present any CTA or close text from inside this step.
+
 ### Why C writes `run_mode` before Generate loads
 
 Write `run_mode: "decide_and_execute"` **before** `generate.md` loads, not after
@@ -405,9 +435,9 @@ a reason to be more careful, not less.
 ### On A, do not nag
 
 Option A is a complete, successful run, not an abandoned one: the customer got a
-design and a costed decision. Close with where the artifacts are and how to
-resume — "if you decide to migrate, say 'generate the Terraform and migration
-scripts' and I'll pick up from here" — and stop there.
+design and a costed decision. The close is `estimate.md`'s own post-`HANDOFF_OK`
+block (step 4), which runs once after Step 3a returns. Step 3a itself emits no
+close. Do not add a second pitch after it, and stop there.
 
 ---
 
