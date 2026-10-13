@@ -25,7 +25,7 @@
 **Anthropic Claude (Standard on-demand)** figures match **US East (N. Virginia)** on
 [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) as of cache refresh.
 **Recommend defaults (new migrations):** Claude Sonnet 5 (flagship), Claude Opus 4.8 (hardest
-reasoning), Claude Haiku 4.5 (cost/speed). Do not default to Claude Fable 5 (frontier). Long-context
+reasoning), Claude Haiku 5.5 (cost/speed). Do not default to Claude Fable 5 (frontier). Long-context
 SKUs do not all use the same multiplier; confirm batch/cache and cross-region rows per model on
 that page. See `references/vendored/ai/ai-model-lifecycle.md` for lifecycle detail — **do not
 recommend Legacy/excluded models for new migrations.**
@@ -61,7 +61,7 @@ recommend Legacy/excluded models for new migrations.**
 | Claude Opus 4.8   | anthropic.claude-opus-4-8                | Anthropic | 5.00       | 25.00       | 200K    | premium   | active                                                                                         |
 | Claude Sonnet 4.6 | anthropic.claude-sonnet-4-6              | Anthropic | 3.00       | 15.00       | 200K    | flagship  | active                                                                                         |
 | Claude Opus 4.6   | anthropic.claude-opus-4-6-v1             | Anthropic | 5.00       | 25.00       | 200K    | premium   | active                                                                                         |
-| Claude Haiku 4.5  | anthropic.claude-haiku-4-5-20251001-v1:0 | Anthropic | 1.00       | 5.00        | 200K    | fast      | active                                                                                         |
+| Claude Haiku 5.5  | anthropic.claude-haiku-5-5-... | Anthropic | <new price> | <new price> | 200K | fast | active |
 | Claude Opus 4.1   | anthropic.claude-opus-4-1-20250805-v1:0  | Anthropic | 15.00      | 75.00       | 200K    | premium   | legacy (EOL Jan 8, 2027)                                                                       |
 | Llama 4 Maverick  | meta.llama4-maverick-17b-instruct-v1:0   | Meta      | 0.24       | 0.97        | 1M      | mid       | active                                                                                         |
 | Llama 4 Scout     | meta.llama4-scout-17b-instruct-v1:0      | Meta      | 0.17       | 0.66        | 10M     | efficient | active                                                                                         |
@@ -129,7 +129,7 @@ Per 1M tokens unless noted.
 | Claude Sonnet 5   | 1.00 ‡   | 5.00 ‡    | 2.50           | 4.00           | 0.20       |
 | Claude Opus 4.8   | 2.50 ‡   | 12.50 ‡   | 6.25           | 10.00          | 0.50       |
 | Claude Sonnet 4.6 | 1.50     | 7.50      | 3.75           | 6.00           | 0.30       |
-| Claude Haiku 4.5  | 0.50     | 2.50      | 1.25           | 2.00           | 0.10       |
+| Claude Haiku 5.5  | <new values ~75% lower> |
 
 ‡ Not listed on the [batch-supported models table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html)
 as of 2026-10-05 — the figure above is the standard 50%-of-on-demand projection, not a confirmed
