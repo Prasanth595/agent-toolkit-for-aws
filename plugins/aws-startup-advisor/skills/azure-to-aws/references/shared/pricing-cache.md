@@ -29,10 +29,6 @@ Anthropic models that require a cross-Region inference profile — see the Geo v
 
 ---
 
-Bedrock pricing is provider-neutral and canonical in
-`references/vendored/ai/bedrock-pricing-cache.md`. Load that cache for every Bedrock
-model and service rate; this file intentionally does not duplicate those values.
-
 ## Source Provider Pricing (for Migration Comparison)
 
 Use alongside the Bedrock rates to compute migration ROI. This is the **source-side baseline** —
