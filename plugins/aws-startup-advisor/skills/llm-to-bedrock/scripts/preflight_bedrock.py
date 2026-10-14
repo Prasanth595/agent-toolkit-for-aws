@@ -58,14 +58,15 @@ def is_embedding_model(model_id: str) -> bool:
 
 def is_mantle_model(model_id: str) -> bool:
     """Pure: ids that must be probed via the mantle Responses API rather than
-    Converse/InvokeModel. Matches the BARE proprietary GPT ids (`openai.gpt-5*`),
+    Converse/InvokeModel. Matches the BARE proprietary GPT ids (`openai.gpt-5*`,
+    `openai.gpt-6*` — covers GPT-5.5/5.4/5.6 and GPT-6 Astra/Sol/Luna/6.1 Sol),
     which are mantle-served. Deliberately does NOT match:
     - gpt-oss ids (Converse-capable on bedrock-runtime), and
-    - GPT-5.6 CRIS profile ids (`us.`/`in.`/`global.` prefixed) — those are
+    - GPT-5.6/GPT-6 CRIS profile ids (`us.`/`in.`/`global.` prefixed) — those are
       bedrock-runtime targets where Converse IS supported, so falling through to
       the standard Converse probe is the correct behavior, not an accident."""
     mid = model_id.lower()
-    return mid.startswith("openai.gpt-5") and "oss" not in mid
+    return (mid.startswith("openai.gpt-5") or mid.startswith("openai.gpt-6")) and "oss" not in mid
 
 
 def classify_mantle_error(status: int | None, message: str) -> dict:

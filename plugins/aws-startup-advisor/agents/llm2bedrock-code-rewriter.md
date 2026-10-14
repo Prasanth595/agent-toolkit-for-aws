@@ -156,7 +156,7 @@ The source SDK stays. Per client, change only three things:
 
   | Target model                             | base_url                                               |
   | ---------------------------------------- | ------------------------------------------------------ |
-  | Proprietary OpenAI GPT (`openai.gpt-5*`) | `https://bedrock-mantle.<REGION>.api.aws/openai/v1`    |
+  | Proprietary OpenAI GPT (`openai.gpt-5*` / `openai.gpt-6*`) | `https://bedrock-mantle.<REGION>.api.aws/openai/v1`    |
   | Other OpenAI-compatible targets          | `https://bedrock-mantle.<REGION>.api.aws/v1`           |
   | Anthropic SDK                            | `https://bedrock-mantle.<REGION>.api.aws/anthropic/v1` |
 
@@ -229,7 +229,7 @@ client = anthropic.Anthropic(
 
 Preserve compatible SDK request/response shapes. A model version change still requires §9 target checks, including typed response parsing for Opus 5.5. Apply the Chat Completions → Responses reshape above for proprietary GPT targets. After applying the changes above, skip the Converse-specific guidance in the rest of §8; the §9 behavior-delta application still applies normally.
 
-**Converse for a proprietary GPT target is family-dependent.** GPT-5.5 / GPT-5.4 (`openai.gpt-5.5`, `openai.gpt-5.4`) have no `bedrock-runtime` surface — a boto3 `converse()` call against them fails at runtime; if your context pairs one with the Converse path, stop and report the contradiction. GPT-5.6 DOES have a `bedrock-runtime` path via CRIS ids (`us.`/`in.`/`global.` prefixed): when the plan says `migration_path: runtime_openai_cris`, a Converse or Responses rewrite against the CRIS id is valid (base URL `bedrock-runtime.{region}.amazonaws.com/openai/v1` for the OpenAI-compatible APIs; note Guardrails are Converse-only and prompt caching Responses-only on runtime). For a Responses-based source app, the mantle express lane above remains the default and smallest change.
+**Converse for a proprietary GPT target is family-dependent.** GPT-5.5 / GPT-5.4 (`openai.gpt-5.5`, `openai.gpt-5.4`) have no `bedrock-runtime` surface — a boto3 `converse()` call against them fails at runtime; if your context pairs one with the Converse path, stop and report the contradiction. GPT-5.6 and GPT-6 (Astra, Sol, Luna, 6.1 Sol) DO have a `bedrock-runtime` path via CRIS ids (`us.`/`in.`/`global.` prefixed): when the plan says `migration_path: runtime_openai_cris`, a Converse or Responses rewrite against the CRIS id is valid (base URL `bedrock-runtime.{region}.amazonaws.com/openai/v1` for the OpenAI-compatible APIs; note Guardrails are Converse-only and prompt caching Responses-only on runtime). For a Responses-based source app, the mantle express lane above remains the default and smallest change.
 
 ### Converse rewrite (default)
 

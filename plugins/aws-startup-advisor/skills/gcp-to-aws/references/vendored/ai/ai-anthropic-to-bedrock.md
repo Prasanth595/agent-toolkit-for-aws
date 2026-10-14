@@ -124,7 +124,7 @@ headroom; fewer tokens are not guaranteed on every task.
 **Batch is not supported.** Keep Opus 4.6 as an alternative when Batch is required,
 after checking its availability and rates. Do not infer Batch support from
 another Opus version. For sourced on-demand/cache rates and region/profile differences,
-use `references/shared/pricing-cache.md`.
+use `references/vendored/ai/bedrock-pricing-cache.md`.
 
 **Structured output:** Opus 5.5 rejects forced `tool_choice` types `any` and `tool`
 (including Converse `toolChoice.tool`) because thinking cannot be disabled. It also

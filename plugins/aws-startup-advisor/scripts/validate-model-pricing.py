@@ -17,7 +17,7 @@ def validate_model_pricing(plugin_root: Path) -> list[str]:
     catalog = json.loads((skills / "agent-advisor/references/models" / match[1]).read_text())
     errors = []
     for cloud in ("gcp-to-aws", "azure-to-aws"):
-        cache = skills / cloud / "references/shared/pricing-cache.md"
+        cache = skills / cloud / "references/vendored/ai/bedrock-pricing-cache.md"
         priced = set()
         for line in cache.read_text().splitlines():
             if not line.startswith("|"):

@@ -91,10 +91,11 @@ continues to Step 1 as before — this catalog check only short-circuits the spe
 otherwise be unreachable from free text; it is not a replacement for Step 1's inference-profile search for every
 other provider/model.
 
-**Case B — GPT-5.6 (`openai.gpt-5.6-sol` / `-terra` / `-luna`, or already `us.` / `in.` / `global.` prefixed):
-BOTH paths exist.** The bare id is the mantle form; `bedrock-runtime` serves these models through CRIS inference
-profiles (`us.openai.gpt-5.6-*`, `in.openai.gpt-5.6-*` in India Regions, `global.openai.gpt-5.6-*`), which
-`list-inference-profiles` DOES return. Route on the plan's intent:
+**Case B — GPT-5.6 and GPT-6 (`openai.gpt-5.6-sol` / `-terra` / `-luna`, `openai.gpt-6-astra` / `-sol` / `-luna`,
+`openai.gpt-6.1-sol`, or already `us.` / `in.` / `global.` prefixed): BOTH paths exist.** The bare id is the mantle
+form; `bedrock-runtime` serves these models through CRIS inference profiles (`us.openai.gpt-5.6-*` /
+`us.openai.gpt-6-*`, `in.openai.gpt-5.6-*` in India Regions, `global.openai.gpt-5.6-*` / `global.openai.gpt-6-*`),
+which `list-inference-profiles` DOES return. Route on the plan's intent:
 
 - Plan targets the mantle endpoint (`migration_path` starts with `mantle`, or the id is bare) → validate the bare id
   against the model catalog exactly as in Case A.
@@ -102,7 +103,12 @@ profiles (`us.openai.gpt-5.6-*`, `in.openai.gpt-5.6-*` in India Regions, `global
   continue to Step 1; the normal inference-profile resolution below applies to these ids like any other CRIS
   profile. Note the runtime base URL for these models is `bedrock-runtime.{region}.amazonaws.com/openai/v1`.
 
-Other IDs continue to Step 1 unchanged after checking the London exception above.
+The four bare GPT-6 IDs (`openai.gpt-6-astra`, `openai.gpt-6-sol`, `openai.gpt-6-luna`, `openai.gpt-6.1-sol`)
+follow Case A's catalog-lookup procedure when the plan targets the bare/mantle endpoint; when the plan targets
+`bedrock-runtime` (`migration_path: runtime_openai_cris` or an already-CRIS-prefixed id), they follow this Case's
+inference-profile procedure instead — same routing rule as GPT-5.6, just a different id family.
+
+Non-`openai.gpt-5*` / non-`openai.gpt-6*` ids continue to Step 1 unchanged after checking the London exception above.
 
 ### Step 1: List live inference profiles
 

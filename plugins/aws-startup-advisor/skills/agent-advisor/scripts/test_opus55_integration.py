@@ -191,7 +191,7 @@ def test_required_structured_output_is_checked_without_a_detected_source_feature
 
 @pytest.mark.parametrize("cloud", ["gcp-to-aws", "azure-to-aws"])
 def test_price_cache_preserves_existing_deployment_rates_without_recommending_opus48(cloud):
-    text = (SKILLS / cloud / "references/shared/pricing-cache.md").read_text()
+    text = (SKILLS / cloud / "references/vendored/ai/bedrock-pricing-cache.md").read_text()
     assert "Opus 4.8" in text
     assert "rates are retained for existing deployments only" in text
     assert "or automatic fallback" in text
@@ -261,7 +261,7 @@ def test_bare_opus55_is_mantle_for_iam_but_not_a_runtime_probe():
 
 def test_each_anthropic_pool_model_has_a_numeric_cache_row_in_both_clouds():
     for cloud in ("gcp-to-aws", "azure-to-aws"):
-        text = (SKILLS / cloud / "references/shared/pricing-cache.md").read_text()
+        text = (SKILLS / cloud / "references/vendored/ai/bedrock-pricing-cache.md").read_text()
         rows = [line.split("|")[1:-1] for line in text.splitlines() if line.startswith("|")]
         for model in mr.load_catalog()["models"].values():
             model_id = model["paths"]["runtime_converse"]["model_id"]
@@ -280,15 +280,15 @@ def test_build_price_guard_rejects_a_missing_default_model_rate(tmp_path, cloud)
     paths = [
         "agent-advisor/scripts/model_recommendation.py",
         f"agent-advisor/references/models/{mr.DEFAULT_CATALOG.name}",
-        "gcp-to-aws/references/shared/pricing-cache.md",
-        "azure-to-aws/references/shared/pricing-cache.md",
+        "gcp-to-aws/references/vendored/ai/bedrock-pricing-cache.md",
+        "azure-to-aws/references/vendored/ai/bedrock-pricing-cache.md",
     ]
     for relative in paths:
         target = tmp_path / "skills" / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(SKILLS / relative, target)
     assert guard.validate_model_pricing(tmp_path) == []
-    cache = tmp_path / "skills" / cloud / "references/shared/pricing-cache.md"
+    cache = tmp_path / "skills" / cloud / "references/vendored/ai/bedrock-pricing-cache.md"
     cache.write_text("\n".join(line for line in cache.read_text().splitlines() if MODEL not in line))
     assert guard.validate_model_pricing(tmp_path) == [
         f"{cloud}: candidate {MODEL} has no numeric Active price row."
@@ -404,7 +404,7 @@ def test_assessment_eligibility_precedes_same_model_shortcuts(cloud):
     text = (SKILLS / cloud / "references/phases/design/design-ai.md").read_text()
     selection = text.split("## Part 1:", 1)[1]
     gate = selection.split("**New-target eligibility", 1)[1].split("\n\n", 1)[0]
-    assert "references/shared/pricing-cache.md" in gate
+    assert "references/vendored/ai/bedrock-pricing-cache.md" in gate
     assert "references/vendored/ai/ai-anthropic-to-bedrock.md" in gate
     assert "Opus 4.8" in gate and "Opus 5.5" in gate
     assert "model_change: true" in gate
@@ -425,7 +425,7 @@ def test_assessment_eligibility_precedes_same_model_shortcuts(cloud):
 def test_assessment_same_model_pricing_keeps_opus_flat_and_gpt_tiers_scoped(cloud):
     text = (SKILLS / cloud / "references/phases/design/design-ai.md").read_text()
     assessment = text.split("**Stay-or-migrate", 1)[1].split("**Quota risk", 1)[0]
-    assert "**GPT-5.6 only:**" in assessment
+    assert "**GPT-5.6/GPT-6 only:**" in assessment
     assert "2.0x input" in assessment and "1.5x output" in assessment
     assert "**Opus 5.5:**" in assessment
     assert "flat" in assessment and "full 1M" in assessment
