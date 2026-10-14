@@ -1,3 +1,15 @@
+## Problem
+
+<!-- Describe the problem this PR addresses. -->
+
+## Fix
+
+<!-- Describe how this PR solves the problem. -->
+
+## Scope
+
+<!-- Describe which skills, workflows, or files are affected. -->
+
 ## Type of Change
 
 Select at least one.

@@ -7,8 +7,15 @@ const test = require("node:test");
 const { COMMENT_MARKER, checklistItems, evaluate, inspect, notify: runNotify } = require("./startup-advisor-pr-checklist.cjs");
 
 const template = readFileSync(resolve(__dirname, "../PULL_REQUEST_TEMPLATE/startup-advisor.md"), "utf8");
-const [typeSection, confirmationSection] = template.split("## Startup Advisor review checklist");
-const complete = typeSection.replace("- [ ] Bug fix", "- [x] Bug fix") +
+const descriptions = {
+  Problem: "Authors can submit Startup Advisor changes without explaining them.",
+  Fix: "Require a short explanation before the author checklist passes.",
+  Scope: "The Startup Advisor PR template and checklist bot.",
+};
+const descriptionSection = Object.entries(descriptions).map(([heading, content]) => `## ${heading}\n\n${content}\n\n`).join("");
+const [typeSection, confirmationSection] = template.slice(template.indexOf("## Type of Change"))
+  .split("## Startup Advisor review checklist");
+const complete = descriptionSection + typeSection.replace("- [ ] Bug fix", "- [x] Bug fix") +
   "## Startup Advisor review checklist" + confirmationSection.replaceAll("- [ ]", "- [x]");
 const pluginFile = { filename: "plugins/aws-startup-advisor/README.md" };
 const repository = "example/toolkit";
@@ -91,6 +98,81 @@ fs.writeFileSync(1, JSON.stringify(response));
   const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   return { ...child, calls };
 }
+
+test("requires text under Problem, Fix, and Scope even when every checkbox is complete", () => {
+  assert.deepEqual(evaluate(pull(), [pluginFile], template).missingDescriptions, []);
+  for (const [heading, content] of Object.entries(descriptions)) {
+    for (const replacement of [
+      "", " \t\n", "<!-- Write an explanation here. -->", "- <!-- Write an explanation here. -->",
+      "```text\nAn example is not an explanation.\n```", "<pre>Example only.</pre>",
+      "### A heading without body text", "---", "...", "&nbsp;", "TODO", "TBD",
+      "## Another section\n\nThis text belongs to a different section.",
+    ]) {
+      const body = complete.replace(content, replacement);
+      const result = evaluate(pull({ body }), [pluginFile], template);
+      assert.deepEqual(result.missingDescriptions, [heading], body);
+      assert.equal(result.changeTypeSelected, true);
+      assert.deepEqual(result.missing, []);
+      assert.equal(result.checklistComplete, false, body);
+    }
+    const body = complete.replace(`## ${heading}`, `## Missing ${heading}`);
+    assert.deepEqual(evaluate(pull({ body }), [pluginFile], template).missingDescriptions, [heading]);
+  }
+  const unfilled = template.replace("- [ ] Bug fix", "- [x] Bug fix").replaceAll("- [ ] I have", "- [x] I have");
+  assert.deepEqual(evaluate(pull({ body: unfilled }), [pluginFile], template).missingDescriptions,
+    ["Problem", "Fix", "Scope"]);
+  for (const prompt of template.matchAll(/<!-- (.+) -->/g)) {
+    const body = complete.replace(descriptions.Problem, prompt[1]);
+    assert.deepEqual(evaluate(pull({ body }), [pluginFile], template).missingDescriptions, ["Problem"]);
+  }
+});
+
+test("description text supports paragraphs, lists, links, and inline formatting without a minimum length", () => {
+  for (const content of [
+    "Fix.", "- Fix handling of null values.\n- Update the regression test.",
+    "[Issue details](https://example.com/issue)", "**Fix** the `null` case.",
+    "<!-- Author note. -->\n\nHandle null values.", "Handle <!-- hidden note --> null values.",
+  ]) {
+    const body = complete.replace(descriptions.Fix, content);
+    assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true, body);
+  }
+});
+
+test("description headings in quoted, fenced, indented, or commented examples do not count", () => {
+  const checklist = complete.slice(complete.indexOf("## Type of Change"));
+  for (const example of [
+    "```\n" + descriptionSection + "```\n",
+    "<!--\n" + descriptionSection + "-->\n",
+    descriptionSection.split("\n").map((line) => "> " + line).join("\n"),
+    descriptionSection.split("\n").map((line) => "    " + line).join("\n"),
+  ]) {
+    const result = evaluate(pull({ body: example + "\n\n" + checklist }), [pluginFile], template);
+    assert.deepEqual(result.missingDescriptions, ["Problem", "Fix", "Scope"]);
+    assert.equal(result.checklistComplete, false);
+  }
+});
+
+test("missing description text updates one targeted reminder and clears after the author fills it in", async () => {
+  const f = fixture();
+  for (const [body, conclusion] of [
+    [complete.replace(descriptions.Scope, "<!-- Describe affected files. -->"), "failure"],
+    [complete, "success"],
+    [complete.replace(descriptions.Scope, ""), "failure"],
+  ]) {
+    f.pr.body = body;
+    await notify(f.api, repository, 42, template);
+    assert.equal(f.writes.at(-1).body.conclusion, conclusion);
+    assert.equal(f.comments.length, 1);
+    if (conclusion === "failure") {
+      assert.match(f.comments[0].body, /Add a short explanation under `Scope`/);
+      assert.ok(!f.comments[0].body.includes("under `Problem`"));
+      assert.ok(!f.comments[0].body.includes("- I have reviewed"));
+    } else {
+      assert.match(f.comments[0].body, /Problem, Fix, and Scope are filled in/);
+    }
+  }
+  assert.equal(f.writes.filter((write) => write.method === "POST" && write.endpoint.endsWith("/comments")).length, 1);
+});
 
 test("requires the four confirmations in the dedicated section", () => {
   assert.equal(evaluate(pull(), [pluginFile], template).checklistComplete, true);
@@ -391,12 +473,12 @@ test("a blockquote with lazy continuation followed by an HR keeps the required s
   }
 });
 
-test("the default template fails, but adding our completed checklist to it passes", () => {
+test("the default template fails, but adding our descriptions and completed checklist to it passes", () => {
   const defaultTemplate = readFileSync(resolve(__dirname, "../pull_request_template.md"), "utf8")
     .replaceAll("- [ ]", "- [x]");
   assert.equal(evaluate(pull({ body: defaultTemplate }), [pluginFile], template).checklistComplete, false);
   const section = complete.slice(complete.indexOf("## Startup Advisor review checklist")).split("\n\n*By submitting")[0];
-  const body = `${defaultTemplate}\n\n${section}\n\n## Additional context\nCustom author content.\n`;
+  const body = `${descriptionSection}${defaultTemplate}\n\n${section}\n\n## Additional context\nCustom author content.\n`;
   assert.equal(evaluate(pull({ body }), [pluginFile], template).checklistComplete, true);
 });
 

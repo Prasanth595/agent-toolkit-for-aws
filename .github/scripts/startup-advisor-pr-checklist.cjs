@@ -10,14 +10,19 @@ const PLUGIN_PREFIX = "plugins/aws-startup-advisor/";
 const TEMPLATE_PATH = ".github/PULL_REQUEST_TEMPLATE/startup-advisor.md";
 const HEADING = "## Startup Advisor review checklist";
 const TYPE_HEADING = "## Type of Change";
+const DESCRIPTION_HEADINGS = ["Problem", "Fix", "Scope"];
 
-function checklistItems(source, heading = HEADING) {
+function markdownTokens(source) {
   // Marked's block rules expect spaces at line ends. Preserve indentation and item text.
   const normalized = (source || "").replace(/\r\n|\r/g, "\n").replace(/\t(?=[ \t]*$)/gm, " ");
+  return lexer(normalized, { gfm: true });
+}
+
+function checklistItems(source, heading = HEADING) {
   const items = [];
   let inSection = false;
   // Only root headings and their direct task items can contain confirmations.
-  for (const token of lexer(normalized, { gfm: true })) {
+  for (const token of markdownTokens(source)) {
     if (token.type === "heading" && [1, 2].includes(token.depth)) {
       // Setext headings end a section; only the exact template syntax opens one.
       inSection = token.depth === 2 && token.raw.trimEnd() === heading;
@@ -36,6 +41,37 @@ function checklistItems(source, heading = HEADING) {
     }
   }
   return items;
+}
+
+function descriptionText(tokens) {
+  return tokens.map((token) => {
+    if (token.type === "list") return token.items.map((item) => descriptionText(item.tokens)).join(" ");
+    if (["paragraph", "text", "strong", "em", "link", "codespan"].includes(token.type)) {
+      return token.tokens ? descriptionText(token.tokens) : token.text;
+    }
+    // Comments, code blocks, and headings are not author explanations.
+    return "";
+  }).join(" ");
+}
+
+function missingDescriptions(source, template) {
+  const sections = new Map(DESCRIPTION_HEADINGS.map((heading) => [heading, []]));
+  const prompts = [...template.matchAll(/<!--([\s\S]*?)-->/g)]
+    .map((match) => match[1].replace(/\s+/g, " ").trim().toLowerCase());
+  let current;
+  for (const token of markdownTokens(source)) {
+    if (token.type === "heading" && token.depth <= 2) {
+      current = DESCRIPTION_HEADINGS.find((heading) => token.raw.trimEnd() === `## ${heading}`);
+    } else if (current) {
+      sections.get(current).push(token);
+    }
+  }
+  return DESCRIPTION_HEADINGS.filter((heading) => {
+    const content = descriptionText(sections.get(heading))
+      .replace(/&(?:#\d+|#x[\da-f]+|[a-z]\w*);/gi, "").replace(/\s+/g, " ").trim();
+    return !/[\p{L}\p{N}]/u.test(content) || /^(?:TODO|TBD)[.!:]?$/i.test(content) ||
+      prompts.includes(content.toLowerCase());
+  });
 }
 
 function evaluate(pr, files, template) {
@@ -61,13 +97,15 @@ function evaluate(pr, files, template) {
   });
   const changeTypeSelected = checklistItems(pr.body, TYPE_HEADING)
     .some((item) => item.checked && !item.continued && changeTypes.includes(item.text));
+  const missingSections = missingDescriptions(pr.body, template);
   return {
     number: pr.number,
     head: pr.head.sha,
     inScope,
     missing,
+    missingDescriptions: missingSections,
     changeTypeSelected,
-    checklistComplete: changeTypeSelected && missing.length === 0,
+    checklistComplete: missingSections.length === 0 && changeTypeSelected && missing.length === 0,
   };
 }
 
@@ -120,17 +158,19 @@ function reminder(repository, result) {
     return `${COMMENT_MARKER}\nThis PR does not change Startup Advisor. Its author checklist is not required.`;
   }
   if (result.checklistComplete) {
-    return `${COMMENT_MARKER}\nA change type is selected and all four Startup Advisor author confirmations are complete.\n\n` +
+    return `${COMMENT_MARKER}\nProblem, Fix, and Scope are filled in. A change type is selected and all four Startup Advisor author confirmations are complete.\n\n` +
       "The author checklist check now passes. CI and reviewers still need to verify the change.";
   }
   const requiredUpdates = [
+    ...result.missingDescriptions.map((heading) => `Add a short explanation under \`${heading}\`.`),
     ...(!result.changeTypeSelected ? ["Select at least one option under `Type of Change`."] : []),
     ...result.missing,
   ];
   return `${COMMENT_MARKER}\nThis PR changes Startup Advisor and is awaiting author confirmation.\n\n` +
     `Use [the Startup Advisor PR template](${templateUrl}) to update the following items in the PR description:\n\n` +
     requiredUpdates.map((text) => `- ${text}`).join("\n") +
-    "\n\nSelect one or more change types. Keep all four author confirmations exactly once, with their original wording, and check every confirmation. " +
+    "\n\nFill in Problem, Fix, and Scope using paragraphs or lists; comments and TODO/TBD placeholders do not count. " +
+    "Select one or more change types. Keep all four author confirmations exactly once, with their original wording, and check every confirmation. " +
     "Paste the headings and checkbox lines without indentation, and keep each checkbox on one line. " +
     "Put notes in a separate unindented paragraph after a blank line. The check will run again when you update the description.";
 }
