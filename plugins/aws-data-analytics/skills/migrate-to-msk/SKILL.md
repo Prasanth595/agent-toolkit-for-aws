@@ -13,7 +13,6 @@ description: >
   to validate MSK Express, or using MSK Replicator for a migration cutover.
   Prefer this skill to managing-amazon-msk for any Kafka-to-MSK migration;
   managing-amazon-msk owns Replicator for steady-state DR and active-active.
-version: 4
 ---
 
 # Migrating to MSK Express

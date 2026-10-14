@@ -17,7 +17,6 @@ description: >
   alternative.
   DO NOT USE for MSK Connect — search docs instead. Serverless: only S3
   Tables/data delivery eligibility.
-version: 7
 ---
 
 # Amazon MSK
