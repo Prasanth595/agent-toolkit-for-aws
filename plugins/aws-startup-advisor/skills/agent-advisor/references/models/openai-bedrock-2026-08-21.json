@@ -226,8 +226,8 @@
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
-      "context_window": 272000,
-      "output_token_ceiling": "unknown",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
       "region_availability": {
         "commercial": ["us-east-1", "us-west-2"],
         "govcloud": [],
@@ -238,7 +238,7 @@
         "tool_or_function_calling",
         "image_input_vision"
       ],
-      "capability_source": "AWS model card (fetched 2026-10-10), frontier reasoning/agentic tier parity with GPT-5.6 Sol: image+text input checked, tool calling via the Responses API's built-in tool use. Context window is 272K short / ~1.05M long-context (bedrock-pricing-cache.md lines 241-248), repriced at the long-context tier (2x input/cache-write, 1.5x output) above 272K. Supports a 6x-Standard Ultrafast service tier (service_tier: \"ultrafast\") in us-east-1 only, in addition to Standard \u2014 confirmed on the model card's Service Tiers section (bedrock-pricing-cache.md lines 274-276; GPT-6 Sol/Luna are Standard-only). Numeric limits beyond context_window are unknown.",
+      "capability_source": "AWS model card (fetched 2026-10-10), frontier reasoning/agentic tier parity with GPT-5.6 Sol: image+text input checked, tool calling via the Responses API's built-in tool use. Context window is 1.05M tokens (bedrock-pricing-cache.md lines 241-248); 272K is the short-context pricing tier boundary, not the window size \u2014 above it the long-context tier applies (2x input/cache-write, 1.5x output). Max output tokens is 128,000 (bedrock-pricing-cache.md). Supports a 6x-Standard Ultrafast service tier (service_tier: \"ultrafast\") in us-east-1 only, in addition to Standard \u2014 confirmed on the model card's Service Tiers section (bedrock-pricing-cache.md lines 274-276; GPT-6 Sol/Luna are Standard-only).",
       "paths": {
         "mantle_openai_responses": {
           "available": true,
@@ -266,8 +266,8 @@
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
-      "context_window": 272000,
-      "output_token_ceiling": "unknown",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
       "region_availability": {
         "commercial": ["us-east-1"],
         "govcloud": [],
@@ -277,7 +277,7 @@
         "reasoning",
         "tool_or_function_calling"
       ],
-      "capability_source": "AWS model card (fetched 2026-10-10), flagship reasoning/agentic tier parity with GPT-5.6 Terra: tool calling via the Responses API's built-in tool use; no vision evidence on this card, so image_input_vision is not claimed. Context window is 272K short / ~1.05M long-context (bedrock-pricing-cache.md lines 241-248), repriced at the long-context tier (2x input/cache-write, 1.5x output) above 272K. Standard service tier only \u2014 GPT-6 Sol's model card lists no Ultrafast tier, unlike Astra and 6.1 Sol (bedrock-pricing-cache.md lines 274-276). Numeric limits beyond context_window are unknown.",
+      "capability_source": "AWS model card (fetched 2026-10-10), flagship reasoning/agentic tier parity with GPT-5.6 Terra: tool calling via the Responses API's built-in tool use; no vision evidence on this card, so image_input_vision is not claimed. Context window is 1.05M tokens (bedrock-pricing-cache.md lines 241-248); 272K is the short-context pricing tier boundary, not the window size \u2014 above it the long-context tier applies (2x input/cache-write, 1.5x output). Max output tokens is 128,000 (bedrock-pricing-cache.md). Standard service tier only \u2014 GPT-6 Sol's model card lists no Ultrafast tier, unlike Astra and 6.1 Sol (bedrock-pricing-cache.md lines 274-276).",
       "paths": {
         "mantle_openai_responses": {
           "available": true,
@@ -305,8 +305,8 @@
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
-      "context_window": 272000,
-      "output_token_ceiling": "unknown",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
       "region_availability": {
         "commercial": ["us-east-1"],
         "govcloud": [],
@@ -316,7 +316,7 @@
         "reasoning",
         "tool_or_function_calling"
       ],
-      "capability_source": "AWS model card (fetched 2026-10-10), fast/low-cost tier parity with GPT-5.6 Luna: tool calling via the Responses API's built-in tool use; no vision evidence on this card, so image_input_vision is not claimed. Context window is 272K short / ~1.05M long-context (bedrock-pricing-cache.md lines 241-248), repriced at the long-context tier (2x input/cache-write, 1.5x output) above 272K. Standard service tier only \u2014 GPT-6 Luna's model card lists no Ultrafast tier, unlike Astra and 6.1 Sol (bedrock-pricing-cache.md lines 274-276). Numeric limits beyond context_window are unknown.",
+      "capability_source": "AWS model card (fetched 2026-10-10), fast/low-cost tier parity with GPT-5.6 Luna: tool calling via the Responses API's built-in tool use; no vision evidence on this card, so image_input_vision is not claimed. Context window is 1.05M tokens (bedrock-pricing-cache.md lines 241-248); 272K is the short-context pricing tier boundary, not the window size \u2014 above it the long-context tier applies (2x input/cache-write, 1.5x output). Max output tokens is 128,000 (bedrock-pricing-cache.md). Standard service tier only \u2014 GPT-6 Luna's model card lists no Ultrafast tier, unlike Astra and 6.1 Sol (bedrock-pricing-cache.md lines 274-276).",
       "paths": {
         "mantle_openai_responses": {
           "available": true,
@@ -344,8 +344,8 @@
       "generation": "reasoning",
       "version": "6.1",
       "class": "reasoning",
-      "context_window": 272000,
-      "output_token_ceiling": "unknown",
+      "context_window": 1050000,
+      "output_token_ceiling": 131072,
       "region_availability": {
         "commercial": ["us-east-1"],
         "govcloud": [],
@@ -356,7 +356,7 @@
         "tool_or_function_calling",
         "image_input_vision"
       ],
-      "capability_source": "AWS model card (fetched 2026-10-10), flagship reasoning/agentic tier parity with GPT-6 Sol (same price tier, same class): image+text input checked, tool calling via the Responses API's built-in tool use. Context window is 272K short / ~1.05M long-context (bedrock-pricing-cache.md lines 241-248), repriced at the long-context tier (2x input/cache-write, 1.5x output) above 272K. Supports a 6x-Standard Ultrafast service tier (service_tier: \"ultrafast\") in addition to Standard \u2014 confirmed on the model card's Service Tiers section (bedrock-pricing-cache.md lines 274-276; GPT-6 Sol/Luna are Standard-only). Cache-read rate is deeper than GPT-6 Sol's (0.05x vs 0.10x of input) \u2014 the one real pricing differentiator between Sol and 6.1 Sol beyond the base model upgrade; input/output rates are identical between the two. Numeric limits beyond context_window are unknown.",
+      "capability_source": "AWS model card (fetched 2026-10-10), flagship reasoning/agentic tier parity with GPT-6 Sol (same price tier, same class): image+text input checked, tool calling via the Responses API's built-in tool use. Context window is 1.05M tokens (bedrock-pricing-cache.md lines 241-248); 272K is the short-context pricing tier boundary, not the window size \u2014 above it the long-context tier applies (2x input/cache-write, 1.5x output). Max output tokens is 131,072 (bedrock-pricing-cache.md). Supports a 6x-Standard Ultrafast service tier (service_tier: \"ultrafast\") in addition to Standard \u2014 confirmed on the model card's Service Tiers section (bedrock-pricing-cache.md lines 274-276; GPT-6 Sol/Luna are Standard-only). Cache-read rate is deeper than GPT-6 Sol's (0.05x vs 0.10x of input) \u2014 the one real pricing differentiator between Sol and 6.1 Sol beyond the base model upgrade; input/output rates are identical between the two.",
       "paths": {
         "mantle_openai_responses": {
           "available": true,
