@@ -14,6 +14,9 @@
     },
     "ai-workload-profile.json": {
       "json_schema": "scripts/contracts/ai-workload-profile.schema.json"
+    },
+    "aws-design-ai.json": {
+      "json_schema": "scripts/contracts/aws-design-ai.schema.json"
     }
   },
   "skills": {
@@ -56,6 +59,10 @@
       "ai-workload-profile.json": {
         "shape": "skills/gcp-to-aws/references/shared/schema-discover-ai.md",
         "root_heading": "ai-workload-profile.json"
+      },
+      "aws-design-ai.json": {
+        "shape": "skills/gcp-to-aws/references/shared/schema-design-aws-ai.md",
+        "root_heading": "Shape"
       },
       "preferences.json": {
         "shape": "skills/gcp-to-aws/references/shared/schema-preferences.md",

@@ -412,6 +412,11 @@ def test_neutral_matrix_shared_artifacts_extend_the_mapped_fixture_count():
     assert matrix_checked == len(shared_artifacts)
     assert matrix_findings == []
 
+    # Several fixture families besides ai-migration-matrix are unmapped (no
+    # fixture_prefix entry) and so validate only against artifact-contracts.json's
+    # "shared" section too -- e.g. ai-workload-profiles/ (#415) and aws-design-ai/
+    # (#416). Count every unmapped family's shared artifacts, not only the matrix's,
+    # so this assertion does not silently drift whenever a future PR adds another one.
     mapped_checked = 0
     neutral_checked = 0
     neutral_shared_count = 0
@@ -1309,4 +1314,3 @@ def test_gcp_estimate_snapshots_use_the_active_estimate_shape(tmp_path: Path):
         bad = json.loads(json.dumps(est))
         bad["pricing_source"]["services_by_source"]["live"] = ["Fargate"]
         assert ("UNKNOWN_KEY", "pricing_source.services_by_source.live") in run("bad-" + artifact, artifact, bad)
-

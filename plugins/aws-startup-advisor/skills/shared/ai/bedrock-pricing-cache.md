@@ -246,6 +246,10 @@ a same-model migration costs about 10% MORE, not the same. Do not describe it as
 
 #### GPT-6 family — short context (≤272K)
 
+GPT-6 Astra, GPT-6 Sol, GPT-6 Luna, and GPT-6.1 Sol are priced the same In-Region/Geo-CRIS vs. Global-CRIS way as
+GPT-5.6: In-Region and Geo-CRIS carry the ~10% data-residency premium over OpenAI's standard rate, while Global
+CRIS is published at OpenAI's standard list price (cost parity). Figures below are in · cache-write · cache-read · out, per 1M tokens.
+
 | Model       | In-Region/Geo-CRIS (in · cache-write · cache-read · out) | Global CRIS (in · cache-write · cache-read · out) |
 | ----------- | ------------------------------------------------------- | --------------------------------------------------- |
 | GPT-6 Astra | 11.00 · 13.75 · 1.10 · 55.00                             | 10.00 · 12.50 · 1.00 · 50.00                        |
@@ -253,7 +257,12 @@ a same-model migration costs about 10% MORE, not the same. Do not describe it as
 | GPT-6 Luna  | 0.11 · 0.1375 · 0.011 · 0.55                             | 0.10 · 0.125 · 0.01 · 0.50                          |
 | GPT-6.1 Sol | 2.20 · 2.75 · 0.11 · 11.00                               | 2.00 · 2.50 · 0.10 · 10.00                          |
 
+GPT-6.1 Sol's cache-read rate is deeper (0.05x vs the other three models' 0.10x) — this is the one real pricing
+difference from GPT-6 Sol beyond capability.
+
 #### GPT-6 family — long context (>272K; 1.05M context window)
+
+Full request — input, cache, and output — is repriced at 2x input/cache and 1.5x output above 272K input tokens.
 
 | Model       | In-Region/Geo-CRIS (in · cache-write · cache-read · out) | Global CRIS (in · cache-write · cache-read · out) |
 | ----------- | ------------------------------------------------------- | --------------------------------------------------- |
@@ -262,8 +271,10 @@ a same-model migration costs about 10% MORE, not the same. Do not describe it as
 | GPT-6 Luna  | 0.22 · 0.275 · 0.022 · 0.825                             | 0.20 · 0.25 · 0.02 · 0.75                           |
 | GPT-6.1 Sol | 4.40 · 5.50 · 0.22 · 16.50                               | 4.00 · 5.00 · 0.20 · 15.00                          |
 
-GPT-6 Astra and GPT-6.1 Sol also support a 6x-Standard **Ultrafast** service tier; GPT-6 Sol and GPT-6 Luna are
-Standard-only. See `shared/openai-on-bedrock.md` for the full tier/region breakdown.
+GPT-6 Astra and GPT-6.1 Sol also support a 6x-Standard **Ultrafast** service tier (`service_tier: "ultrafast"`),
+confirmed on both model cards' "Service Tiers" sections; GPT-6 Sol and GPT-6 Luna are Standard-only. None of the
+four GPT-6 models support Priority, Flex, or Reserved. See `shared/openai-on-bedrock.md` for the full breakdown,
+including per-model Ultrafast availability by region.
 
 #### Proprietary GPT models — short context (272K), in-region
 
