@@ -37,7 +37,7 @@
       "upstream_providers": ["anthropic", "openai", "google"],
       "status": "unknown",
       "route": null,
-      "note": "No mapping guide of any kind targets gateway routing today."
+      "note": "status: unknown reflects documentation coverage only, not code: discover-openrouter-api.md already detects OpenRouter usage and BYOK-vs-credits attribution per upstream model at runtime. What is missing is a shared, cross-skill mapping GUIDE (the ai-anthropic-to-bedrock.md / ai-openai-to-bedrock.md equivalent) that documents how an OpenRouter-fronted upstream model maps onto a Bedrock target. Until that guide exists, this entry stays unknown rather than supported, per this catalog's rule that a mapping-guide document is the bar for supported and an implemented adapter/route is a separate, stricter bar tracked by implemented_adapter."
     }
   ]
 }
