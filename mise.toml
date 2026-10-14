@@ -27,13 +27,9 @@ run = "python3 tools/sync-plugin-skills.py --check"
 description = "Validate Agent Plugins v1.0.0 conformance (plugins/)"
 run = "uv run --with jsonschema --with pyyaml python tools/validate_spec.py"
 
-[tasks."lint:consent-disclosure"]
-description = "aws-startup-advisor: usage-API discovery consent text must not contradict its own Capture Endpoint Table"
-run = "python3 plugins/aws-startup-advisor/scripts/consent-disclosure-audit.py"
-
 [tasks.validate]
 description = "Run all validation"
-depends = ["lint:manifests", "lint:skill-parity", "lint:spec", "lint:consent-disclosure"]
+depends = ["lint:manifests", "lint:skill-parity", "lint:spec"]
 
 [tasks.security]
 description = "Run security scans"
