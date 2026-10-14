@@ -393,6 +393,12 @@ def test_fixtures_pass_with_baseline_and_no_stale_entries():
 
 
 def test_neutral_matrix_shared_artifacts_extend_the_mapped_fixture_count():
+    """Every fixture directory with no skill prefix (`ai-migration-matrix`,
+    `ai-workload-profiles`, ...) is "neutral": its artifacts are checked against
+    the manifest's `shared` contracts only, with no `--skill` passed. `--fixtures`
+    walks and counts all of them, so the accounting below must sum across every
+    neutral directory, not just the matrix — a second neutral directory (as
+    `ai-workload-profiles` is) is not a special case, it is the general one."""
     manifest = va.load_manifest(PLUGIN_ROOT / "scripts" / "artifact-contracts.json")
     fixtures_root = PLUGIN_ROOT / "fixtures"
     matrix = fixtures_root / "ai-migration-matrix"
@@ -412,24 +418,25 @@ def test_neutral_matrix_shared_artifacts_extend_the_mapped_fixture_count():
     # (#416). Count every unmapped family's shared artifacts, not only the matrix's,
     # so this assertion does not silently drift whenever a future PR adds another one.
     mapped_checked = 0
+    neutral_checked = 0
+    neutral_shared_count = 0
     mapped_findings = []
-    unmapped_shared_count = 0
+    neutral_findings = []
     for fixture_dir in sorted(p for p in fixtures_root.iterdir() if p.is_dir()):
         skill = va.skill_for_fixture(fixture_dir.name, manifest)
         if skill is not None:
             mapped_checked += va.validate_run_dir(fixture_dir, skill, manifest, mapped_findings)
         else:
-            unmapped_shared_count += len(
-                [p for p in va.find_artifacts(fixture_dir) if p.name in manifest["shared"]]
-            )
-    assert unmapped_shared_count >= len(shared_artifacts), (
-        "the matrix's own shared artifacts must be a subset of every unmapped family's total"
-    )
+            neutral_checked += va.validate_run_dir(fixture_dir, None, manifest, neutral_findings)
+            neutral_shared_count += sum(
+                1 for p in va.find_artifacts(fixture_dir) if p.name in manifest["shared"])
+    assert neutral_findings == []
+    assert neutral_checked == neutral_shared_count
 
     r = _run("--fixtures", "--json")
     assert r.returncode == 0, r.stdout + r.stderr
     report = json.loads(r.stdout)
-    assert report["checked_artifacts"] - mapped_checked == unmapped_shared_count
+    assert report["checked_artifacts"] - mapped_checked == neutral_shared_count
 
 
 def test_invalid_neutral_shared_artifacts_fail_their_schemas(tmp_path: Path):

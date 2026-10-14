@@ -16,13 +16,12 @@ depends = ["lint:md", "lint:model-id", "lint:model-staleness", "lint:artifacts",
 description = "Lint startup advisor markdown using the shared rules"
 run = "markdownlint-cli2 --config ../../.markdownlint-cli2.yaml '**/*.md' '#node_modules'"
 
-[tasks."lint:model-id"]
-description = "Check model references against the lifecycle registry"
-run = "uv run --no-project python scripts/model-id-lint.py"
-
 [tasks."lint:model-staleness"]
 description = "Check Bedrock model-lifecycle registry freshness"
 run = "python3 tools/model-staleness.py --strict"
+[tasks."lint:model-id"]
+description = "Check model references against the lifecycle registry"
+run = "uv run --no-project python scripts/model-id-lint.py"
 [tasks.test]
 description = "Run plugin contract tests"
 run = "uv run --no-project --with pytest python -m pytest tests -q"
