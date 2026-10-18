@@ -11,9 +11,9 @@ import re
 
 
 # --- Source model-family detection (ported from the reference compatibility matrix) ---
-# Reasoning generation: gpt-5 / gpt5 / gpt-5.4 / openai.gpt-5.4, and o1/o3/o4.
+# Reasoning generation: gpt-5 / gpt-6 variants and o1/o3/o4.
 _REASONING_PATTERNS = (
-    re.compile(r"(?i)(^|[^a-z0-9])gpt[-_ ]?5(\.\d+)?([^0-9]|$)"),
+    re.compile(r"(?i)(^|[^a-z0-9])gpt[-_ ]?[56](\.\d+)?([^0-9]|$)"),
     re.compile(r"(?i)(^|[^a-z0-9])o[134](-mini|-pro|-preview)?([^a-z0-9]|$)"),
 )
 # Legacy generation: gpt-4*, gpt-3.5 / gpt-35.
@@ -137,18 +137,29 @@ def _converse_tier_for_source(source):
     return _CONVERSE_TIER_DEFAULT
 
 
-def _same_model_runtime_key(source):
-    """GPT-5.6 sources have a SAME-MODEL runtime_converse path via CRIS (verified
-    2026-08-21) — governance requirements no longer force a family switch for
-    them. Returns the catalog key, or None for every other source (5.5/5.4 and
-    legacy have no runtime path, so their Converse candidates stay Claude)."""
-    sid = _primary_source_id(source).lower()
-    for marker, key in (("5.6-sol", "openai_gpt_5_6_sol"),
-                        ("5.6-terra", "openai_gpt_5_6_terra"),
-                        ("5.6-luna", "openai_gpt_5_6_luna")):
-        if marker in sid:
-            return key
+_SOURCE_MODEL_KEYS = {
+    "gpt-5.6-sol": "openai_gpt_5_6_sol",
+    "gpt-5.6-terra": "openai_gpt_5_6_terra",
+    "gpt-5.6-luna": "openai_gpt_5_6_luna",
+    "gpt-6-astra": "openai_gpt_6_astra",
+    "gpt-6-sol": "openai_gpt_6_sol",
+    "gpt-6-luna": "openai_gpt_6_luna",
+    "gpt-6.1-sol": "openai_gpt_6_1_sol",
+}
+
+
+def _same_model_catalog_key(source):
+    """Return the exact catalog key for a recognized source model identity."""
+    sid = re.sub(r"[_ ]", "-", _primary_source_id(source).lower())
+    for identity in sorted(_SOURCE_MODEL_KEYS, key=len, reverse=True):
+        if re.search(rf"(?<![a-z0-9]){re.escape(identity)}(?![a-z0-9])", sid):
+            return _SOURCE_MODEL_KEYS[identity]
     return None
+
+
+def _same_model_runtime_key(source):
+    """Return the exact source model when it has a runtime_converse path."""
+    return _same_model_catalog_key(source)
 
 
 def _converse_candidate_order(source):
@@ -157,18 +168,37 @@ def _converse_candidate_order(source):
     same = _same_model_runtime_key(source)
     if same:
         # Same model outranks any cross-family tier: keeping the model removes
-        # prompt-adaptation and behavior-delta risk entirely, and on Global CRIS
-        # it is also the cost-parity option.
+        # prompt-adaptation and behavior-delta risk entirely.
         order.insert(0, same)
     return order
 
 
+def _mantle_path(source, requirements):
+    same = _same_model_catalog_key(source)
+    if (
+        source.get("api_surface") == "chat_completions"
+        and _api_continuity(requirements) in {"required", "preferred"}
+        and same is not None
+        and same.startswith("openai_gpt_6")
+    ):
+        return "mantle_openai_chat"
+    return "mantle_openai_responses"
+
+
+def _mantle_candidate_order(catalog, source):
+    same = _same_model_catalog_key(source)
+    keys = list(catalog["models"])
+    return ([same] if same else []) + [key for key in keys if key != same]
+
+
 def _catalog_model_for_path(catalog, path, detected_features=None, requirements=None,
-                            candidate_order=None):
+                            candidate_order=None, region=None):
     """Pick the first available catalog model for `path` whose capability evidence
     covers the required/detected text features (evidence-driven fallback: a newer
     model without feature-level evidence is skipped in favor of an older probed
-    one). When no candidate covers them, return the first available model together
+    one). Mantle candidates with cataloged region availability are skipped outside
+    that footprint; runtime Converse availability remains governed by CRIS resolution.
+    When no candidate covers the requirements, return the first available model together
     with its unmet-capability list so the caller can fail closed. Deterministic:
     iterates `candidate_order` when given (e.g. the Converse tier map), else
     catalog key order."""
@@ -182,6 +212,12 @@ def _catalog_model_for_path(catalog, path, detected_features=None, requirements=
         path_config = model["paths"].get(path, {})
         if path_config.get("available") is not True:
             continue
+        availability = model.get("region_availability")
+        if path.startswith("mantle_") and region and region != "unknown" and availability:
+            supported_regions = set(availability.get("commercial", []))
+            supported_regions.update(availability.get("govcloud", []))
+            if region not in supported_regions:
+                continue
         unmet = _unsupported_required_capabilities(
             model, detected_features, requirements or {}
         )
@@ -682,11 +718,14 @@ def _verification(region, catalog, path, requires_cris, invocation_model_id, sel
 
 
 def _decision_options(catalog, workload, region):
-    """Two-sided option set: Mantle Responses continuity vs runtime Converse governance."""
+    """Two-sided option set: Mantle continuity vs runtime Converse governance."""
     options = []
     detected = workload.get("detected_features") or []
+    mantle_path = _mantle_path(workload["source"], workload["requirements"])
     mantle, _ = _catalog_model_for_path(
-        catalog, "mantle_openai_responses", detected, workload["requirements"]
+        catalog, mantle_path, detected, workload["requirements"],
+        candidate_order=_mantle_candidate_order(catalog, workload["source"]),
+        region=region,
     )
     if mantle:
         model_key, model, path_config = mantle
@@ -694,13 +733,18 @@ def _decision_options(catalog, workload, region):
             {
                 "model_key": model_key,
                 "model": path_config["model_id"],
-                "api_path": "mantle_openai_responses",
+                "api_path": mantle_path,
                 "invocation_model_id": _resolve_invocation_model_id(
                     path_config["model_id"], path_config["requires_cris"], workload["requirements"]
                 ),
                 "requires_cris": path_config["requires_cris"],
-                "reason": "Preserves the OpenAI SDK and Responses surface; gives up runtime-only "
-                "Bedrock governance.",
+                "reason": (
+                    "Preserves the OpenAI SDK and Chat Completions surface; gives up "
+                    "runtime-only Bedrock governance."
+                    if mantle_path == "mantle_openai_chat"
+                    else "Preserves the OpenAI SDK and Responses surface; gives up "
+                    "runtime-only Bedrock governance."
+                ),
             }
         )
     runtime, _ = _catalog_model_for_path(
@@ -719,12 +763,12 @@ def _decision_options(catalog, workload, region):
                 ),
                 "requires_cris": path_config["requires_cris"],
                 "reason": (
-                    "SAME-MODEL governance path: this GPT-5.6 target runs on bedrock-runtime via a "
-                    "CRIS id — Guardrails (Converse API only), invocation logging, and cost parity "
-                    "on Global CRIS (1.10x on Geo/In-Region pricing), without a model change."
+                    "SAME-MODEL governance path: this OpenAI target runs on bedrock-runtime via "
+                    "a CRIS id — Guardrails (Converse API only), invocation logging, and "
+                    "same-model behavior without a family change."
                     if model_key == _same_model_runtime_key(workload["source"])
-                    else "Uses Bedrock-native Converse request/response shapes and a Bedrock-native "
-                    "model; requires rewriting the OpenAI integration."
+                    else "Uses Bedrock-native Converse request/response shapes and a "
+                    "cross-family model; requires rewriting the OpenAI integration."
                 ),
             }
         )
@@ -757,7 +801,9 @@ def recommend_openai_workload(workload, region, catalog):
 
     unknown_required = _unknown_required_features(feature_assessment, requirements)
 
-    def _unresolved(reason_head, reasons, block, path_for_compat):
+    def _unresolved(
+        reason_head, reasons, block, path_for_compat, decision_options=None
+    ):
         # Shared decision_required assembly (no target selected).
         rec = _base(workload, "decision_required")
         rec.update(
@@ -768,7 +814,11 @@ def recommend_openai_workload(workload, region, catalog):
                 "model_identity": None,
                 "api_path": None,
                 "invocation_model_id": None,
-                "decision_options": _decision_options(catalog, workload, region),
+                "decision_options": (
+                    _decision_options(catalog, workload, region)
+                    if decision_options is None
+                    else decision_options
+                ),
                 "alternatives": [],
                 "rationale": [reason_head] + reasons,
                 "blocks": [block],
@@ -819,8 +869,9 @@ def recommend_openai_workload(workload, region, catalog):
             "Required OpenAI API continuity conflicts with a runtime-only Bedrock "
             "governance requirement.",
             [
-                "Mantle preserves the OpenAI SDK/Responses surface; runtime Converse provides "
-                "Bedrock-native governance with a Bedrock-native model."
+                "Mantle preserves the OpenAI SDK and the supported source API surface; runtime "
+                "Converse provides Bedrock-native governance and keeps an exact same-model "
+                "runtime candidate when the catalog provides one."
             ],
             _finding(
                 "model_path_decision_required",
@@ -834,7 +885,6 @@ def recommend_openai_workload(workload, region, catalog):
         )
 
     # --- Select a path ---
-    candidate_order = None
     if runtime_required:
         path = "runtime_converse"
         candidate_order = _converse_candidate_order(source)
@@ -843,34 +893,78 @@ def recommend_openai_workload(workload, region, catalog):
             rationale_head = (
                 "Bedrock governance or multi-model requirements select runtime Converse; "
                 f"the source model itself ({catalog['models'][same]['display_name']}) runs "
-                "there via a CRIS id (verified 2026-08-21), so the same-model candidate "
-                "leads, with the Claude tier as the cross-family fallback."
+                "there via a CRIS id, so the same-model candidate leads, with the Claude "
+                "tier as the cross-family fallback."
             )
         else:
             tier = _converse_tier_for_source(source)
             rationale_head = (
                 "Bedrock governance or multi-model requirements select runtime Converse; "
                 f"the source tier maps to {catalog['models'][tier]['display_name']} "
-                "(capability-evidence fallback across Claude tiers). GPT-5.5/5.4 sources "
-                "have no runtime path, so governance implies this family switch."
+                "(capability-evidence fallback across Claude tiers). Sources without an "
+                "exact runtime catalog identity require this family switch."
             )
     else:
-        path = "mantle_openai_responses"
-        rationale_head = (
-            "OpenAI source with API continuity lands on Mantle Responses (GPT-5.x is "
-            "Responses-only on Mantle)."
-        )
+        path = _mantle_path(source, requirements)
+        candidate_order = _mantle_candidate_order(catalog, source)
+        if path == "mantle_openai_chat":
+            rationale_head = (
+                "GPT-6 Chat Completions API continuity requires an in-region Mantle Chat "
+                "Completions model."
+            )
+        else:
+            rationale_head = (
+                "OpenAI source lands on Mantle Responses, with the exact source model "
+                "evaluated before capability and numeric fallbacks."
+            )
 
     # Evidence-driven selection: pick the first candidate on the path whose catalog
     # capabilities cover the required/detected text features (a newer model without
     # feature-level evidence falls back to an older probed one). G02: fail closed
     # only when NO candidate on the path has the evidence.
     catalog_hit, unsupported = _catalog_model_for_path(
-        catalog, path, detected, requirements, candidate_order=candidate_order
+        catalog, path, detected, requirements, candidate_order=candidate_order,
+        region=region,
     )
     if not catalog_hit:
+        if path.startswith("mantle_"):
+            decision_options = _decision_options(catalog, workload, "unknown")
+            for option in decision_options:
+                if option["api_path"] == path:
+                    option["reason"] += (
+                        f" Requires choosing a catalog-supported region because {region} "
+                        "is outside this model's Mantle footprint."
+                    )
+            return _unresolved(
+                rationale_head,
+                [
+                    f"The catalog has no {path} candidate available in {region}; "
+                    "select another region or migration path."
+                ],
+                _finding(
+                    "mantle_region_unavailable",
+                    "[BLOCKS]",
+                    f"No in-region {path} model is available in {region}.",
+                    "Choose a region in the selected model's Mantle footprint, choose "
+                    "runtime Converse, or update the continuity requirement, then rerun "
+                    "Model Recommend.",
+                ),
+                path,
+                decision_options,
+            )
         raise ValueError(f"catalog has no available model for path {path}")
     model_key, model, path_config = catalog_hit
+    if path == "mantle_openai_chat":
+        if model_key == _same_model_catalog_key(source):
+            rationale_head = (
+                "GPT-6 Chat Completions source with API continuity lands on the exact "
+                "same model through Mantle Chat Completions."
+            )
+        else:
+            rationale_head = (
+                f"The exact source model is unavailable in {region}; "
+                f"{model['display_name']} is the in-region Mantle Chat Completions fallback."
+            )
     if unsupported:
         return _unresolved(
             rationale_head,
@@ -948,12 +1042,19 @@ def recommend_openai_workload(workload, region, catalog):
     deltas.extend(f_deltas)
 
     if path == "runtime_converse":
+        same_model = model_key == _same_model_runtime_key(source)
         deltas.append(
             _delta(
                 "openai_sdk_to_converse",
                 "path",
-                "The OpenAI SDK integration is rewritten to boto3 bedrock-runtime Converse with a "
-                "Bedrock-native model; streaming moves to ConverseStream event shapes.",
+                "The OpenAI SDK integration is rewritten to boto3 bedrock-runtime Converse; "
+                + (
+                    "the selected OpenAI model identity is preserved, while streaming moves "
+                    "to ConverseStream event shapes."
+                    if same_model
+                    else "the selected model also changes families, and streaming moves to "
+                    "ConverseStream event shapes."
+                ),
             )
         )
 

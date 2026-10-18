@@ -92,18 +92,20 @@ reuse the Anthropic `preserve_messages_api` switch):
 - minimum context window and expected output-token ceiling?
 - allow Global CRIS or require a geography-scoped profile (runtime Converse only)?
 
-OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-08-21.json` catalog):
-GPT-5.x on Mantle is Responses-only, so a Chat Completions source is reshaped, not routed to
-`mantle_openai_chat`. GPT-5.6 sources additionally carry a SAME-MODEL `runtime_converse`
-candidate via CRIS ids (verified 2026-08-21) — governance requirements no longer force a
-family switch for them, while GPT-5.5/5.4 remain mantle-only. The catalog also carries the
-GPT-6 family (Astra, Sol, Luna, 6.1 Sol); the same same-model routing logic applies — Mantle
-Responses in-region, or `runtime_converse` via CRIS otherwise — and unlike GPT-5.x, the GPT-6
-model cards list Chat Completions as supported on mantle, not just Responses. GPT-6's in-region
-mantle footprint is narrower than GPT-5.6's: Astra reaches us-east-1 and us-west-2 only; Sol,
-Luna, and 6.1 Sol reach us-east-1 only. GPT-6 Astra's `runtime_converse` CRIS path lacks `Invoke`
-support (Responses/Chat Completions/Converse only), where Sol/Luna/6.1 Sol have all four APIs —
-this is a per-model capability gap to check before assuming parity, not a family-wide rule.
+OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-08-21.json` catalog).
+Recognized GPT-5.6 and GPT-6 source identities are evaluated against their exact same-model
+catalog entry before capability/numeric fallbacks. GPT-5.x on Mantle is Responses-only, so a Chat
+Completions source is reshaped rather than routed to `mantle_openai_chat`. GPT-6 Chat Completions
+sources with required or preferred API continuity instead keep that surface through
+`mantle_openai_chat`; GPT-6 Responses sources use `mantle_openai_responses`. Both Mantle paths are
+in-region only and enforce the selected model's cataloged `region_availability`: Astra reaches
+us-east-1 and us-west-2, while Sol, Luna, and 6.1 Sol reach us-east-1 only. Outside that footprint,
+the engine skips the same-model Mantle candidate and evaluates its existing capability/numeric
+fallbacks. Governance requirements select the exact same GPT-5.6 or GPT-6 model through
+`runtime_converse` via Global/Geo CRIS when available; Mantle region lists do not constrain this
+CRIS-backed path. GPT-5.5/5.4 remain mantle-only. GPT-6 Astra's runtime surface lacks `Invoke`
+support (Responses/Chat Completions/Converse only), while Sol/Luna/6.1 Sol support all four APIs.
+Every selected path remains provisional until it is probed in the target account and region.
 Azure OpenAI remains an explicit `provider_module_pending` generic result.
 
 **OpenRouter/LiteLLM-sourced OpenAI models still use the OpenAI module.** Discover records the
