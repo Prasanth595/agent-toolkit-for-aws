@@ -151,6 +151,17 @@ def validate_plugin(plugin_dir: Path) -> None:
                 elif srv_type == "http" and "url" not in srv:
                     error(f"MCP server '{srv_name}' is http but missing 'url'")
 
+                # Reject shell-style interpolation in URLs: not all MCP
+                # clients expand ${VAR} / ${VAR:-default}, so an unresolved
+                # placeholder is passed through literally and breaks HTTP
+                # client construction before any handshake.
+                url = srv.get("url")
+                if isinstance(url, str) and "${" in url:
+                    error(
+                        f"MCP server '{srv_name}' uses unsupported environment "
+                        f"interpolation in URL: {url}"
+                    )
+
     # Skills in this plugin
     skills_dir = plugin_dir / "skills"
     if skills_dir.is_dir():

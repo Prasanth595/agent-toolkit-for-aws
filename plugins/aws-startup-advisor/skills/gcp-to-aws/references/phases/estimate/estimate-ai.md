@@ -10,17 +10,18 @@ The parent `estimate.md` selects the pricing mode before loading this file.
 
 **Price lookup order:**
 
-1. **`shared/pricing-cache.md` (primary)** — Look up Bedrock model pricing and source provider pricing by table. Set `pricing_source: "cached"`.
-2. **Unavailable** — If a model is NOT in the cache, set `pricing_source: "unavailable"` and warn the user. An `_unverified_` cache cell is blocking — do not use it as if it were a confirmed price.
+1. **`references/vendored/ai/bedrock-pricing-cache.md` (primary for Bedrock)** — Look up Bedrock model and service pricing by table. Set `pricing_source: "cached"`.
+2. **`shared/pricing-cache.md` (primary for source providers)** — Look up Gemini and OpenAI source-provider comparison pricing by table. Set `pricing_source: "cached"`.
+3. **Unavailable** — If a model is NOT in the applicable cache, set `pricing_source: "unavailable"` and warn the user. An `_unverified_` cache cell is blocking — do not use it as if it were a confirmed price.
 
-For typical migrations (Claude, Llama, Nova, Mistral, DeepSeek, Gemma, OpenAI gpt-oss, Gemini source pricing), ALL prices are in `pricing-cache.md`. Zero MCP calls needed.
+For typical migrations (Claude, Llama, Nova, Mistral, DeepSeek, Gemma, OpenAI gpt-oss, Gemini source pricing), all prices are in the two caches. Zero MCP calls needed.
 
 **Model lifecycle:** When building the model comparison table, check `references/vendored/ai/ai-model-lifecycle.md` and apply the 90-day exclusion rule:
 
 - **Excluded** (≤90 days to EOL): omit entirely from `model_comparison`, `recommended_model`, and `backup_model`.
 - **Legacy** (>90 days to EOL): include in `model_comparison` with `(Legacy — EOL YYYY-MM-DD)` annotation. Do not select as `recommended_model` unless no Active alternative exists.
 - **Active**: no restrictions.
-- **Restricted** (`restricted (…)` in the `pricing-cache.md` Status column — Covered Models such as Claude Fable 5 / 5.1, gated previews such as Claude Mythos): never `recommended_model` or `backup_model`. Include in `model_comparison` only when the user explicitly asked for a frontier model, annotated with the data-retention opt-in it requires.
+- **Restricted** (`restricted (…)` in the `references/vendored/ai/bedrock-pricing-cache.md` Status column — Covered Models such as Claude Fable 5 / 5.1, gated previews such as Claude Mythos): never `recommended_model` or `backup_model`. Include in `model_comparison` only when the user explicitly asked for a frontier model, annotated with the data-retention opt-in it requires.
 
 ## Prerequisites
 
@@ -71,6 +72,28 @@ If design or discover phase has more specific token estimates, use those instead
 
 **Long-context surcharge:** If `ai_critical_feature = "ultra_long_context"` in `preferences.json`, Claude models charge 2x the standard input rate for tokens beyond 200K context. Apply the surcharge to the portion of input tokens that exceeds 200K per request. If per-request token counts are unknown, assume 50% of input tokens fall in the long-context tier as a conservative estimate.
 
+**OpenAI/GPT source-side long-context parity:** When comparing a GPT-5.x/GPT-6 source cost against
+its Bedrock target, both sides MUST use the same context tier. If `usage_by_model[]` or
+`ai-workload-profile.json` carries no per-request token-size data (so it is unknown whether any
+requests exceed 272K input), do NOT assume the short-context rate for the source side while the
+Bedrock side may be priced long-context (or vice versa) — flag the comparison
+`pricing_tier: "approximate — request-size distribution unknown"` and present both a short-context
+and a long-context scenario row rather than a single blended number. When request-size data IS
+available (e.g., `ai_workload_profile.json` → `workloads[].typical_request_tokens` or measured
+usage profile per-request stats), apply the GPT breakpoint at 272,000 input tokens on BOTH sides
+consistently: a request above the threshold reprices input, cache, and output 2x/2x/1.5x on
+the OpenAI source row the same way it does on the Bedrock row (see `pricing-cache.md`'s GPT-6
+breakpoint note). Measured source spend (Part 1's `current_costs`/usage-profile dollar figures)
+always takes precedence over this list-rate comparison when it exists.
+
+**Worked example:** 100 requests of GPT-6 Sol at 300,000 input / 10,000 output tokens each (30M
+input / 1M output total) is ABOVE the 272,000-token breakpoint on every request. Source cost at
+the flat ≤272K rate ($2.00/$10.00) is $70 — wrong, because it ignores the breakpoint. Source cost
+at the correct long-context rate ($4.00 input / $15.00 output, per `pricing-cache.md`'s GPT-6
+family — long context table, Global column) is $135. Bedrock Global CRIS long-context is $135
+(parity); Bedrock In-Region/Geo-CRIS long-context ($4.40 input / $16.50 output) is $148.50 — a
+~10% premium, not the 112% a flat-rate comparison would produce.
+
 **Comparison table columns:** Model, Bedrock Monthly, vs Source Provider ($ and %), vs Current GCP, Quality, Capabilities Match (checked against `ai_capabilities_required`).
 
 Include source provider pricing from `aws-design-ai.json` → `bedrock_models[].source_provider_price`.
@@ -116,7 +139,7 @@ Do **not** repeat these as "costs" in the user-facing summary.
 
 Present the monthly and annual cost difference between current GCP AI spend and projected Bedrock cost:
 
-- **If the model is unchanged** (`model_change: false`): projected cost is **about 10% higher**, not the same — Bedrock in-region is priced at OpenAI's data-residency tier, which is 1.10x OpenAI standard. Quote the increase plainly and make the case on non-cost grounds. If any workload exceeds 272K context, price it at the long-context tier (2.0x input / 1.5x output) and show that separately; it can dominate the comparison.
+- **If the model is unchanged** (`model_change: false`): projected cost is **about 10% higher**, not the same, UNLESS the chosen path is Global CRIS (`migration_path: "runtime_openai_cris"` with a `global.`-prefixed model ID) — Global CRIS is priced at OpenAI's standard list price, i.e. cost PARITY with the source, not a premium. In-Region and Geo CRIS (and any GPT-5.5/GPT-5.4 move, which has no CRIS at all) remain at the 1.10x data-residency-tier premium over OpenAI standard. Quote whichever applies plainly and make the case on non-cost grounds. If any workload exceeds 272K context, price it at the long-context tier (2.0x input / 1.5x output) and show that separately; it can dominate the comparison.
 - **If Bedrock is cheaper**: present monthly and annual savings clearly
 - **If Bedrock is more expensive**: state clearly, justify with non-cost benefits or note "not justified if cost is the only priority"
 
@@ -124,9 +147,9 @@ Reference `aws-design-ai.json` → `honest_assessment`. If `"recommend_stay"`, p
 
 **Non-cost benefits to present:** usage counting toward existing AWS commitments, IAM/VPC/PrivateLink/KMS/CloudTrail governance, in-region processing for data residency, prompt caching (Claude, and GPT-5.6 at 90% off cached input with cached tokens exempt from the input-TPM quota), model flexibility (100+ models), AWS ecosystem (Guardrails, Knowledge Bases, AgentCore), and — for a same-model move — the elimination of behavior-delta and prompt-regression risk.
 
-**Pricing source caveat (all providers):** a `pricing-cache.md` cell marked `_unverified_` is **blocking for any quoted figure, whatever the provider** — resolve it from the Bedrock pricing page or the model card before the row enters `model_comparison` or the ROI table; never substitute a guess or a same-tier sibling's rate. An `_unverified_` cache cell is not evidence the model is unavailable or free — it means the rate was not confirmed when the cache was last updated. See `shared/openai-on-bedrock.md`.
+**Pricing source caveat (all providers):** a `references/vendored/ai/bedrock-pricing-cache.md` cell marked `_unverified_` is **blocking for any quoted Bedrock figure, whatever the provider** — resolve it from the Bedrock pricing page or the model card before the row enters `model_comparison` or the ROI table; never substitute a guess or a same-tier sibling's rate. An `_unverified_` Bedrock cache cell is not evidence the model is unavailable or free — it means the rate was not confirmed when the cache was last updated. See `shared/openai-on-bedrock.md`.
 
-**Unverified gate (all providers, not just OpenAI):** any cell marked `_unverified_` in `shared/pricing-cache.md` — including Anthropic batch cells for models not yet on the [batch-supported models table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html) (Sonnet 5, Opus 4.8 as of 2026-09-02) — is blocking for any quoted figure that depends on it. Do not apply a batch discount to an `_unverified_` batch cell; price on-demand and note batch as a possible future saving, or resolve the rate from the Bedrock pricing page first.
+**Unverified gate (all providers, not just OpenAI):** any cell marked `_unverified_` in `references/vendored/ai/bedrock-pricing-cache.md` — including Anthropic batch cells for models not yet on the [batch-supported models table](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html) (Sonnet 5, Opus 4.8 as of 2026-09-02) — is blocking for any quoted figure that depends on it. Do not apply a batch discount to an `_unverified_` batch cell; price on-demand and note batch as a possible future saving, or resolve the rate from the Bedrock pricing page first.
 
 **Note:** Human/professional-services one-time migration costs are intentionally out of scope for this advisor and excluded from ROI calculations.
 
@@ -144,7 +167,7 @@ Present applicable optimizations with estimated savings. **Every entry requires 
 | -------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Model downsizing / tiering | `model_tiering`              | 60-87%                                                                                       | `"none"`                                                                               | High volume, premium model selected. Available: Day 1.                                                                                                                                                                                                                                                                                                                                                              |
 | Prompt caching             | `prompt_caching`             | up to 90% on cached input tokens (workload- and cache-hit-rate dependent — see caveat below) | `"none"`                                                                               | Repeated system prompts, long cacheable context. Available: Day 1.                                                                                                                                                                                                                                                                                                                                                  |
-| Batch API                  | `batch_api`                  | 50% of on-demand                                                                             | `"none"`                                                                               | Non-real-time workloads (`ai_latency = "flexible"`) — **confirmed-batch models only**; models whose batch cells are `_unverified_` in `shared/pricing-cache.md` must not be quoted with a batch discount. Available: Day 1.                                                                                                                                                                                         |
+| Batch API                  | `batch_api`                  | 50% of on-demand                                                                             | `"none"`                                                                               | Non-real-time workloads (`ai_latency = "flexible"`) — **confirmed-batch models only**; models whose batch cells are `_unverified_` in `references/vendored/ai/bedrock-pricing-cache.md` must not be quoted with a batch discount. Available: Day 1.                                                                                                                                                                                         |
 | Input token reduction      | `input_token_reduction`      | 10-30%                                                                                       | `"none"`                                                                               | Prompt optimization, shorter context. Available: Day 1.                                                                                                                                                                                                                                                                                                                                                             |
 | Multi-model tiered routing | `multi_model_routing`        | 60-87%                                                                                       | `"none"`                                                                               | High/very-high volume, `tiered_strategy` in design. Available: Day 1 (design-time choice).                                                                                                                                                                                                                                                                                                                          |
 | Intelligent Prompt Routing | `intelligent_prompt_routing` | up to 30% (AWS-published ceiling)                                                            | `"none"`                                                                               | Same model family (Anthropic or Meta Llama by default; additional models via configurable routers) available in 2+ tiers, latency-tolerant routing. **Does not apply to a Gemini-only or OpenAI-only Bedrock stack** — check the design's model family has a router available. Available: after 2+ weeks production traffic (this plugin's caution, not an AWS-imposed minimum -- AWS documents no waiting period). |
@@ -284,7 +307,7 @@ All cost values are numbers, not strings. Output must be valid JSON.
 - [ ] `model_comparison` includes ALL viable Bedrock models, not just recommended
 - [ ] Legacy models in `model_comparison` are annotated with EOL dates (per `vendored/ai/ai-model-lifecycle.md`)
 - [ ] `recommended_model` is an Active model (not Legacy) unless no Active alternative exists
-- [ ] Neither `recommended_model` nor `backup_model` carries a `restricted (…)` Status in `shared/pricing-cache.md`
+- [ ] Neither `recommended_model` nor `backup_model` carries a `restricted (…)` Status in `references/vendored/ai/bedrock-pricing-cache.md`
 - [ ] Every model has `capabilities_match` checked against `ai_capabilities_required`
 - [ ] `recommended_model.rationale` references user's priority, preference, and volume
 - [ ] `roi_analysis` is honest — if migration increases cost, says so
