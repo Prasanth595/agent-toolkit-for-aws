@@ -279,8 +279,11 @@ Not run: `chat` or `investigate`, because those bill.
 
 ## Verify before declaring success
 
-Make one cheap call — a `chat` request, not an `investigate` — and confirm a real response. Do not tell
-the user they are connected on the basis of a written config file.
+Make one authenticated call that starts no agent work — MCP `tools/list`, or `tools/call
+list_agent_spaces` — and confirm a real response. Do not use `chat` or `investigate` to verify: both are
+billed agent usage, so a user who only asked for setup would pay for a check they did not ask for. Run
+those only for an operational request. Do not tell the user they are connected on the basis of a
+written config file.
 
 | Symptom | Cause | Fix |
 |---|---|---|

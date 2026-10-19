@@ -166,7 +166,8 @@ been paying attention.
    hold back the approval question; resolve it before creating anything (Phase 3).
 3. **Is an AWS DevOps Agent MCP server already registered?** Look in the agent's MCP configuration for a
    server pointing at `connect.aidevops.*`.
-4. **Does it actually work?** One cheap call, not just the presence of a config file.
+4. **Does it actually work?** One call that starts no agent work — `tools/list` or `list_agent_spaces`,
+   never `chat` or `investigate` — not just the presence of a config file.
 
 | What you find | What to do |
 |---|---|
@@ -466,7 +467,8 @@ Full procedure in [`references/connecting.md`](references/connecting.md).
 - Two auth paths: a bearer access token, or SigV4 through `mcp-proxy-for-aws`. Prefer SigV4 when the user
   already has working AWS credentials — it avoids minting a long-lived token
 - Client timeout must be **≥120 seconds**; investigations take 5–8 minutes
-- Verify with one cheap call before declaring success
+- Verify with `tools/list` or `list_agent_spaces` before declaring success. Never use `chat` or
+  `investigate` to verify: they are billed agent work the user has not asked for
 
 This plugin does **not** declare the DevOps Agent MCP server — the endpoint is region-specific and the auth
 is per-user, so no static entry would be right. And `npx skills add` copies skills only, so no MCP server
