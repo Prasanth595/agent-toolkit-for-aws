@@ -110,14 +110,6 @@ phase's `_preconditions`/`_postconditions` perform, and the state transition
 itself, still run at their normal point in the MAIN window — only the state
 CREATION step moves earlier, for this phase alone, to break the cycle.
 
-**Fresh-run migration-credit notice.** Immediately after `_init` resolves to a
-fresh run, before the re-entry check or any live-`az` consent/scanning, load
-`references/vendored/migration/upfront-credits.md` and render it verbatim once.
-Skip it when `_init` resumed an existing run, on a confirmed re-entry, when the
-state records `initiated_by: LLM_TO_BEDROCK`, or when the user's request is
-explicitly a direct AI-only assessment with no infrastructure track. Do not
-render it later in the run.
-
 1. **Re-entry check (do this FIRST, before offering consent).** If
    `$MIGRATION_DIR/live-capture/manifest.json` already exists (this run directory
    is being reused — a resumed run, or a confirmed re-entry per this phase's

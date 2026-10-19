@@ -509,21 +509,24 @@ Tell the user, before starting:
 
 Then, in order:
 
-1. **Resolve `$MIGRATION_DIR`.** Check for an existing `.migration/` directory at `$REPO`
-   exactly as `$ASSESS_BASE/references/phases/discover/discover.md` Step 0 describes (list
-   existing runs and offer Resume/Fresh/Cancel if any exist; otherwise create
-   `$REPO/.migration/<MMDD-HHMM>/` with the current timestamp and set `$MIGRATION_DIR` to it).
-   **A directory that exists but has no `.phase-status.json` yet is NOT an existing run** —
-   treat it as fresh and skip discover.md's Resume/Fresh/Cancel prompt for it (same exception
-   `agent-advisor`'s `migration-plan.md` Phase A documents for its own inline gcp-to-aws
-   delegation). This matters here because llm-to-bedrock does not pre-create `$MIGRATION_DIR`
-   before this step — but a run interrupted after this step creates the directory and before
-   discover.md's Step 0 writes `.phase-status.json` would otherwise leave exactly this
-   directory (present, but state-less) for a later resume, and discover.md's Resume branch
-   would then try to read a `.phase-status.json` that doesn't exist.
+1. **Resolve `$MIGRATION_DIR`.** Check `$REPO/.migration/` exactly as
+   `$ASSESS_BASE/references/phases/discover/discover.md` Step 0 describes. Treat either of
+   these as an existing interrupted run and include it in the Resume/Fresh/Cancel choices:
+   a directory with `.phase-status.json`, or a stateless directory carrying
+   `.llm-upfront-credits-offered`. The latter means an earlier attempt reserved its offer and
+   was interrupted before delegated Discover initialized provider state.
+
+   A **Resume** choice must set `$MIGRATION_DIR` to the selected existing directory unchanged.
+   If it is stateless but marked, continue into delegated Discover's provider initialization
+   in that same directory; do not allocate a current-minute replacement. An explicit
+   **Fresh** choice must allocate a genuinely unused `$REPO/.migration/<MMDD-HHMM>/`
+   directory, adding a collision suffix when needed. With no existing runs, allocate the same
+   unused fresh path. Never classify a marked stateless directory as Fresh merely because
+   `.phase-status.json` is absent.
 
    **Fresh-only upfront migration-credit offer (standalone full migrations only):** after
-   step 1 selects **Fresh**, atomically reserve this run's one-time offer before rendering it:
+   step 1 selects or allocates **Fresh**, atomically reserve this run's one-time offer before
+   rendering it:
 
    ```bash
    if (set -o noclobber; : > "$MIGRATION_DIR/.llm-upfront-credits-offered") 2>/dev/null; then

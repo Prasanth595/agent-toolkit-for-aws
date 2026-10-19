@@ -11,7 +11,9 @@ PLAN_OK/PLAN_SKIP status tokens) so benign rewording does not trip them.
 """
 from __future__ import annotations
 
+import json
 import re
+import subprocess
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
@@ -36,7 +38,6 @@ LLM_VENDORED_NOTICE = (
 LLM_SKILL = PLUGIN_ROOT / "skills" / "llm-to-bedrock" / "SKILL.md"
 PLUGIN_README = PLUGIN_ROOT / "README.md"
 UPFRONT_DISCOVER_FILES = {
-    "azure": PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "discover" / "discover.md",
     "gcp": PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "discover" / "discover.md",
     "heroku": PLUGIN_ROOT / "skills" / "heroku-to-aws" / "references" / "phases" / "discover" / "discover.md",
 }
@@ -48,13 +49,12 @@ AGENT_ADVISOR_LLM_HANDOFF = (
     PLUGIN_ROOT / "skills" / "agent-advisor" / "references" / "handoff"
     / "handoff-migration.md"
 )
-APPROVED_CREDIT_COPY = (
-    "Get $1,500 in AWS Promotional Credits for your migration when you create "
-    "an assessment. Migrating a larger workload? You may be eligible for more. "
-    "Talk to your AWS representative. Final eligibility determined by AWS."
+QUALIFICATION_COPY = (
+    "Complete your migration assessment to see whether you qualify for AWS "
+    "migration credits. Final eligibility is determined by AWS."
 )
-STALE_CREDIT_COPY = (
-    "Get $1,500 in migration credits when you create an assessment.",
+UNSUPPORTED_CREDIT_COPY = (
+    "$1,500",
     "up to $1,500",
     "Credits are not guaranteed",
     "Qualification and credits are not guaranteed",
@@ -64,9 +64,10 @@ STALE_CREDIT_COPY = (
 def test_migration_credit_notice_is_vendored_and_qualified() -> None:
     canonical = UPFRONT_NOTICE.read_bytes()
     text = canonical.decode()
-    assert APPROVED_CREDIT_COPY in text
-    assert all(stale not in text for stale in STALE_CREDIT_COPY)
+    assert QUALIFICATION_COPY in text
+    assert all(unsupported not in text for unsupported in UNSUPPORTED_CREDIT_COPY)
     assert "plan.json" in text and "migrate/credits" in text
+    assert "GCP or Heroku" in text
     assert "upload below" not in text.lower()
     for provider in UPFRONT_DISCOVER_FILES:
         vendored = (
@@ -75,14 +76,25 @@ def test_migration_credit_notice_is_vendored_and_qualified() -> None:
         )
         assert vendored.read_bytes() == canonical
 
+    azure_vendored = (
+        PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "vendored"
+        / "migration" / "upfront-credits.md"
+    )
+    azure_discover = (
+        PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases"
+        / "discover" / "discover.md"
+    ).read_text(encoding="utf-8")
+    assert not azure_vendored.exists()
+    assert "upfront-credits.md" not in azure_discover
+
 
 def test_llm_migration_credit_notice_is_vendored_and_qualified() -> None:
     canonical = LLM_UPFRONT_NOTICE.read_bytes()
     text = canonical.decode()
 
     assert LLM_VENDORED_NOTICE.read_bytes() == canonical
-    assert APPROVED_CREDIT_COPY in text
-    assert all(stale not in text for stale in STALE_CREDIT_COPY)
+    assert QUALIFICATION_COPY in text
+    assert all(unsupported not in text for unsupported in UNSUPPORTED_CREDIT_COPY)
     assert (
         "[AWS Startups Migrate](https://startups.aws.com/startups/en-US/"
         "migrate/credits?source=plugin)" in text
@@ -92,11 +104,13 @@ def test_llm_migration_credit_notice_is_vendored_and_qualified() -> None:
     assert "upload that" not in text.lower()
 
 
-def test_readme_uses_approved_migration_credit_copy() -> None:
+def test_readme_uses_qualification_based_migration_credit_copy() -> None:
     text = PLUGIN_README.read_text(encoding="utf-8")
 
-    assert text.count(APPROVED_CREDIT_COPY) == 3
-    assert all(stale not in text for stale in STALE_CREDIT_COPY)
+    assert text.count(QUALIFICATION_COPY) == 3
+    assert all(unsupported not in text for unsupported in UNSUPPORTED_CREDIT_COPY)
+    assert "GCP and Heroku currently write importable plans" in text
+    assert "returns `PLAN_SKIP` until the downstream importer accepts Azure plans" in text
 
 
 def test_llm_migration_credit_notice_runs_once_before_delegated_discover() -> None:
@@ -104,23 +118,27 @@ def test_llm_migration_credit_notice_runs_once_before_delegated_discover() -> No
     a1_start = text.index("### A1 — Run Discover, Clarify, Design, and Estimate")
     a2_start = text.index("### A2 — Confirm Assess is complete", a1_start)
     a1 = text[a1_start:a2_start]
-    resolution_idx = a1.index("offer Resume/Fresh/Cancel")
+    resolution_idx = a1.index("Resume/Fresh/Cancel choices")
     notice_ref = "references/vendored/migration/upfront-credits-llm.md"
     marker = ".llm-upfront-credits-offered"
-    marker_idx = a1.index(marker)
+    reservation_idx = a1.index("set -o noclobber")
     notice_idx = a1.index(notice_ref)
     discover_idx = a1.index(
         "$ASSESS_BASE/references/phases/discover/discover.md", notice_idx
     )
 
     assert a1.count(notice_ref) == 1
-    assert a1.count(marker) == 1
-    assert resolution_idx < marker_idx < notice_idx < discover_idx
-    contract = a1[marker_idx - 200:discover_idx]
+    assert resolution_idx < reservation_idx < notice_idx < discover_idx
+    contract = a1[resolution_idx:discover_idx]
     for required in (
-        "Fresh",
-        "standalone full migrations only",
+        "stateless directory carrying",
+        marker,
         "Resume",
+        "same directory",
+        "explicit",
+        "Fresh",
+        "genuinely unused",
+        "standalone full migrations only",
         "A2 re-entry",
         "access-only mode",
         "agent-advisor delegation",
@@ -129,8 +147,61 @@ def test_llm_migration_credit_notice_runs_once_before_delegated_discover() -> No
     assert "set -o noclobber" in contract
     assert "OFFER_FIRST_ATTEMPT" in contract
     assert "OFFER_ALREADY_RECORDED" in contract
-    assert "state-less directory left by interruption" in contract
     assert "$INVOCATION_ORIGIN` is not `AGENT_ADVISOR" in contract
+
+
+def test_llm_stateless_marked_run_resumes_without_reoffering(tmp_path: Path) -> None:
+    migration_root = tmp_path / ".migration"
+    old_run = migration_root / "0101-1200"
+    current_run = migration_root / "0101-1201"
+    old_run.mkdir(parents=True)
+    current_run.mkdir()
+    marker = old_run / ".llm-upfront-credits-offered"
+    marker.touch()
+
+    interrupted = sorted(
+        path for path in migration_root.iterdir()
+        if (path / ".phase-status.json").exists()
+        or (path / ".llm-upfront-credits-offered").exists()
+    )
+    assert interrupted == [old_run]
+
+    resumed = interrupted[0]
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'if (set -o noclobber; : > "$1/.llm-upfront-credits-offered") '
+            '2>/dev/null; then echo OFFER_FIRST_ATTEMPT; '
+            'else echo OFFER_ALREADY_RECORDED; fi',
+            "bash",
+            str(resumed),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert resumed == old_run
+    assert result.stdout.strip() == "OFFER_ALREADY_RECORDED"
+
+    fresh = migration_root / "0101-1201-2"
+    fresh.mkdir()
+    first = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'if (set -o noclobber; : > "$1/.llm-upfront-credits-offered") '
+            '2>/dev/null; then echo OFFER_FIRST_ATTEMPT; '
+            'else echo OFFER_ALREADY_RECORDED; fi',
+            "bash",
+            str(fresh),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert fresh != old_run and fresh != current_run
+    assert first.stdout.strip() == "OFFER_FIRST_ATTEMPT"
 
 
 def test_agent_advisor_handoff_durably_suppresses_llm_notice() -> None:
@@ -172,11 +243,24 @@ def test_migration_credit_notice_runs_once_at_fresh_discover_start() -> None:
             assert notice_idx < text.index("**When to offer capture:**", notice_idx)
 
 
-def test_agent_advisor_delegation_uses_resume_routable_state() -> None:
+def test_agent_advisor_delegation_uses_resume_routable_state(tmp_path: Path) -> None:
     advisor_text = AGENT_ADVISOR_MIGRATION_PLAN.read_text(encoding="utf-8")
     discover_text = UPFRONT_DISCOVER_FILES["gcp"].read_text(encoding="utf-8")
+    step_one = advisor_text[
+        advisor_text.index("## Step 1 — Resolve the target repo"):
+        advisor_text.index("## Step 2 — Assemble the injection context")
+    ]
+    pointer_idx = step_one.index("Immediately read-merge-write agent-advisor's state")
+    provider_idx = step_one.index("Then inspect `$MIGRATION_DIR/.phase-status.json`")
     envelope_start = advisor_text.index('"initiated_by": "AGENT_ADVISOR"')
 
+    assert pointer_idx < provider_idx
+    assert "reuse those exact paths on re-entry" in step_one
+    assert "sole path selected on every re-entry" in step_one
+    assert "collision-suffixed unused directory" in step_one
+    assert "Reuse the envelope unchanged" in step_one
+    assert "occupied-directory conflict" in step_one
+    assert "otherwise empty" in step_one
     assert '{"initiated_by":"AGENT_ADVISOR"}' not in advisor_text
     assert envelope_start < advisor_text.index("### Phase A — Discover")
     for required in (
@@ -191,9 +275,38 @@ def test_agent_advisor_delegation_uses_resume_routable_state() -> None:
     assert "normal Resume" in discover_text
     assert "do not recreate state" in discover_text
     assert "change its `migration_id`/`run_id`" in discover_text
-    assert "creates its initial delegated envelope in Step 1" in advisor_text
-    assert "Discover reuses that envelope" in advisor_text
-    assert "migration-plan.md does NOT touch it" not in advisor_text
+    assert "preserve the existing `migration_plan_ctx` unchanged" in advisor_text
+
+    repo = tmp_path / "repo"
+    original_dir = repo / ".migration" / "0101-1200"
+    original_dir.mkdir(parents=True)
+    advisor_state = {
+        "migration_plan_ctx": {
+            "repo": str(repo.resolve()),
+            "migration_dir": str(original_dir.resolve()),
+        }
+    }
+    provider_state = {
+        "migration_id": "0101-1200",
+        "run_id": "11111111-2222-4333-8444-555555555555",
+        "owning_skill": "GCP_TO_AWS",
+        "initiated_by": "AGENT_ADVISOR",
+        "current_phase": "design",
+        "phases": {"discover": "completed", "clarify": "completed", "design": "in_progress"},
+    }
+    advisor_path = tmp_path / "advisor-state.json"
+    provider_path = original_dir / ".phase-status.json"
+    advisor_path.write_text(json.dumps(advisor_state))
+    provider_path.write_text(json.dumps(provider_state))
+
+    for derived_now in (repo / ".migration" / "0101-1200", repo / ".migration" / "0101-1201"):
+        persisted = json.loads(advisor_path.read_text())
+        selected = Path(persisted["migration_plan_ctx"]["migration_dir"])
+        resumed = json.loads((selected / ".phase-status.json").read_text())
+        assert selected == original_dir.resolve()
+        assert selected != derived_now or derived_now == original_dir
+        assert resumed["run_id"] == provider_state["run_id"]
+        assert resumed["phases"] == provider_state["phases"]
 
 
 def test_azure_skill_describes_only_implemented_discovery_sources() -> None:

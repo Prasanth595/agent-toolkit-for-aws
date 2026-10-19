@@ -126,18 +126,36 @@ resumes at migration-plan.md rather than at generate.md.
 
 ## Step 1 — Resolve the target repo and set $MIGRATION_DIR
 
-The plan needs the repo containing the workload to migrate. If Discover ran (`phases.discover
-== "completed"`), reuse the repo path the user gave then (from `context-notes.md` or
-`context-signals.json`). Otherwise ask for it now. Resolve to an absolute path (`$REPO`).
+Read agent-advisor's `$RUN_DIR/.phase-status.json` before selecting a provider run.
 
-If the user has no code (idea-only migrate), STOP: tell them a migration plan needs an
-existing workload, set `phases.migration_plan = "not_applicable"`, and continue to the Gate
-2 branch in generate.md Step 7.
+- If it already carries a schema-valid `migration_plan_ctx` object with absolute `repo` and
+  `migration_dir` paths, reuse those exact paths on re-entry. Do not derive a directory from
+  the current minute, mint another UUID, or rewrite the provider envelope.
+- Otherwise resolve the target repo. If Discover ran (`phases.discover == "completed"`), reuse
+  the repo path the user gave then (from `context-notes.md` or `context-signals.json`); otherwise
+  ask for it now. Resolve to an absolute path (`$REPO`). If the user has no code (idea-only
+  migrate), STOP: tell them a migration plan needs an existing workload, set
+  `phases.migration_plan = "not_applicable"`, and continue to the Gate 2 branch in generate.md
+  Step 7.
+- For a first entry, choose an UNUSED `$REPO/.migration/<MMDD-HHMM>/` directory. If that name
+  already exists, choose a collision-suffixed unused directory; never claim or overwrite an
+  occupied path. Immediately read-merge-write agent-advisor's state with
+  `migration_plan_ctx = {"repo": "<abs $REPO>", "migration_dir": "<abs $MIGRATION_DIR>"}`
+  before creating provider state or loading any gcp-to-aws phase. This durable pointer must
+  survive interruption and is the sole path selected on every re-entry.
 
-Set `$MIGRATION_DIR` using the gcp-to-aws convention: `$REPO/.migration/<MMDD-HHMM>/`
-(current timestamp). Create the directory and `.migration/.gitignore` (`*\n!.gitignore`).
-Before loading gcp-to-aws Discover, mint a fresh `run_id` with `uuidgen` (or an equivalent
-random UUID source) and write `$MIGRATION_DIR/.phase-status.json` as one schema-valid provider
+Create `$MIGRATION_DIR` and `.migration/.gitignore` (`*\n!.gitignore`) only after the advisor
+pointer is durable. Then inspect `$MIGRATION_DIR/.phase-status.json`:
+
+- If it exists, validate it before doing anything else. It must parse, satisfy the provider
+  state schema, and carry `owning_skill: GCP_TO_AWS` plus `initiated_by: AGENT_ADVISOR`.
+  Reuse the envelope unchanged, including `migration_id`, `run_id`, `current_phase`, and the
+  complete phase map. A mismatch or invalid state is an occupied-directory conflict: halt and
+  inform rather than overwriting it.
+- If it does not exist, require the selected directory to be otherwise empty, then create the
+  fresh provider state described below.
+
+Mint a fresh `run_id` with `uuidgen` (or an equivalent random UUID source) and write one schema-valid provider
 state envelope:
 
 ```json
@@ -442,7 +460,8 @@ files present in `$MIGRATION_DIR`.
 Read-merge-write `$RUN_DIR/.phase-status.json`:
 
 - `phases.migration_plan` = `"completed"`
-- `migration_plan_ctx` = `{"repo": "<abs $REPO>", "migration_dir": "<abs $MIGRATION_DIR>"}`
+- preserve the existing `migration_plan_ctx` unchanged; it was persisted before provider
+  initialization in Step 1 and is the durable resume pointer
 
 Verify `$MIGRATION_DIR/aws-design-ai.json` exists and has a non-empty `ai_architecture`.
 If missing → AI path did not complete; show the error, set `phases.migration_plan =
