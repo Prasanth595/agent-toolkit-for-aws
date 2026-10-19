@@ -33,7 +33,7 @@ def _default_runtime_client(region):
     return boto3.client("bedrock-runtime", region_name=region)
 
 
-def _default_openai_responses_client(region):
+def _default_openai_client(region, path_name):
     """Lazily build an OpenAI SDK client pointed at the Bedrock Mantle endpoint.
 
     Imports are deferred so the offline recommendation/verify code path never
@@ -43,20 +43,36 @@ def _default_openai_responses_client(region):
         from openai import OpenAI
     except ImportError as exc:
         raise RuntimeError(
-            "Mantle Responses verification requires the openai package"
+            f"Mantle {path_name} verification requires the openai package"
         ) from exc
     try:
         from aws_bedrock_token_generator import provide_token
     except ImportError as exc:
         raise RuntimeError(
-            "Mantle Responses verification requires aws-bedrock-token-generator"
+            f"Mantle {path_name} verification requires aws-bedrock-token-generator"
         ) from exc
     base_url = f"https://bedrock-mantle.{region}.api.aws/openai/v1"
     return OpenAI(base_url=base_url, api_key=provide_token(region=region))
 
 
+def _default_openai_responses_client(region):
+    return _default_openai_client(region, "Responses")
+
+
+def _default_openai_chat_client(region):
+    return _default_openai_client(region, "Chat Completions")
+
+
 def _probe_openai_responses(client, model_id):
     return client.responses.create(model=model_id, input=PROMPT)
+
+
+def _probe_openai_chat(client, model_id):
+    return client.chat.completions.create(
+        model=model_id,
+        max_completion_tokens=8,
+        messages=[{"role": "user", "content": PROMPT}],
+    )
 
 
 def _response_model_id(response):
@@ -118,6 +134,7 @@ def verify_workload(
     mantle_client_factory=None,
     runtime_client_factory=None,
     openai_responses_client_factory=None,
+    openai_chat_client_factory=None,
     now=None,
 ):
     result = _base_result(workload_id, recommendation)
@@ -147,6 +164,9 @@ def verify_workload(
         elif path == "mantle_openai_responses":
             factory = openai_responses_client_factory or _default_openai_responses_client
             response = _probe_openai_responses(factory(result["region"]), model_id)
+        elif path == "mantle_openai_chat":
+            factory = openai_chat_client_factory or _default_openai_chat_client
+            response = _probe_openai_chat(factory(result["region"]), model_id)
         elif path == "runtime_converse":
             factory = runtime_client_factory or _default_runtime_client
             response = _probe_converse(factory(result["region"]), model_id)
@@ -174,6 +194,7 @@ def verify_recommendation(
     mantle_client_factory=None,
     runtime_client_factory=None,
     openai_responses_client_factory=None,
+    openai_chat_client_factory=None,
     now=None,
 ):
     selected = set(workload_ids or recommendation["workloads"])
@@ -192,6 +213,7 @@ def verify_recommendation(
             mantle_client_factory=mantle_client_factory,
             runtime_client_factory=runtime_client_factory,
             openai_responses_client_factory=openai_responses_client_factory,
+            openai_chat_client_factory=openai_chat_client_factory,
             now=generated_at,
         )
     return {

@@ -254,6 +254,106 @@ def test_gpt6_chat_conflict_option_names_chat_completions_surface():
     assert "Responses surface" not in option["reason"]
 
 
+def test_gpt6_chat_findings_preserve_chat_request_shapes():
+    rec = _recommend(
+        _workload(
+            source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+            requirements={
+                "api_continuity": "required",
+                "uses_n": True,
+                "uses_hosted_state": True,
+            },
+            detected_features=["tool_or_function_calling", "conversation_state"],
+        ),
+        region="us-east-1",
+    )
+    assert rec["api_path"] == "mantle_openai_chat"
+    assert "responses_no_n" not in _delta_codes(rec)
+    tool_delta = _delta_by_code(rec, "tool_result_shape")
+    assert "role: tool" in tool_delta["description"]
+    assert "tool_call_id" in tool_delta["description"]
+    assert "function_call_output" not in tool_delta["description"]
+    state_delta = _delta_by_code(rec, "conversation_state_ownership")
+    assert "application-owned message history" in state_delta["description"]
+    assert "previous_response_id" not in state_delta["description"]
+
+
+def test_gpt6_chat_conflict_outside_mantle_region_is_schema_valid():
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements={
+            "api_continuity": "required",
+            "governance": ["guardrails"],
+        },
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert {option["api_path"] for option in rec["decision_options"]} == {
+        "mantle_openai_chat",
+        "runtime_converse",
+    }
+    mantle = next(
+        option for option in rec["decision_options"]
+        if option["api_path"] == "mantle_openai_chat"
+    )
+    assert "Requires changing from eu-west-1" in mantle["reason"]
+
+
+def test_gpt6_chat_unknown_required_feature_outside_region_has_two_options():
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements={
+            "api_continuity": "required",
+            "critical_features": ["streaming"],
+        },
+        feature_status={"streaming": "unknown"},
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert len(rec["decision_options"]) >= 2
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    (
+        {
+            "api_continuity": "preferred",
+            "governance": ["guardrails"],
+            "critical_features": ["streaming"],
+        },
+        {
+            "api_continuity": "preferred",
+            "governance": ["guardrails"],
+            "expected_output_tokens": 10000000,
+        },
+    ),
+)
+def test_runtime_unresolved_branches_outside_mantle_region_are_schema_valid(
+    requirements,
+):
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements=requirements,
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert {option["api_path"] for option in rec["decision_options"]} == {
+        "mantle_openai_chat",
+        "runtime_converse",
+    }
+    mantle = next(
+        option for option in rec["decision_options"]
+        if option["api_path"] == "mantle_openai_chat"
+    )
+    assert "Requires changing from eu-west-1" in mantle["reason"]
+
+
 # --- 11.2 Model-generation analysis ---------------------------------------
 
 def test_gpt4_to_gpt5_emits_model_generation_finding():

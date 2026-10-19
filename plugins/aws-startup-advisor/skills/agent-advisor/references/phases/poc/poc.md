@@ -461,7 +461,7 @@ calls the recommended Bedrock model and answers the AgentCore entrypoint contrac
 **Code-path branch (per unit):** read
 `design.json.units[<unit-id>].model_recommendation.api_path`. For `mantle_messages`, generate an
 `AnthropicBedrockMantle` Messages client. For `runtime_converse`, use the boto3 Converse
-template. For `runtime_invoke`, use boto3 InvokeModel with the provider-native body. Future
+template. For `runtime_invoke`, use boto3 InvokeModel with the provider-native body. The
 `mantle_openai_chat` and `mantle_openai_responses` paths use their matching OpenAI-compatible
 clients. Never branch on one run-wide `migration_path` string.
 

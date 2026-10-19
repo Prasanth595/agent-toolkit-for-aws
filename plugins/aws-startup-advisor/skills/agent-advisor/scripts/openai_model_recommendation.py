@@ -485,11 +485,12 @@ def _feature_findings(detected_features, requirements, path=None):
     Bedrock-native Converse target does not."""
     detected = set(detected_features or [])
     detected.update(requirements.get("critical_features") or [])
-    is_mantle = path == "mantle_openai_responses"
+    is_responses = path == "mantle_openai_responses"
+    is_chat = path == "mantle_openai_chat"
     blocks, tuning, deltas, impacts = [], [], [], []
 
     if "structured_output_json" in detected:
-        if is_mantle:
+        if is_responses:
             # Verified on Mantle: responses.parse(text_format=Model) returns a typed object.
             deltas.append(
                 _delta(
@@ -505,11 +506,12 @@ def _feature_findings(detected_features, requirements, path=None):
                 _delta(
                     "structured_output_text_format",
                     "feature",
-                    "For a Bedrock-native Converse target, enforce the schema via tool-use or "
-                    "prompt + validation; the OpenAI parse() helper is not the selected path.",
+                    "For the selected non-Responses path, enforce the schema through that "
+                    "path's supported request shape plus application validation; the OpenAI "
+                    "Responses parse() helper is not available.",
                 )
             )
-    if requirements.get("uses_n") or "multiple_candidates_n" in detected:
+    if (requirements.get("uses_n") or "multiple_candidates_n" in detected) and not is_chat:
         deltas.append(
             _delta(
                 "responses_no_n",
@@ -519,16 +521,20 @@ def _feature_findings(detected_features, requirements, path=None):
             )
         )
     if "tool_or_function_calling" in detected:
-        deltas.append(
-            _delta(
-                "tool_result_shape",
-                "feature",
-                "Tool calls continue via function_call_output on Responses; the application "
-                "executes the tool.",
+        if is_chat:
+            tool_description = (
+                "On Mantle Chat Completions, preserve assistant tool_calls and continue each "
+                "result as a role: tool message with the matching tool_call_id; the "
+                "application executes the tool."
             )
-        )
+        else:
+            tool_description = (
+                "Tool calls continue via function_call_output on Responses; the application "
+                "executes the tool."
+            )
+        deltas.append(_delta("tool_result_shape", "feature", tool_description))
     if "conversation_state" in detected or requirements.get("uses_hosted_state"):
-        if is_mantle:
+        if is_responses:
             deltas.append(
                 _delta(
                     "conversation_state_ownership",
@@ -537,6 +543,16 @@ def _feature_findings(detected_features, requirements, path=None):
                     "(store=True + previous_response_id) or manual replay (store=False with "
                     "application-owned history). Retention/compliance/availability are "
                     "verification questions, not a lost capability.",
+                )
+            )
+        elif is_chat:
+            deltas.append(
+                _delta(
+                    "conversation_state_ownership",
+                    "path",
+                    "Mantle Chat Completions uses application-owned message history; replay "
+                    "the prior user, assistant, tool-call, and tool-result messages on each "
+                    "request.",
                 )
             )
         else:
@@ -727,8 +743,34 @@ def _decision_options(catalog, workload, region):
         candidate_order=_mantle_candidate_order(catalog, workload["source"]),
         region=region,
     )
+    mantle_requires_region_change = False
+    if mantle is None and region != "unknown":
+        mantle, _ = _catalog_model_for_path(
+            catalog, mantle_path, detected, workload["requirements"],
+            candidate_order=_mantle_candidate_order(catalog, workload["source"]),
+            region="unknown",
+        )
+        mantle_requires_region_change = mantle is not None
     if mantle:
         model_key, model, path_config = mantle
+        reason = (
+            "Preserves the OpenAI SDK and Chat Completions surface; gives up "
+            "runtime-only Bedrock governance."
+            if mantle_path == "mantle_openai_chat"
+            else "Preserves the OpenAI SDK and Responses surface; gives up "
+            "runtime-only Bedrock governance."
+        )
+        if mantle_requires_region_change:
+            availability = model.get("region_availability") or {}
+            supported_regions = sorted(
+                set(availability.get("commercial", []))
+                | set(availability.get("govcloud", []))
+            )
+            region_label = ", ".join(supported_regions) or "a catalog-supported region"
+            reason += (
+                f" Requires changing from {region} to a catalog-supported Mantle region "
+                f"({region_label})."
+            )
         options.append(
             {
                 "model_key": model_key,
@@ -738,13 +780,7 @@ def _decision_options(catalog, workload, region):
                     path_config["model_id"], path_config["requires_cris"], workload["requirements"]
                 ),
                 "requires_cris": path_config["requires_cris"],
-                "reason": (
-                    "Preserves the OpenAI SDK and Chat Completions surface; gives up "
-                    "runtime-only Bedrock governance."
-                    if mantle_path == "mantle_openai_chat"
-                    else "Preserves the OpenAI SDK and Responses surface; gives up "
-                    "runtime-only Bedrock governance."
-                ),
+                "reason": reason,
             }
         )
     runtime, _ = _catalog_model_for_path(
@@ -928,13 +964,6 @@ def recommend_openai_workload(workload, region, catalog):
     )
     if not catalog_hit:
         if path.startswith("mantle_"):
-            decision_options = _decision_options(catalog, workload, "unknown")
-            for option in decision_options:
-                if option["api_path"] == path:
-                    option["reason"] += (
-                        f" Requires choosing a catalog-supported region because {region} "
-                        "is outside this model's Mantle footprint."
-                    )
             return _unresolved(
                 rationale_head,
                 [
@@ -950,7 +979,6 @@ def recommend_openai_workload(workload, region, catalog):
                     "Model Recommend.",
                 ),
                 path,
-                decision_options,
             )
         raise ValueError(f"catalog has no available model for path {path}")
     model_key, model, path_config = catalog_hit
