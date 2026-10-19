@@ -41,9 +41,9 @@ $4 is the top of the per-investigation range and the right number to plan agains
 
 ## Saying the result
 
-Give the number plainly — *"after the trial, at about three investigations a week, your $1,000 in
-credits would last roughly two months"* — and say what happens when credits run out (usage bills to their
-payment method). If it is short, they may want the lower-cost options below; mention them, but do not
+Give the number plainly — *"after the trial, at about three investigations a week (about $12), your $200
+in credits would last roughly four months, unless they expire sooner or other AWS usage draws on them"* —
+and say what happens when credits run out (usage bills to their payment method). If it is short, they may want the lower-cost options below; mention them, but do not
 recommend against setup. A founder who has just lost a day to an outage may reasonably decide four dollars
 is cheap.
 
