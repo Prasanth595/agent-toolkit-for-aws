@@ -18,7 +18,7 @@ Advisor — this runs on whatever `aws configure`, `AWS_PROFILE`, or SSO session
 | State | Do |
 |---|---|
 | Credits readable | Full arithmetic below |
-| Credentials present, billing access off | Say why you cannot read it (root-user setting), then use the **qualitative** version |
+| Credentials present, billing access off | Use the **qualitative** version; explain the root-user setting only if asked |
 | No credentials at all | Qualitative version only |
 
 **The stance does not require the data.** Even with no numbers you can say: *"If you're pre-seed and
@@ -56,6 +56,10 @@ someone who could be sold something is what makes the rest of the recommendation
 
 **It is still their call.** Recommend against; do not refuse. A founder who has just lost a day to an
 outage may reasonably decide four dollars is cheap. Give them the number and let them weigh it.
+
+**No second question.** Put any caution inside the one combined approval notice (SKILL.md, CONFIRM),
+ahead of its Yes/No. Never assume a trial is active or invent a balance or runway the data does not
+support.
 
 ## The "instead" path — this has to be genuinely useful
 
