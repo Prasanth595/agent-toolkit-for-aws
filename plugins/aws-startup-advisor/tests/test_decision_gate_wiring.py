@@ -151,57 +151,87 @@ def test_llm_migration_credit_notice_runs_once_before_delegated_discover() -> No
 
 
 def test_llm_stateless_marked_run_resumes_without_reoffering(tmp_path: Path) -> None:
-    migration_root = tmp_path / ".migration"
-    old_run = migration_root / "0101-1200"
-    current_run = migration_root / "0101-1201"
-    old_run.mkdir(parents=True)
-    current_run.mkdir()
-    marker = old_run / ".llm-upfront-credits-offered"
-    marker.touch()
+    llm_text = LLM_SKILL.read_text(encoding="utf-8")
+    a1 = llm_text[
+        llm_text.index("### A1 — Run Discover, Clarify, Design, and Estimate"):
+        llm_text.index("### A2 — Confirm Assess is complete")
+    ]
+    assert "marked-stateless" in a1
+    assert "Never create provider state in another path" in a1
+    assert "`GCP_TO_AWS` or `AZURE_TO_AWS`" in a1
+    assert "skip the provider's resume/Fresh prompt" in a1
 
-    interrupted = sorted(
-        path for path in migration_root.iterdir()
-        if (path / ".phase-status.json").exists()
-        or (path / ".llm-upfront-credits-offered").exists()
-    )
-    assert interrupted == [old_run]
+    def initialize_selected_provider(run: Path, owning_skill: str) -> dict[str, object]:
+        state_path = run / ".phase-status.json"
+        assert not state_path.exists()
+        state: dict[str, object] = {
+            "migration_id": run.name,
+            "run_id": "11111111-2222-4333-8444-555555555555",
+            "owning_skill": owning_skill,
+            "initiated_by": "LLM_TO_BEDROCK",
+            "last_updated": "2026-04-01T12:01:00Z",
+            "current_phase": "discover",
+            "phases": {
+                "discover": "in_progress",
+                "clarify": "pending",
+                "design": "pending",
+                "estimate": "pending",
+                "workshop": "pending",
+                "generate": "pending",
+                "feedback": "pending",
+            },
+        }
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        return state
 
-    resumed = interrupted[0]
-    result = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'if (set -o noclobber; : > "$1/.llm-upfront-credits-offered") '
-            '2>/dev/null; then echo OFFER_FIRST_ATTEMPT; '
-            'else echo OFFER_ALREADY_RECORDED; fi',
-            "bash",
-            str(resumed),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert resumed == old_run
-    assert result.stdout.strip() == "OFFER_ALREADY_RECORDED"
+    for provider in ("GCP_TO_AWS", "AZURE_TO_AWS"):
+        migration_root = tmp_path / provider / ".migration"
+        old_run = migration_root / "0101-1200"
+        current_run = migration_root / "0101-1201"
+        old_run.mkdir(parents=True)
+        current_run.mkdir()
+        marker = old_run / ".llm-upfront-credits-offered"
+        marker.touch()
 
-    fresh = migration_root / "0101-1201-2"
-    fresh.mkdir()
-    first = subprocess.run(
-        [
-            "bash",
-            "-c",
-            'if (set -o noclobber; : > "$1/.llm-upfront-credits-offered") '
-            '2>/dev/null; then echo OFFER_FIRST_ATTEMPT; '
-            'else echo OFFER_ALREADY_RECORDED; fi',
-            "bash",
-            str(fresh),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert fresh != old_run and fresh != current_run
-    assert first.stdout.strip() == "OFFER_FIRST_ATTEMPT"
+        interrupted = sorted(
+            path for path in migration_root.iterdir()
+            if (path / ".phase-status.json").exists()
+            or (path / ".llm-upfront-credits-offered").exists()
+        )
+        assert interrupted == [old_run]
+
+        resumed = interrupted[0]
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                'if (set -o noclobber; : > "$1/.llm-upfront-credits-offered") '
+                '2>/dev/null; then echo OFFER_FIRST_ATTEMPT; '
+                'else echo OFFER_ALREADY_RECORDED; fi',
+                "bash",
+                str(resumed),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert resumed == old_run
+        assert result.stdout.strip() == "OFFER_ALREADY_RECORDED"
+
+        resumed_state = initialize_selected_provider(resumed, provider)
+        assert resumed_state["migration_id"] == old_run.name
+        assert resumed_state["owning_skill"] == provider
+        assert resumed_state["initiated_by"] == "LLM_TO_BEDROCK"
+        assert (old_run / ".phase-status.json").exists()
+        assert not (current_run / ".phase-status.json").exists()
+
+        fresh = migration_root / "0101-1201-2"
+        fresh.mkdir()
+        (fresh / ".llm-upfront-credits-offered").touch(exist_ok=False)
+        fresh_state = initialize_selected_provider(fresh, provider)
+        assert fresh != old_run and fresh != current_run
+        assert fresh_state["migration_id"] == fresh.name
+        assert (fresh / ".phase-status.json").exists()
 
 
 def test_agent_advisor_handoff_durably_suppresses_llm_notice() -> None:
@@ -261,6 +291,15 @@ def test_agent_advisor_delegation_uses_resume_routable_state(tmp_path: Path) -> 
     assert "Reuse the envelope unchanged" in step_one
     assert "occupied-directory conflict" in step_one
     assert "otherwise empty" in step_one
+    existing_branch = step_one[
+        step_one.index("- If it exists"):
+        step_one.index("- If it does not exist")
+    ]
+    no_state_branch = step_one[step_one.index("- If it does not exist"):]
+    assert re.search(r"continue to\s+Step 2", existing_branch)
+    assert "mint a fresh `run_id`" not in existing_branch
+    assert "Only in this\n  no-state branch" in no_state_branch
+    assert "mint a fresh `run_id`" in no_state_branch
     assert '{"initiated_by":"AGENT_ADVISOR"}' not in advisor_text
     assert envelope_start < advisor_text.index("### Phase A — Discover")
     for required in (
@@ -299,14 +338,50 @@ def test_agent_advisor_delegation_uses_resume_routable_state(tmp_path: Path) -> 
     advisor_path.write_text(json.dumps(advisor_state))
     provider_path.write_text(json.dumps(provider_state))
 
-    for derived_now in (repo / ".migration" / "0101-1200", repo / ".migration" / "0101-1201"):
+    def initialize_provider(selected: Path) -> dict[str, object]:
+        state_path = selected / ".phase-status.json"
+        if state_path.exists():
+            return json.loads(state_path.read_text(encoding="utf-8"))
+        fresh_state: dict[str, object] = {
+            "migration_id": selected.name,
+            "run_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "owning_skill": "GCP_TO_AWS",
+            "initiated_by": "AGENT_ADVISOR",
+            "last_updated": "2026-04-01T12:01:00Z",
+            "current_phase": "discover",
+            "phases": {
+                "discover": "in_progress",
+                "clarify": "pending",
+                "design": "pending",
+                "estimate": "pending",
+                "workshop": "pending",
+                "generate": "pending",
+                "feedback": "pending",
+            },
+        }
+        state_path.write_text(json.dumps(fresh_state), encoding="utf-8")
+        return fresh_state
+
+    original_bytes = provider_path.read_bytes()
+    for derived_now in (
+        repo / ".migration" / "0101-1200",
+        repo / ".migration" / "0101-1201",
+    ):
         persisted = json.loads(advisor_path.read_text())
         selected = Path(persisted["migration_plan_ctx"]["migration_dir"])
-        resumed = json.loads((selected / ".phase-status.json").read_text())
+        resumed = initialize_provider(selected)
         assert selected == original_dir.resolve()
         assert selected != derived_now or derived_now == original_dir
         assert resumed["run_id"] == provider_state["run_id"]
         assert resumed["phases"] == provider_state["phases"]
+        assert provider_path.read_bytes() == original_bytes
+
+    unused_dir = repo / ".migration" / "0101-1201"
+    unused_dir.mkdir()
+    created = initialize_provider(unused_dir)
+    assert created["run_id"] != provider_state["run_id"]
+    assert created["current_phase"] == "discover"
+    assert json.loads((unused_dir / ".phase-status.json").read_text()) == created
 
 
 def test_azure_skill_describes_only_implemented_discovery_sources() -> None:

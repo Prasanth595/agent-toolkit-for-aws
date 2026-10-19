@@ -151,12 +151,12 @@ pointer is durable. Then inspect `$MIGRATION_DIR/.phase-status.json`:
   state schema, and carry `owning_skill: GCP_TO_AWS` plus `initiated_by: AGENT_ADVISOR`.
   Reuse the envelope unchanged, including `migration_id`, `run_id`, `current_phase`, and the
   complete phase map. A mismatch or invalid state is an occupied-directory conflict: halt and
-  inform rather than overwriting it.
-- If it does not exist, require the selected directory to be otherwise empty, then create the
-  fresh provider state described below.
-
-Mint a fresh `run_id` with `uuidgen` (or an equivalent random UUID source) and write one schema-valid provider
-state envelope:
+  inform rather than overwriting it. **This completes provider initialization:** continue to
+  Step 2 without executing the no-state creation branch below.
+- If it does not exist, require the selected directory to be otherwise empty. **Only in this
+  no-state branch**, mint a fresh `run_id` with `uuidgen` (or an equivalent random UUID source)
+  and write one schema-valid provider
+state envelope (this write belongs only to the no-state branch):
 
 ```json
 {
