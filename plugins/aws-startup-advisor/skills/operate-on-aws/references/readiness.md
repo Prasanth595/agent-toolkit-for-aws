@@ -108,7 +108,7 @@ intent requires.
 | They want | R2 no credentials | R3 expired | R4 valid | R5 + billing |
 |---|---|---|---|---|
 | **"What does this cost?"** | Answer fully. List pricing. **Ask for nothing.** | Answer fully | Answer fully | Answer with *their* balance and coverage |
-| **"Is this for me?"** | Scan the codebase, assess, advise | same | same, richer | same, plus affordability arithmetic |
+| **"Is this for me?"** | Scan the codebase, assess, advise | same | same, richer | same, plus their balance and coverage |
 | **"Review my PR"** | Explain the path; repo connection needs console access | Offer the refresh, then continue | Connected: review. Not set up: ask first | Connected: review. Not set up: ask first |
 | **"Set it up"** | Show the combined notice and ask first; after a Yes, walk the credential setup — it is genuinely the prerequisite | Ask first; after a Yes, `aws sso login`, then continue | Ask, then proceed on Yes | Ask, then proceed on Yes |
 | **"Production is down"** | **Help with the incident directly.** Say the agent needs AWS access and offer it as a follow-up | Offer the ten-second refresh, then help | Connected: investigate. Not set up: help, and ask before setup | Connected: investigate. Not set up: help, and ask before setup |

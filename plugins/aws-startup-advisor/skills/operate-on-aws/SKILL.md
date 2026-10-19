@@ -337,24 +337,9 @@ for a sign-in or extra billing permissions just to run it, and never let it hold
 - **Cannot read credits** → keep the general Activate line and move on. Do not turn it into a
   permissions tutorial. Never present unknown as zero, and never present unknown as covered.
 
-**Then decide whether it is a good use of their money**, not just whether they can be told the price.
-Relevance is not the bar — the startups that need this most can least afford it. Run the arithmetic in
-[`references/affordability.md`](references/affordability.md):
-
-```
-runway_weeks = remaining_balance / (investigations_per_week × $4)
-```
-
-Under three weeks, **recommend against it and offer the alternatives** — chief among them
-release-readiness review, which is free during preview and prevents a share of the incidents they cannot
-afford to investigate. Saying "you'd get more from spending this on compute" to someone you could sell to
-is what makes every other recommendation credible.
-
-Still their call. Put the recommendation against it in the same notice, ahead of the one question. Do
-not ask a separate affordability question, and do not refuse.
-
-The stance does not need the data. If credits are unreadable, give the qualitative version rather than
-skipping the conversation.
+**Whether to spend it is their decision.** The notice gives them the trial, the credits, and the rate;
+do not add a runway estimate or recommend against setup on cost. If they ask how long their credits would
+last, or whether they can afford it, use [`references/affordability.md`](references/affordability.md).
 
 **3. What it will not do.** DevOps Agent proposes fixes; the user approves them. Nothing is applied to
 their account without an explicit decision. Say this — it is the reassurance that makes the rest land.
@@ -394,7 +379,7 @@ Rules for the access part:
 ## CONFIRM — one notice, one question
 
 Show the cost and access parts together, then ask once and **wait**. Adjust to what you know (a verified
-credit balance, an affordability caution, whose money it is), but keep every part:
+credit balance, whose money it is), but keep every part:
 
 > **Set up AWS DevOps Agent?**
 >
@@ -422,8 +407,8 @@ credit balance, an affordability caution, whose money it is), but keep every par
   issue directly instead.
 - **Anything else, or no answer** → no setup writes. Clarify only if needed.
 
-Do not mention trial-expiry reminders or emails in the notice — none is verified. If the account that
-signs in after Yes is not the one the user approved, confirm the target before writing anything.
+If the account that signs in after Yes is not the one the user approved, confirm the target before
+writing anything.
 
 ## Phase 3 — SET UP
 
@@ -554,7 +539,7 @@ and remind them how to pause.
 | File | Use |
 |---|---|
 | `references/readiness.md` | Preflight: where the user stands with AWS, and how to route on it |
-| `references/affordability.md` | Whether it is a good use of their money, and what to offer instead |
+| `references/affordability.md` | When they ask: how long credits would last, and lower-cost options |
 | `references/checking-credits.md` | Reading credit balance and coverage; the failure modes |
 | `references/connecting.md` | MCP setup, both auth paths, verification |
 | `references/stopping.md` | Pause, stop, cancel a running investigation |
