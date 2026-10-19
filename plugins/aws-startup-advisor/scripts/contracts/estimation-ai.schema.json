@@ -56,9 +56,9 @@
       "additionalProperties": false,
       "properties": {
         "current_source_monthly": {"oneOf": [{"type": "null"}, {"type": "number"}]},
-        "projected_bedrock_monthly": {"type": "number"},
-        "monthly_difference": {"type": "number"},
-        "annual_difference": {"type": "number"},
+        "projected_bedrock_monthly": {"oneOf": [{"type": "null"}, {"type": "number"}]},
+        "monthly_difference": {"oneOf": [{"type": "null"}, {"type": "number"}]},
+        "annual_difference": {"oneOf": [{"type": "null"}, {"type": "number"}]},
         "percent_change": {"oneOf": [{"type": "null"}, {"type": "number"}]}
       }
     },
@@ -98,7 +98,7 @@
       "additionalProperties": false,
       "properties": {
         "model": {"$ref": "#/definitions/normalizedModel"},
-        "monthly_cost": {"type": "number"},
+        "monthly_cost": {"oneOf": [{"type": "null"}, {"type": "number"}]},
         "vs_source_percent": {"oneOf": [{"type": "null"}, {"type": "number"}]}
       }
     },

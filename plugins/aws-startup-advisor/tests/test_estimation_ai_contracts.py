@@ -95,6 +95,46 @@ def test_gateway_fixture_carries_multi_upstream_openrouter_fronting_two_provider
     assert len(openai_source["models"]) == 1
 
 
+def test_unknown_source_baseline_propagates_null_to_dependent_deltas() -> None:
+    estimate = _base_estimate()
+    estimate["current_costs"]["monthly_ai_spend"] = None
+    comparison = estimate["cost_comparison"]
+    comparison["current_source_monthly"] = None
+    comparison["monthly_difference"] = None
+    comparison["annual_difference"] = None
+    comparison["percent_change"] = None
+    for source in estimate["cost_by_source"]:
+        for model in source["models"]:
+            model["vs_source_percent"] = None
+
+    assert _estimation_ai_findings(estimate) == []
+    assert comparison["projected_bedrock_monthly"] is not None
+
+    comparison["projected_bedrock_monthly"] = 0
+    assert comparison["projected_bedrock_monthly"] == 0
+    assert comparison["projected_bedrock_monthly"] is not None
+    assert _estimation_ai_findings(estimate) == []
+
+    comparison["projected_bedrock_monthly"] = "0"
+    assert _estimation_ai_findings(estimate) != []
+
+
+def test_unavailable_target_pricing_preserves_unknown_costs_as_null() -> None:
+    estimate = _base_estimate()
+    estimate["pricing_source"] = "unavailable"
+    comparison = estimate["cost_comparison"]
+    comparison["projected_bedrock_monthly"] = None
+    comparison["monthly_difference"] = None
+    comparison["annual_difference"] = None
+    comparison["percent_change"] = None
+    for source in estimate["cost_by_source"]:
+        for model in source["models"]:
+            model["monthly_cost"] = None
+            model["vs_source_percent"] = None
+
+    assert _estimation_ai_findings(estimate) == []
+
+
 # --------------------------------------------------------------------------- cross-phase projection
 
 

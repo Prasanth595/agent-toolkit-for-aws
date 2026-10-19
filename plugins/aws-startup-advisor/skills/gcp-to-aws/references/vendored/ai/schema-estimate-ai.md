@@ -45,11 +45,11 @@
   "backup_model": {},
   "embeddings": {}, // present only when the workload uses embeddings
   "cost_comparison": {
-    "current_source_monthly": 1200.0, // provider-neutral name for current_gcp_monthly / current_azure_monthly
-    "projected_bedrock_monthly": 1320.0,
-    "monthly_difference": 120.0,
-    "annual_difference": 1440.0,
-    "percent_change": 10.0
+    "current_source_monthly": 1200.0, // provider-neutral name for current_gcp_monthly / current_azure_monthly; number or null
+    "projected_bedrock_monthly": 1320.0, // number or null
+    "monthly_difference": 120.0, // number or null
+    "annual_difference": 1440.0, // number or null
+    "percent_change": 10.0 // number or null
   },
   "migration_cost_considerations": {
     "categories": [], // ALWAYS [] — human/pro-services costs are out of scope
@@ -82,7 +82,7 @@ models regardless of source attribution.
   "models": [
     {
       "model": "claude-3-5-sonnet-20240620", // normalizedModel — must trace to the matching aws-design-ai.json source
-      "monthly_cost": 1320.0, // projected Bedrock monthly cost for this model under this source
+      "monthly_cost": 1320.0, // projected Bedrock monthly cost for this model under this source; null when its target rate is unavailable
       "vs_source_percent": 10.0 // null when a source-side list rate is unavailable (e.g. an OpenRouter-only portion)
     }
   ]
@@ -94,6 +94,16 @@ Semantic uniqueness is the `(provider, source_service)` pair, same as `aws-desig
 presentation choice. `provider` is never `"openrouter"`; an OpenRouter-fronted cost still
 attributes to the fronted provider's `(provider, source_service)` pair, mirroring how
 `aws-design-ai.json`'s `metadata.gateways[].upstreams[]` represents gateway-fronted sources.
+
+## Unknown costs and null propagation
+
+Unavailable monetary values are JSON `null`, never numeric zero. If the source baseline is
+unknown, `current_costs.monthly_ai_spend` and `cost_comparison.current_source_monthly` are `null`,
+and all differences derived from that baseline (`monthly_difference`, `annual_difference`, and
+`percent_change`) are also `null`. If a target rate is unavailable, set
+`cost_comparison.projected_bedrock_monthly` and the affected
+`cost_by_source[].models[].monthly_cost` values to `null`; every difference that depends on that
+unknown target is `null` as well. Numeric `0` is reserved for a cost that is known to be zero.
 
 ## Design-decision: no `model_observations[]` here
 
@@ -144,6 +154,8 @@ priced, not token priced, and are listed here instead of silently omitted.
 - [ ] Every `optimization_opportunities[]` entry has `type`, `commitment`, `target_services`,
       `potential_savings_percent`, and `available`.
 - [ ] `migration_cost_considerations.categories` is `[]`.
+- [ ] Unknown source or target costs and their dependent deltas are `null`; known zero-dollar
+      costs remain numeric `0`.
 - [ ] `services_not_estimated[]` is present (`[]` when clean).
 
 ## Status — target-only, no producer yet
