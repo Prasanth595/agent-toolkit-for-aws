@@ -61,6 +61,7 @@ Validation: when all three tiers are present, `scenario_deltas.premium` and `sce
     "services_with_missing_fallback": []
   },
   "accuracy_confidence": "±5-10%|±15-25%",
+  "complexity_tier": "small|medium|large",
 
   "current_costs": {
     "source": "billing_data|inventory_estimate|preferences|user_provided|unavailable",
@@ -68,7 +69,7 @@ Validation: when all three tiers are present, `scenario_deltas.premium` and `sce
     "gcp_monthly": 300,
     "gcp_annual": 3600,
     "baseline_note": "From billing-profile.json actual spend data — or the mandatory derived-baseline caveat for inventory_estimate",
-    "breakdown": { "compute": 75, "database": 50, "storage": 40, "networking": 20, "other": 15 },
+    "breakdown": { "compute": 75, "database": 50, "cache": 10, "storage": 40, "networking": 20, "other": 15 },
     "derivation": [],
     "excluded_resources": [],
     "warnings": []
@@ -450,7 +451,7 @@ Present in `estimation-infra.json` only when `preferences.json` → `design_cons
 - `projected_costs.breakdown` observability entry (when present) REPLACES any CloudWatch/log/metric costs in the "Supporting" row — never double-count
 - `cost_comparison` shows all three options with monthly and annual differences
 - `cost_comparison.commitment_context` is present if `billing-profile.json` has `commitments.has_active_cuds == true`; omitted otherwise
-- `migration_cost_considerations.billing_data_available` is `true` if `billing-profile.json` exists, `false` otherwise
+- `migration_cost_considerations.billing_data_available` is `true` if `billing-profile.json` exists **with non-empty `services[]`**, `false` otherwise (a skip-record profile — empty `services[]`, non-empty `warnings[]` — counts as `false`; it records that billing input was seen and skipped, not usable spend data)
 - If `billing_data_available` is `true`: `migration_cost_considerations.categories` lists **GCP vendor egress / data transfer** only (never human or professional-services costs)
 - If `billing_data_available` is `false`: `migration_cost_considerations.categories` is empty; `note` explains that billing data is required for GCP egress fee estimates
 - `roi_analysis` presents recurring monthly/annual savings (or increase) per tier

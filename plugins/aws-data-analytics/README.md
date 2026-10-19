@@ -10,6 +10,9 @@ This plugin brings AWS data engineering expertise directly into your coding assi
 - **External Connectivity** — Create and troubleshoot AWS Glue connections to JDBC databases (Oracle, SQL Server, PostgreSQL, MySQL, RDS, Aurora), Amazon Redshift, Snowflake, and BigQuery.
 - **Search & Observability (OpenSearch)** — Migrate from Solr/Elasticsearch/self-managed OpenSearch into Amazon OpenSearch Service or Serverless, provision domains and collections, and build vector/semantic/hybrid search, log analytics, and trace analytics.
 - **Data Warehouse (Amazon Redshift)** — Write Redshift SQL on a provisioned cluster or Serverless workgroup: DDL and distribution/sort keys, COPY/UNLOAD, system views, and the Data API.
+- **Workflow Orchestration (Amazon MWAA)** — Author, test, and debug Apache Airflow DAGs on Amazon Managed Workflows for Apache Airflow (MWAA) provisioned environments and YAML workflows on MWAA Serverless, and upgrade provisioned environments to newer Airflow versions, including 2.x to 3.x.
+- **Streaming (Amazon MSK)** — Operate Amazon MSK Provisioned clusters with Standard and Express brokers: size and cost a cluster, troubleshoot performance and consumer lag, manage topics, replicate across clusters with MSK Replicator for disaster recovery and active-active topologies, and deliver topic data to Apache Iceberg tables on S3 Tables with Streaming Tables. Plan and execute a migration from self-managed Apache Kafka to MSK Express.
+- **Stream Processing (Amazon Managed Service for Apache Flink)** — Develop, deploy, and tune Apache Flink applications on Amazon Managed Service for Apache Flink, including checkpointing, state, connectors, dependency management, and Flink 1.x to 2.x migration.
 
 ## Agent Skills
 
@@ -24,6 +27,13 @@ This plugin brings AWS data engineering expertise directly into your coding assi
 | 7 | `connecting-to-data-source` | Create and troubleshoot AWS Glue connections to JDBC databases, Amazon Redshift, Snowflake, and BigQuery | [SKILL.md](skills/connecting-to-data-source/SKILL.md) |
 | 8 | `amazon-opensearch-service` | Migration, provisioning, vector/semantic/hybrid search, log analytics, and trace analytics for Amazon OpenSearch Service and Serverless | [SKILL.md](skills/amazon-opensearch-service/SKILL.md) |
 | 9 | `redshift-guide` | Amazon Redshift SQL dialect, system views, metadata discovery, and Data API patterns, correcting common agent mistakes | [SKILL.md](skills/redshift-guide/SKILL.md) |
+| 10 | `authoring-mwaa-workflow` | Author and deploy Airflow DAGs for Amazon MWAA provisioned environments and YAML workflows for MWAA Serverless | [SKILL.md](skills/authoring-mwaa-workflow/SKILL.md) |
+| 11 | `testing-mwaa-workflow` | Trigger a deployed MWAA DAG or Serverless workflow, monitor it to completion, and retest after fixes | [SKILL.md](skills/testing-mwaa-workflow/SKILL.md) |
+| 12 | `debugging-mwaa-workflow` | Root-cause failed MWAA runs and tasks, DAGs that don't appear, import errors, worker out-of-memory, and IAM denials | [SKILL.md](skills/debugging-mwaa-workflow/SKILL.md) |
+| 13 | `upgrading-mwaa-environments` | Upgrade MWAA provisioned environments to a newer Airflow version, including 2.x to 3.x, with a blue/green or in-place strategy | [SKILL.md](skills/upgrading-mwaa-environments/SKILL.md) |
+| 14 | `managing-amazon-msk` | Operate Amazon MSK Provisioned clusters (Standard and Express): sizing and cost, performance and consumer lag, topic management, MSK Replicator, and Streaming Tables delivery to S3 Tables | [SKILL.md](skills/managing-amazon-msk/SKILL.md) |
+| 15 | `migrate-to-msk` | Assess a self-managed Apache Kafka cluster for MSK Express compatibility, produce a target specification and cost, and guide the migration | [SKILL.md](skills/migrate-to-msk/SKILL.md) |
+| 16 | `developing-applications-on-managed-service-for-apache-flink` | Develop, deploy, and tune Apache Flink applications on Amazon Managed Service for Apache Flink, including checkpointing, connectors, and Flink 2.x migration | [SKILL.md](skills/developing-applications-on-managed-service-for-apache-flink/SKILL.md) |
 
 ## MCP Servers
 
@@ -108,6 +118,8 @@ Configure AWS credentials using one of the following methods:
 
 Your IAM role needs permissions for the AWS services used by the skills you install. The relevant IAM action namespaces are:
 
+- `airflow` - Amazon MWAA environments and Airflow REST API calls
+- `airflow-serverless` - Amazon MWAA Serverless workflows and workflow runs (separate from `airflow`)
 - `athena` - Query execution and workgroup management
 - `glue` - Data Catalog operations and ETL jobs
 - `s3` - Object storage operations

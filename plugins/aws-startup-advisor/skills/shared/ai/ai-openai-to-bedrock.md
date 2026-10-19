@@ -57,11 +57,15 @@ Apply in order. Stop at the first tier that resolves.
 
 ### Tier 0 — Source model is on Bedrock (default path)
 
-If the detected model is GPT-5.6 Sol / Terra / Luna, GPT-5.5, or GPT-5.4, the target is **the same model on
-Bedrock**.
+If the detected model is GPT-6 Astra, GPT-6 Sol, GPT-6 Luna, GPT-6.1 Sol, GPT-5.6 Sol / Terra / Luna, GPT-5.5, or
+GPT-5.4, the target is **the same model on Bedrock**.
 
 | Source model  | Bedrock target | Model ID (mantle / runtime CRIS)                        | Assessment                                                      |
 | ------------- | -------------- | ------------------------------------------------------- | --------------------------------------------------------------- |
+| GPT-6 Astra   | GPT-6 Astra    | `openai.gpt-6-astra` / `us.` `global.` prefixed         | `strong_migrate` — same model; parity on Global CRIS, else +10% |
+| GPT-6 Sol     | GPT-6 Sol      | `openai.gpt-6-sol` / `us.` `global.` prefixed           | `strong_migrate` — same model; parity on Global CRIS, else +10% |
+| GPT-6 Luna    | GPT-6 Luna     | `openai.gpt-6-luna` / `us.` `global.` prefixed          | `strong_migrate` — same model; parity on Global CRIS, else +10% |
+| GPT-6.1 Sol   | GPT-6.1 Sol    | `openai.gpt-6.1-sol` / `us.` `global.` prefixed         | `strong_migrate` — same model; parity on Global CRIS, else +10% |
 | GPT-5.6 Sol   | GPT-5.6 Sol    | `openai.gpt-5.6-sol` / `us.` `global.` prefixed         | `strong_migrate` — same model; parity on Global CRIS, else +10% |
 | GPT-5.6 Terra | GPT-5.6 Terra  | `openai.gpt-5.6-terra` / `us.` `in.` `global.` prefixed | `strong_migrate` — same model; parity on Global CRIS, else +10% |
 | GPT-5.6 Luna  | GPT-5.6 Luna   | `openai.gpt-5.6-luna` / `us.` `in.` `global.` prefixed  | `strong_migrate` — same model; parity on Global CRIS, else +10% |
@@ -78,6 +82,13 @@ Report the assessment honestly: `strong_migrate` here means "low-risk, well-supp
 ### Region gate (applies to every Tier 0 selection — endpoint-aware)
 
 The gate differs by family (see `shared/openai-on-bedrock.md` § Regional Availability):
+
+**GPT-6 Astra / Sol / Luna / 6.1 Sol:** same shape as GPT-5.6 — if the target region is in the mantle in-region
+matrix (narrower than GPT-5.6's: us-east-1 + us-west-2 for Astra only, us-east-1 only for Sol/Luna/6.1 Sol — see
+`openai-on-bedrock.md` § Regional Availability), either endpoint works; otherwise the `bedrock-runtime` CRIS path
+(`us.`/`global.` prefixed) covers broad commercial regions. GPT-6 Astra's CRIS path additionally lacks `Invoke`
+support (Responses/Chat Completions/Converse only) — verify per-feature before assuming parity with Sol/Luna/6.1
+Sol.
 
 **GPT-5.6 Sol / Terra / Luna:** rarely blocked. If the target region is in the mantle in-region matrix, either
 endpoint works. If not, the `bedrock-runtime` CRIS path (Geo `us.`/`in.`, Global `global.`) covers most commercial
@@ -135,7 +146,7 @@ See "Cost-optimized cross-family alternatives" below for the numbers.
 
 All figures per 1M tokens. Percentages are blended savings at a 2:1 input-to-output ratio. **Both sides of these
 comparisons are now Bedrock prices** where the OpenAI model is on Bedrock — this is a Bedrock-vs-Bedrock model
-choice, not a provider comparison. Verify rates via `shared/pricing-cache.md` — pricing is cache-only, so a
+choice, not a provider comparison. Verify rates via `references/vendored/ai/bedrock-pricing-cache.md` — pricing is cache-only, so a
 GPT-5.x rate that is absent or `_unverified_` in the cache has no live lookup to fall back to and must be
 reported as unavailable rather than priced (see `shared/openai-on-bedrock.md`).
 
@@ -264,7 +275,7 @@ rather than dismissing it. For a long-context (>272K) workload the gap is much w
 | Vision                                     | GPT-5.x (image input) or Claude / Llama 4                   | Same-model preserves behavior                                                                        |
 | JSON mode                                  | Claude (excellent), Nova Pro (good)                         | Most models via prompt                                                                               |
 | Embeddings (ada-002, `text-embedding-3-*`) | Titan Embeddings v2                                         | No OpenAI embedding model on Bedrock; must re-embed all documents                                    |
-| DALL-E / gpt-image                         | Stability AI                                                | Nova Canvas v1 is Legacy; see `ai-model-lifecycle.md`                                                |
+| DALL-E / gpt-image                         | Stability AI                                                | Nova Canvas v1 is past EOL (2026-09-30); see `ai-model-lifecycle.md`                                 |
 | Whisper (STT)                              | Amazon Transcribe                                           | Different service, API, and pricing model                                                            |
 | TTS                                        | Amazon Polly / Nova 2 Sonic                                 | Different pricing model                                                                              |
 | Assistants API                             | See decision tree below                                     | Path depends on which features are used                                                              |

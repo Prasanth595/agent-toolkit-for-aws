@@ -1,5 +1,13 @@
 # Phase 5: Generate Migration Artifacts (Orchestrator)
 
+## Telemetry boundary
+
+Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including
+when this phase is executed inline by another skill. In `cli` mode, reconcile
+after each persisted `.phase-status.json` update and before waiting, returning,
+or advancing, including the final completion write. In `hook` mode, leave
+reporting to the configured hooks.
+
 > **CONSENT GUARD (check before Step 1):** This phase runs only by explicit
 > opt-in. If `.phase-status.json` → `run_mode` is not `"decide_and_execute"`:
 > when this turn's user message is an explicit Execute request ("generate the
@@ -31,6 +39,29 @@ Check which estimation artifacts exist in `$MIGRATION_DIR/`:
 - `estimation-billing.json` (billing-only estimation)
 
 If **none** of these estimation artifacts exist: **STOP**. Output: "No estimation artifacts found. Run Phase 4 (Estimate) first."
+
+**Compliance-estimate staleness guard.** When `estimation-infra.json` exists, read
+`preferences.json` → `design_constraints.compliance.value` (absent / `none` / `unknown` →
+treat as no gating framework declared) and check whether it contains any of `soc2`, `pci`,
+`hipaa`, `fedramp` — the same gating set `generate-artifacts-infra.md` uses to decide whether
+`baseline.tf` emits the Config + Security Hub compliance controls. If it does,
+`estimation-infra.json` → `projected_costs.breakdown` MUST already contain a
+`security_baseline_compliance` entry (added whenever Estimate ran with the compliance answer
+correctly read). If that entry is **missing** — a run whose Estimate saw an empty/absent
+compliance value even though Clarify recorded a gating framework, most likely because
+Estimate ran before the `design_constraints.compliance.value` reader fix — the budget and
+report totals downstream would **understate**: Generate would still correctly emit the
+compliance controls in `baseline.tf` (it reads the same field, already correct), but their
+cost would be silently absent from `aws_budgets_budget.limit_amount` and every report cost
+table. **STOP.** Emit `GATE_FAIL | phase=generate | field=estimation-infra.json.projected_costs.breakdown.security_baseline_compliance | reason=stale_downstream`.
+Tell the user: "Your declared compliance requirement ([frameworks]) will add AWS Config and
+Security Hub controls to the generated Terraform, but the cost estimate on file was computed
+before that requirement was applied — it's missing that line item, so your budget and report
+totals would understate the real cost. Re-run Phase 4 (Estimate) to refresh it, then come
+back to Generate." **Do NOT** patch `estimation-infra.json` to add the missing entry, and do
+NOT proceed to Stage 1 — per `shared/handoff-gates.md`'s re-entry protocol, this is a
+user-confirmed re-run, not a silent repair. If the user confirms, set `phases.estimate` (and
+`phases.generate`, if not already `"pending"`) back to `"pending"` before re-running Estimate.
 
 ## Stage 1: Migration Planning
 
@@ -139,7 +170,7 @@ Produces: `migration-report.html`
 
 **Validation gate:** Report generation runs `shared/validate-artifacts.md` first. If validation emits `GATE_FAIL`: log the failure to the user, **do not write** `migration-report.html`, and continue to Phase Completion (report is optional output; validation failure is not a silent skip). Do **NOT** patch artifacts to pass validation.
 
-After writing `migration-report.html`, run `shared/validate-migration-report.md` (automated script). Branch on the shell exit code per that doc's table — `0` (`REPORT_OK`), `1` (`REPORT_FAIL`: remove or rename incomplete HTML and warn the user — do not present a stub report as complete), or anything else (validator did not run, e.g. `python3` missing — tell the user validation was skipped, do not treat it as pass or fail).
+After writing `migration-report.html`, run `shared/validate-migration-report.md` (automated script). `REPORT_OK` means the decision-core content checks passed, not that the section IDs alone were present — the HTML must still have been rendered from `references/shared/report-decision-core.md`. Branch on the shell exit code per that doc's table — `0` (`REPORT_OK`), `1` (`REPORT_FAIL`: remove or rename incomplete HTML and warn the user — do not present a stub report as complete), or anything else (validator did not run, e.g. `python3` missing — tell the user validation was skipped, do not treat it as pass or fail).
 
 ## Phase Completion
 
@@ -165,6 +196,10 @@ After `HANDOFF_OK`, use the Phase Status Update Protocol (read-merge-write) to u
 
 - Set `phases.generate` to `"completed"`
 - Set `current_phase` to `"complete"`
+
+**Write the web-handoff summary (fail-open):** run
+`python3 "$PLUGIN_ROOT/scripts/emit-plan-json.py" --migration-dir "$MIGRATION_DIR" --plugin-json "$PLUGIN_ROOT/.claude-plugin/plugin.json"`
+(absolute paths — cwd must not be load-bearing). It reads the estimate artifacts and writes `$MIGRATION_DIR/plan.json`, the uploadable handoff file, printing `PLAN_OK | …` or `PLAN_SKIP | reason=…`. This is an optional enhancement, never a gate: on any skip or error the migration is still complete — continue without it and do not surface the script output to the user. When it printed `PLAN_OK`, present the web-handoff block described after the Output section below.
 
 ## Summary
 
@@ -203,5 +238,75 @@ Output to user:
 
 - If `migration-report.html` exists: "Phase 5 of 6 complete (Generate). All required phases of the GCP-to-AWS migration analysis are complete. Your migration report is ready at $MIGRATION_DIR/migration-report.html. Optional: Phase 6 (Feedback)."
 - If `migration-report.html` is missing: "Phase 5 of 6 complete (Generate). All required phases of the GCP-to-AWS migration analysis are complete. Markdown documentation is available at $MIGRATION_DIR/MIGRATION_GUIDE.md and $MIGRATION_DIR/README.md. (HTML report generation is optional and non-blocking.) Optional: Phase 6 (Feedback)."
+
+**Web-handoff — only when the writer above printed `PLAN_OK`** (if it printed `PLAN_SKIP`, omit this whole block; there is no file to upload). Do three things, in order:
+
+- **(a)** In the `✓ Produced` list in the Summary above, add exactly one entry as **plain text** — that list renders inside a code block, where Markdown links do not work, so do not link it here (the clickable link is the What's next call-to-action below): `plan.json — upload to AWS Startups Migrate to see if you qualify for AWS credits`. Keep every existing entry on its own line; do not merge, collapse, or re-wrap them.
+- **(b)** Then show the user their `plan.json`. The `.migration` folder is hidden by default
+  on macOS and Linux, so open the file's location for them instead of leaving them
+  to find it. Run the command for the user's OS once, as an ordinary command — the
+  agent's own permission prompt is the user's choice, so do not ask separately
+  first:
+
+  - macOS: `open -R "$MIGRATION_DIR/plan.json"` — opens Finder with the file
+    selected, even inside the hidden folder.
+  - Windows: `MSYS_NO_PATHCONV=1 explorer.exe /select,"<absolute Windows path to plan.json>"`
+    — the prefix stops Git Bash from rewriting `/select,` as a path (drop it in
+    PowerShell or cmd). In Git Bash, get the Windows path with
+    `cygpath -w "$MIGRATION_DIR/plan.json"`. `explorer.exe` exits non-zero even
+    when it succeeds, so treat it as opened unless it prints an error.
+  - Linux: `xdg-open "$MIGRATION_DIR"` — opens the folder (it cannot select the
+    file).
+
+  Then show exactly ONE of the two messages below, as plain text (not in a code
+  block). Do not reword them — this copy is owned by the web experience.
+
+  If the folder opened:
+
+  > **The folder is open with your plan.json selected.**
+
+  On Linux, where the file cannot be selected, show **The folder with your
+  plan.json is open.** instead.
+
+  If the command failed, was not available, or the user declined it, show this
+  as its own message, separate from the phase summary, and do not add any other
+  explanation of why it did not open. Replace `<absolute path to plan.json>`
+  with the real absolute path:
+
+  > The folder did not open. The open command is blocked in your permissions.
+  >
+  > Your plan.json is saved at:
+  > `<absolute path to plan.json>`
+  >
+  > The .migration folder is hidden by default on macOS. In Finder, press Command + Shift + Period (.) to show it.
+
+  On Linux, use this last line instead: "The .migration folder is hidden by
+  default on Linux. In your file manager, press Ctrl + H to show it." On Windows,
+  the folder is not hidden, so omit the last line.
+
+  Adjust only the first line: if the migration report also failed to open, start
+  with "The report and the folder did not open." instead; keep "The open command
+  is blocked in your permissions." only when a permission rule blocked it, and
+  drop that sentence when the user declined or the command failed for another
+  reason.
+
+- **(c)** Then append the What's next block below, verbatim, replacing `<run_id>` in the link with the run's `run_id` (from `.phase-status.json`), lowercased if it is a UUID so the `run=` value matches the plan's `runId`. It MUST begin with the "💬 What's next" heading. The call-to-action must be a Markdown link so it renders as clickable text with no bare URL. Do not reword it — this copy is owned by the web experience:
+
+> **💬 What's next**
+>
+> - **Refine your plan**
+>   Tell me what to change. For example: "use Fargate instead," "make it multi-region," or "reduce the cost."
+> - **See your AWS credits**
+>   Sign in or create an account on AWS Startups Migrate, then upload plan.json to see the AWS migration credits you qualify for.
+>
+> [Go to AWS Startups Migrate →](https://startups.aws.com/startups/en-US/migrate/credits?source=plugin&run=<run_id>)
+>
+> After you upload, you also get:
+>
+> - Interactive plan dashboard
+> - Monthly cost estimate
+> - Migration paths: AI agent, AWS expert, or AWS Partner
+
+Ship note: this reaches customers only after the import page and the ImportPlan API are both live in production.
 
 _Breadcrumbs are emitted only after outer-run `HANDOFF_OK` — never on `GATE_FAIL`, never from inner workshop reprices._
