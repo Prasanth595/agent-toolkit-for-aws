@@ -192,16 +192,16 @@ Neither skill can look up account-specific state such as your credits balance, A
 
 ## Operating on AWS
 
-The `operate-on-aws` skill connects a startup with no dedicated DevOps or SRE engineer to [AWS DevOps Agent](https://aws.amazon.com/devops-agent/), which investigates incidents autonomously, finds probable root cause, and reviews pull requests before they ship. DevOps Agent is metered, so the skill is upfront about cost and access at every step.
+The `operate-on-aws` skill connects a startup with no dedicated DevOps or SRE engineer to [AWS DevOps Agent](https://aws.amazon.com/devops-agent/), which investigates incidents autonomously, finds probable root cause, and reviews pull requests before they ship. DevOps Agent is metered, so the skill states cost and access up front and asks before setting anything up.
 
 ### How It Works
 
 - **Detect first** — Checks for an existing DevOps Agent connection and goes straight to work if there is one. Someone already set up is never walked through setup again.
-- **Recommend only when it fits** — Looks for evidence of a live workload or active pull requests, and recommends nothing to a team with neither. If credit runway is short, it recommends against setup and points to the free alternative.
-- **Safe defaults, stated up front** — Cost and credit impact, the read-only access role it creates in the AWS account, and (for release review) code handling are each stated in one line before setup continues. Automated verification testing, which copies source code out of the account, stays off unless you ask for it. Say stop during setup and the skill halts and rolls back what it created; say stop after setup and it cancels or pauses the work, keeping the setup.
+- **Recommend only when it fits** — Looks for evidence of a live workload or active pull requests, and recommends nothing to a team with neither.
+- **Safe defaults with one explicit approval** — Before first-time AWS DevOps Agent setup, the skill explains the two-month new-customer free trial, applicable AWS Activate credit coverage, standard pricing, potential charges, and the account-wide read access and diagnostic permissions required for investigations. It then asks **one Yes/No question covering both cost and account access**, and waits for Yes before creating or connecting resources. AWS credit checks use existing permissions when available and never block setup solely because billing details are inaccessible. Release-readiness reviews are offered as a separate optional choice after setup; automated verification testing and code egress stay off unless you say Yes to them. This setup does **not** enable Directed Actions or create elevated infrastructure-remediation permissions; findings and proposed fixes remain recommendations. Say stop during setup and the skill halts and rolls back what it created; say stop after setup and it cancels or pauses the work, keeping the setup.
 - **Propose, never apply** — Findings and proposed fixes are shown for approval; nothing is changed in the account without an explicit decision.
 
-The DevOps Agent MCP server is region-specific and per-user, so the skill registers it during setup rather than the plugin declaring it. If the [`aws-agents-for-devsecops`](../aws-agents-for-devsecops/) plugin is already installed, the skill reuses its `aws-devops-agent` connection instead of creating a second one, and still gives its own cost and access notices on top.
+The DevOps Agent MCP server is region-specific and per-user, so the skill registers it during setup rather than the plugin declaring it. If the [`aws-agents-for-devsecops`](../aws-agents-for-devsecops/) plugin is already installed, the skill reuses its `aws-devops-agent` connection instead of creating a second one, and still asks for the same approval before any first-time setup.
 
 ### Examples
 
