@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "catalog_version": 1,
-  "verified_at": "2026-10-13",
+  "catalog_version": 2,
+  "verified_at": "2026-10-19",
   "providers": [
     {
       "identity": "anthropic",
@@ -24,9 +24,9 @@
       "aliases": ["gemini"],
       "source_services": ["vertex_ai"],
       "model_families": ["gemini"],
-      "status": "unknown",
+      "status": "supported",
       "implemented_adapter": null,
-      "note": "Gemini's only Bedrock-mapping guide (ai-gemini-to-bedrock.md) lives under skills/gcp-to-aws/references/design-refs/, scoped to that one skill's adapter. It is not a shared, cross-skill guide under skills/shared/ai/ the way anthropic's and openai's guides are, so this provider does not clear the bar for status: supported."
+      "note": "Gemini now has a shared, cross-skill Bedrock-mapping guide at skills/shared/ai/ai-gemini-to-bedrock.md (vendored into gcp-to-aws and azure-to-aws), the same bar anthropic's and openai's guides meet, so this provider clears status: supported. The source-cloud-scoped copy under skills/gcp-to-aws/references/design-refs/ai-gemini-to-bedrock.md is retained as that skill's adapter-local guide; moving its runtime routing onto the shared guide is deferred to the extraction stages (issue #389 stages 3a-3e). supported reflects documentation coverage only, not an implemented adapter: implemented_adapter stays null."
     }
   ],
   "gateways": [
@@ -35,9 +35,9 @@
       "aliases": ["openrouter"],
       "product": "openrouter",
       "upstream_providers": ["anthropic", "openai", "google"],
-      "status": "unknown",
+      "status": "supported",
       "route": null,
-      "note": "status: unknown reflects documentation coverage only, not code: discover-openrouter-api.md already detects OpenRouter usage and BYOK-vs-credits attribution per upstream model at runtime. What is missing is a shared, cross-skill mapping GUIDE (the ai-anthropic-to-bedrock.md / ai-openai-to-bedrock.md equivalent) that documents how an OpenRouter-fronted upstream model maps onto a Bedrock target. Until that guide exists, this entry stays unknown rather than supported, per this catalog's rule that a mapping-guide document is the bar for supported and an implemented adapter/route is a separate, stricter bar tracked by implemented_adapter."
+      "note": "OpenRouter now has a shared, cross-skill gateway-routing guide at skills/shared/ai/ai-openrouter-to-bedrock.md (vendored into gcp-to-aws and azure-to-aws) that documents how an OpenRouter-fronted upstream model maps onto a Bedrock target and defers per-model selection to the per-provider guides. That is the mapping-guide bar this catalog uses for supported, so this entry moves from unknown to supported. This is still documentation coverage only, not code: discover-openrouter-api.md already detects OpenRouter usage and BYOK-vs-credits attribution per upstream model at runtime, but route stays null because an implemented routing adapter is a separate, stricter bar tracked by route and no such adapter is wired up yet."
     }
   ]
 }
