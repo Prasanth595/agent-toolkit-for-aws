@@ -59,6 +59,8 @@ full-cache date at the top of this file.
 >
 > Opus 5.5 rows already specify Global, Geo, Mantle, London or GovCloud pricing; do not apply another 1.10 multiplier.
 
+**Sonnet 5.5 release (2026-09-28):** Sonnet 5.5 (`anthropic.claude-sonnet-5-5` on Bedrock) is a distinct model and has no row in this cache yet. Keep the current Sonnet 5 default and rate rows until 5.5 has a separately verified entry. For an explicit 5.5 estimate, use the consuming skill's unavailable-pricing handling; do not silently reuse Sonnet 5 rates. Read the [5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide) before recommending its request/response handling.
+
 ### Multi-provider quick reference (per 1M tokens)
 
 See `vendored/ai/ai-model-lifecycle.md` for lifecycle details. **Do not recommend Legacy models for new migrations.** Rows whose Status is `restricted (…)` are never `recommended_model` / `backup_model` and never a default (Covered Models, gated previews).
