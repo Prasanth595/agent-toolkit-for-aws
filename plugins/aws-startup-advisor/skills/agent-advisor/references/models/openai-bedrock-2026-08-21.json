@@ -223,6 +223,10 @@
     "openai_gpt_6_astra": {
       "display_name": "OpenAI GPT-6 Astra (on Bedrock)",
       "family": "openai_gpt_6",
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
@@ -263,6 +267,10 @@
     "openai_gpt_6_sol": {
       "display_name": "OpenAI GPT-6 Sol (on Bedrock)",
       "family": "openai_gpt_6",
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
@@ -303,6 +311,10 @@
     "openai_gpt_6_luna": {
       "display_name": "OpenAI GPT-6 Luna (on Bedrock)",
       "family": "openai_gpt_6",
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
       "generation": "reasoning",
       "version": "6",
       "class": "reasoning",
@@ -343,6 +355,10 @@
     "openai_gpt_6_1_sol": {
       "display_name": "OpenAI GPT-6.1 Sol (on Bedrock)",
       "family": "openai_gpt_6",
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
       "generation": "reasoning",
       "version": "6.1",
       "class": "reasoning",

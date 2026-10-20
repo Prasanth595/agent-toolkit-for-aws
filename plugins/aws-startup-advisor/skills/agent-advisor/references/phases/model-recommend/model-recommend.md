@@ -7,8 +7,8 @@ _input:
   - scoring-result.json
   - context-signals.json
 _knowledge:
-  - { file: references/models/anthropic-bedrock-2026-07-21.json }
-  - { file: references/models/openai-bedrock-2026-08-21.json }
+  - { file: references/models/anthropic-bedrock-2026-09-24.json }
+  - { file: references/models/openai-bedrock-2026-09-24.json }
 _assemble:
   _file: phases/model-recommend/model-recommend-assemble.md
 _produces:
@@ -92,7 +92,7 @@ reuse the Anthropic `preserve_messages_api` switch):
 - minimum context window and expected output-token ceiling?
 - allow Global CRIS or require a geography-scoped profile (runtime Converse only)?
 
-OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-08-21.json` catalog).
+OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-09-24.json` catalog).
 Recognized GPT-5.6 and GPT-6 source identities are evaluated against their exact same-model
 catalog entry before capability/numeric fallbacks. GPT-5.x on Mantle is Responses-only, so a Chat
 Completions source is reshaped rather than routed to `mantle_openai_chat`. GPT-6 Chat Completions
@@ -102,11 +102,13 @@ in-region only and enforce the selected model's cataloged `region_availability`:
 us-east-1 and us-west-2, while Sol, Luna, and 6.1 Sol reach us-east-1 only. Outside that footprint,
 the engine skips the same-model Mantle candidate and evaluates its existing capability/numeric
 fallbacks. Governance requirements select the exact same GPT-5.6 or GPT-6 model through
-`runtime_converse` via Global/Geo CRIS when available; Mantle region lists do not constrain this
-CRIS-backed path. GPT-5.5/5.4 remain mantle-only. GPT-6 Astra's runtime surface lacks `Invoke`
-support (Responses/Chat Completions/Converse only), while Sol/Luna/6.1 Sol support all four APIs.
-Every selected path remains provisional until it is probed in the target account and region.
-Azure OpenAI remains an explicit `provider_module_pending` generic result.
+`runtime_converse` only when the requested Global or geography-scoped CRIS profile is cataloged
+for that model and source region; an unsupported profile falls through to an eligible documented
+runtime candidate or remains an explicit decision. GPT-5.5/5.4 remain mantle-only. GPT-6 Astra's
+runtime surface lacks `Invoke` support (Responses/Chat Completions/Converse only), while
+Sol/Luna/6.1 Sol support all four APIs. Every selected path remains provisional until it is probed
+in the target account and region. Azure OpenAI remains an explicit `provider_module_pending`
+generic result.
 
 **OpenRouter/LiteLLM-sourced OpenAI models still use the OpenAI module.** Discover records the
 underlying `provider` (e.g. `openai`) even when the calls transit a gateway — see `discover.md`'s
@@ -275,6 +277,22 @@ The verifier must call only the recorded `invocation_model_id`; it never substit
 model. Runtime recommendations with an unresolved CRIS profile produce `needs_resolution`.
 Keep `model-verification.json` when generated and show its per-workload status. A failed probe
 does not change the accepted recommendation; it blocks runnable POC claims until resolved.
+
+When this engine rewrites a recommendation, it removes the sibling `model-verification.json`
+if any workload's model, API, invocation ID, region, allowed profile set or allowed in-region
+model ARN set changed. An unchanged
+invocation contract retains its verification. After invalidation, treat verification as
+`not_run`; do not restore a passed result from an older design or report.
+
+For an Opus 5.5 application-profile ARN, the verifier first reads `GetInferenceProfile`
+for that ARN and the recommendation's `verification.allowed_inference_profiles`. It requires
+active destinations matching the selected model and an allowed regional profile before
+invoking the original ARN. The caller needs `bedrock:GetInferenceProfile` for these metadata
+reads; a failed or inconclusive check prevents inference and does not establish access.
+For London in-region profiles, `verification.allowed_in_region_model_arns` carries the
+exact permitted foundation-model destination. An ACTIVE application profile with only that
+destination is also valid; a different model, region or additional destination is not accepted
+by this rule. Cross-region application profiles still need the reference-profile comparison.
 
 ## Step 8 — Present the recommendation and advance
 

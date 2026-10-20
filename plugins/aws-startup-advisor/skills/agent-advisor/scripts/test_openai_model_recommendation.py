@@ -188,6 +188,54 @@ def test_gpt6_governance_selects_exact_runtime_model_and_cris_id(
     assert "Bedrock-native model" not in delta["description"]
 
 
+@pytest.mark.parametrize(
+    ("source_id", "region", "geography", "unsupported_id"),
+    (
+        ("gpt-6-sol", "eu-west-1", "eu", "eu.openai.gpt-6-sol"),
+        ("gpt-6.1-sol", "ap-southeast-2", "au", "au.openai.gpt-6.1-sol"),
+    ),
+)
+def test_gpt6_unsupported_geo_profile_falls_back_without_fabricated_id(
+    source_id, region, geography, unsupported_id
+):
+    requirements = {
+        "governance": ["guardrails"],
+        "data_residency": "geo_required",
+        "cris_geography": geography,
+    }
+    rec = _recommend(
+        _workload(source={"model_ids": [source_id]}, requirements=requirements),
+        region=region,
+    )
+    assert rec["decision_status"] == "recommended"
+    assert rec["invocation_model_id"] != unsupported_id
+    assert not rec["invocation_model_id"].endswith(
+        f"openai.{source_id}"
+    )
+
+    conflict = _recommend(
+        _workload(
+            source={"model_ids": [source_id], "api_surface": "chat_completions"},
+            requirements={"api_continuity": "required", **requirements},
+        ),
+        region=region,
+    )
+    assert conflict["decision_status"] == "decision_required"
+    assert unsupported_id not in {
+        option["invocation_model_id"] for option in conflict["decision_options"]
+    }
+
+
+def test_active_catalog_contains_gpt6_profile_metadata_and_current_provenance():
+    assert OPENAI_CATALOG["verified_at"] == "2026-09-24"
+    for model_key, _ in _GPT6_MODELS:
+        catalog_key = oai._SOURCE_MODEL_KEYS[model_key]
+        assert set(OPENAI_CATALOG["models"][catalog_key]["inference_profiles"]) == {
+            "us",
+            "global",
+        }
+
+
 @pytest.mark.parametrize(("source_id", "target_id"), _GPT6_MODELS)
 def test_gpt6_chat_completions_preserves_chat_surface(source_id, target_id):
     rec = _recommend(
@@ -822,7 +870,7 @@ def test_tier_map_sol_cross_family_fallback_is_opus():
     from openai_model_recommendation import _converse_candidate_order
     order = _converse_candidate_order({"model_ids": ["gpt-5.6-sol"]})
     assert order[0] == "openai_gpt_5_6_sol"
-    assert order[1] == "anthropic_claude_opus_4_8"
+    assert order[1] == "anthropic_claude_opus_5_5"
 
 def test_tier_map_luna_source_maps_to_haiku_on_converse():
     # Same-model-first (2026-08-21): Luna keeps Luna; Haiku is the cross-family
