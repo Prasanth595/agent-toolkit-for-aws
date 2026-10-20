@@ -395,23 +395,27 @@ def test_azure_skill_describes_only_implemented_discovery_sources() -> None:
         assert "Terraform" in section
         assert "consent-gated" in section
         assert "application code" in section
-        assert "Billing exports, RDfA, Bicep, and ARM" in section
+        assert "RDfA" in section
+        assert "Billing exports, Bicep, and ARM" in section
         assert "not implemented" in section
         assert "user-stated" in section or "azure_monthly_spend" in section
     input_security = text[
         text.index("### Input Security"):text.index("## State Validation")
     ]
+    assert "RDfA" in input_security
     assert "unsupported" in input_security
     assert "do not read, extract, or ingest them" in input_security
     assert "Bicep files or ARM templates are present" in input_security
     assert "halt per `discover-iac.md` Step 2" in input_security
     assert re.search(r"even\s+when supported sources are also present", input_security)
-    assert "RDfA report archive is the only source" in input_security
-    assert "RDfA archive or billing export" in input_security
     assert "accompanies at least one supported source" in input_security
     assert "continue with the supported sources" in input_security
     assert "billing-export-only workspace" in input_security
     assert "halts at Discover's precondition" in input_security
+    # RDfA is an implemented, supported source: it must never be grouped with the
+    # unsupported-and-halting inputs (Bicep/ARM/billing exports).
+    assert "RDfA report archive is the only source" not in input_security
+    assert "RDfA archive or billing export" not in input_security
 
     iac_text = (
         PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases"
@@ -424,8 +428,8 @@ def test_azure_skill_describes_only_implemented_discovery_sources() -> None:
         "billing exports as a fallback",
         "Azure Cost Management exports",
         "Resource Discovery for Azure report archives",
-        "extracted RDfA archives",
-        "RDfA measurements",
+        "RDfA, Bicep, and ARM templates are not implemented",
+        "RDfA, Bicep, and ARM are not implemented",
         "fragment covers Terraform, Bicep, and ARM",
         "Azure invoice line items",
     ):
