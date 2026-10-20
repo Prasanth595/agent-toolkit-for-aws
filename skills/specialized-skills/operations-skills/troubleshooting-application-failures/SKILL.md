@@ -12,6 +12,11 @@ Domain expertise for diagnosing application failures through CloudWatch log anal
 Discovers relevant log groups, searches for error patterns and stack traces, performs
 root cause analysis, and generates prioritized remediation recommendations.
 
+Logs are where the investigation starts, not its boundary. When the logs point at a timeout,
+throttle, retry or permission problem, read the configuration that sets it, for example the API
+Gateway integration timeout, the queue's visibility timeout, or the function timeout and event
+source mapping. Read-only access normally includes these Describe and Get calls.
+
 ## Troubleshoot a failing application
 
 To diagnose and resolve application failures using CloudWatch logs, follow the
