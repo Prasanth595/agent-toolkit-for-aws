@@ -13,7 +13,7 @@ description: >-
   setting-up-cloudwatch-observability. Not for app logging or threat detection.
 
 metadata:
-  version: "7"
+  version: "9"
 ---
 
 # AWS Observability
