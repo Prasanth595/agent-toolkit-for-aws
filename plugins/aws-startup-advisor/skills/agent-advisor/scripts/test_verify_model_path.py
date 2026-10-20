@@ -193,26 +193,47 @@ class FakeResponses:
         return self.response
 
 
+class FakeCompletions:
+    def __init__(self, response=None, error=None):
+        self.calls = []
+        self.response = response or type("Resp", (), {"model": "openai.gpt-6-sol"})()
+        self.error = error
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return self.response
+
+
+class FakeChat:
+    def __init__(self, completions=None):
+        self.completions = completions or FakeCompletions()
+
+
 class FakeOpenAIClient:
-    def __init__(self, responses=None):
+    def __init__(self, responses=None, chat=None):
         self.responses = responses or FakeResponses()
+        self.chat = chat or FakeChat()
 
 
-def _openai_input(requirements=None):
+def _openai_input(requirements=None, source=None, region="us-east-2"):
+    source_data = {
+        "provider": "openai",
+        "model_ids": ["gpt-5.4"],
+        "sdk": "openai",
+        "api_surface": "responses",
+        "source_paths": ["src/app.py"],
+    }
+    source_data.update(source or {})
     return {
         "schema_version": 2,
-        "region": "us-east-2",
+        "region": region,
         "primary_unit": "openai-svc",
         "workloads": [
             {
                 "workload_id": "openai-svc",
-                "source": {
-                    "provider": "openai",
-                    "model_ids": ["gpt-5.4"],
-                    "sdk": "openai",
-                    "api_surface": "responses",
-                    "source_paths": ["src/app.py"],
-                },
+                "source": source_data,
                 "requirements": {
                     "priority": "balanced",
                     "critical_features": [],
@@ -224,8 +245,10 @@ def _openai_input(requirements=None):
     }
 
 
-def _verify_openai(requirements=None, **kwargs):
-    recommendation = model_recommendation.recommend(_openai_input(requirements))
+def _verify_openai(requirements=None, source=None, region="us-east-2", **kwargs):
+    recommendation = model_recommendation.recommend(
+        _openai_input(requirements, source, region)
+    )
     return verify_model_path.verify_recommendation(recommendation, now=NOW, **kwargs)
 
 
@@ -535,6 +558,52 @@ def test_mantle_responses_failure_does_not_substitute_model():
     assert verification["invocation_model_id"] == "openai.gpt-5.6-sol"
     # Only the exact selected model was ever probed.
     assert [c["model"] for c in client.responses.calls] == ["openai.gpt-5.6-sol"]
+
+
+def test_mantle_chat_probe_calls_chat_completions_with_exact_id():
+    client = FakeOpenAIClient()
+    result = _verify_openai(
+        {"api_continuity": "required"},
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        region="us-east-1",
+        openai_chat_client_factory=lambda region: client,
+    )
+    verification = result["workloads"]["openai-svc"]
+    schema = json.loads(
+        (
+            pathlib.Path(verify_model_path.__file__).parent
+            / "schemas"
+            / "model-verification.json"
+        ).read_text()
+    )
+    jsonschema.validate(result, schema, format_checker=jsonschema.FormatChecker())
+
+    assert verification["status"] == "passed"
+    assert verification["api_path"] == "mantle_openai_chat"
+    assert verification["response_model_id"] == "openai.gpt-6-sol"
+    assert client.chat.completions.calls == [
+        {
+            "model": "openai.gpt-6-sol",
+            "max_completion_tokens": 8,
+            "messages": [{"role": "user", "content": verify_model_path.PROMPT}],
+        }
+    ]
+
+
+def test_mantle_chat_failure_does_not_substitute_model():
+    completions = FakeCompletions(error=RuntimeError("access denied"))
+    client = FakeOpenAIClient(chat=FakeChat(completions))
+    result = _verify_openai(
+        {"api_continuity": "required"},
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        region="us-east-1",
+        openai_chat_client_factory=lambda region: client,
+    )
+    verification = result["workloads"]["openai-svc"]
+
+    assert verification["status"] == "failed"
+    assert verification["invocation_model_id"] == "openai.gpt-6-sol"
+    assert [call["model"] for call in completions.calls] == ["openai.gpt-6-sol"]
 
 
 def test_openai_decision_required_is_not_probed():
