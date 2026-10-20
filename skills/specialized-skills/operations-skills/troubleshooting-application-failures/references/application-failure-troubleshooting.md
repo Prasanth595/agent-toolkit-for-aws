@@ -72,9 +72,9 @@ Search CloudWatch logs for error patterns and failure indicators.
 
 - You MUST only proceed with log analysis if log streams were found in the previous step
 - You MUST derive timestamps from existing AWS response data rather than calculating independently
-- You MUST use the `lastEventTimestamp` from the log streams as the reference point for time calculations
+- If the user gave a time window, use it as given. Otherwise use the `lastEventTimestamp` from the log streams as the reference point for time calculations
 - You MUST convert the validated time window to Unix timestamps (milliseconds since epoch)
-- **Timestamp Derivation Process:**
+- **Timestamp Derivation Process, when the user gave no window:**
   1. Extract `lastEventTimestamp` from the log streams response (step 3)
   2. Use this as your end time for the analysis window
   3. Calculate start time by subtracting the desired time window in milliseconds
