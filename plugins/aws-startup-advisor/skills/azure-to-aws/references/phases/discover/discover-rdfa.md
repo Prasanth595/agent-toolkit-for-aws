@@ -174,10 +174,12 @@ or container-level identity — `ID` is always the parent's id):
   drift comparison can actually compare them), one array element per source row:
   `{ name: NodePoolName, mode: PoolMode, os_type: PoolOS, vm_size: NodeSize, node_count:
   Nodes, min_count, max_count, max_pods_per_node: MaxPodsPerNode }`. Normalize bounds using
-  `Autoscale` field: when `Autoscale != "true"`, RDfA's sentinel
-  `AutoscaleMin: "0"` / `AutoscaleMax: "0"` means absent, so emit
-  `min_count == max_count == node_count`; for an autoscaled pool preserve its actual bounds,
-  including a legitimate minimum zero. The downstream EKS contract must always satisfy
+  the `Autoscale` field and bounds together: when `Autoscale != "true"`, or when
+  `node_count > 0` and RDfA emitted the impossible autoscaled shape `AutoscaleMin: "0"` /
+  `AutoscaleMax: "0"`, treat those zero bounds as the producer's absent-bounds sentinel and
+  emit `min_count == max_count == node_count`. Otherwise preserve the autoscaled pool's
+  actual bounds, including a legitimate minimum zero (for example min `0`, desired `1`,
+  max `2`). The downstream EKS contract must always satisfy
   `min_count <= node_count <= max_count`.
 - **CONTAINER:** group all rows sharing one `ID` into a SINGLE inventory entry
   (`azure_type: Microsoft.ContainerInstance/containerGroups`). Take group-level fields

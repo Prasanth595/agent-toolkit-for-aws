@@ -49,10 +49,11 @@ def _eligible(row: dict, window_days=None, minimum=14) -> bool:
 
 def _normalize_pool(row: dict) -> dict:
     desired = int(row["Nodes"])
-    if row["Autoscale"].lower() != "true":
+    minimum, maximum = int(row["AutoscaleMin"]), int(row["AutoscaleMax"])
+    if row["Autoscale"].lower() != "true" or (
+        desired > 0 and minimum == maximum == 0
+    ):
         minimum = maximum = desired
-    else:
-        minimum, maximum = int(row["AutoscaleMin"]), int(row["AutoscaleMax"])
     assert minimum <= desired <= maximum
     return {"desired_size": desired, "min_size": minimum, "max_size": maximum}
 
@@ -228,6 +229,7 @@ def test_partial_nested_report_keeps_valid_inner_and_warns_for_bad_inner(tmp_pat
 
 def test_fixed_and_autoscaled_aks_bounds_are_valid() -> None:
     pools = _load("inventory.json")["AKS"]
+    assert pools[0]["Autoscale"] == "true"
     fixed = _normalize_pool(pools[0])
     autoscaled = _normalize_pool(pools[2])
     assert fixed == {"desired_size": 3, "min_size": 3, "max_size": 3}

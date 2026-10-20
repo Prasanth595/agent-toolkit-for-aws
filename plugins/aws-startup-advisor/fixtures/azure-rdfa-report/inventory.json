@@ -30,7 +30,7 @@
       "PoolOS": "Linux",
       "NodeSize": "Standard_D2s_v5",
       "Nodes": 3,
-      "Autoscale": "false",
+      "Autoscale": "true",
       "AutoscaleMin": "0",
       "AutoscaleMax": "0",
       "MaxPodsPerNode": 30
