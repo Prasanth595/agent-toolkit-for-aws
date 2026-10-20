@@ -157,7 +157,7 @@ The multi-provider quick reference table includes a `Status` column:
 
 When refreshing the cache, recompute `days_to_eol` and refresh the `active` / `legacy` / `excluded` values from the [model lifecycle page](https://docs.aws.amazon.com/bedrock/latest/userguide/model-lifecycle.html). **Preserve an existing `restricted (…)` value** — that page publishes only active / legacy / EOL and does not track access gating, so it can never produce `restricted`; change or remove a `restricted` value only when the model card's access requirement itself changed (data-retention mode, gated preview status).
 
-### Mapping Guides (`ai-openai-to-bedrock.md`, `ai-anthropic-to-bedrock.md`, `ai-gemini-to-bedrock.md`, and any source-cloud-specific guide the consuming skill ships)
+### Mapping Guides (`ai-openai-to-bedrock.md`, `ai-anthropic-to-bedrock.md`, `ai-gemini-to-bedrock.md`, the gateway guide `ai-openrouter-to-bedrock.md`, and any source-cloud-specific guide the consuming skill ships)
 
 - "Best Bedrock Match" columns must only contain Active models.
 - Exclusion-zone models must not appear in any recommendation row.
