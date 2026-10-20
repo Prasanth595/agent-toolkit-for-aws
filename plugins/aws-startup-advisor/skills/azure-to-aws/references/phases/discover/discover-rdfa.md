@@ -8,15 +8,12 @@ _contributes:
 
 # Discover — RDfA Report Parse
 
-> **Fragment unit.** See `discover.md` for how it composes into the phase. RDfA needs no
-> such split: reading an archive the customer already handed over is not interactive, so
-> this fragment carries no Part A/Part B — it is file-only and non-interactive end to end,
-> unlike `discover-live.md`'s main-window-consent + dispatched-parse split. It still owes
-> the customer an informational block (not a consent gate) naming the tool and the roles
-> it needs, output when no RDfA report is reachable this run (see § Step 0 and the
-> informational block below) — the only decision point here is whether the customer goes
-> and runs the tool at all, and that decision happens before this fragment ever has
-> anything to read.
+> **Fragment unit.** See `discover.md` for composition and for the executable
+> main-window preparation stage. This dispatched fragment is file-only: it reads
+> `$MIGRATION_DIR/rdfa-cache/manifest.json` and prepared JSON, maps rows, and contributes
+> artifacts. It never discovers/extracts ZIPs, creates/runs scripts, or prompts. Report
+> detection and no-report guidance must run before dispatch, because this fragment is not
+> loaded when its trigger is false.
 
 Produces the same two artifacts every other discover fragment writes —
 `azure-resource-inventory.json` (`resources[].config.measured_utilization`, the
@@ -40,45 +37,30 @@ rule rather than being dropped. Consumption-CSV parsing is explicitly deferred (
 — this fragment contributes `measured_utilization` from the Metrics report, never a
 dollar figure.
 
-## Step 0: Locate the report
+## Step 0: Read the prepared source manifest
 
-Look for the first of, in order:
+Source discovery, tie-breaking, fingerprinting, ZIP extraction, nested ZIP extraction,
+JSON validation, and metrics projection have already run in `discover.md`'s executable
+main-window pre-dispatch action. Read `$MIGRATION_DIR/rdfa-cache/manifest.json` and only
+the prepared paths it names.
 
-1. An already-extracted RDfA report directory under `$MIGRATION_DIR/rdfa-report/` — this
-   fragment's own canonical extraction target, so a re-entry finds its own prior
-   extraction here first and never re-extracts.
-2. A `*.zip` matching `*ResourcesReport*.zip` anywhere directly under the workspace root
-   (not recursively — RDfA's own delivery is flat), or a path the user explicitly named
-   in conversation.
-3. An already-extracted directory anywhere in the workspace containing at least one
-   `Inventory_*.json` file (the one artifact every RDfA run produces even with
-   `-SkipMetrics -SkipConsumption`) — covers "I unzipped it myself before telling you."
+The manifest records `source_path`, `source_type` (`zip` or `directory`), SHA-256
+`fingerprint`, `prepared_at`, and prepared inventory/metrics paths. `source_path` always
+names the customer-supplied ZIP or external extracted directory; it never names
+`rdfa-cache` or a generated projection. On re-entry, reuse derived files only when all
+three identity fields exactly match the currently selected source. A newly confirmed
+source wins, invalidates the old cache, and is prepared before this fragment dispatches.
 
-**On a ZIP match:** extract it to `$MIGRATION_DIR/rdfa-report/` using the standard
-library's zip extraction, never a shell `unzip` call — this fragment is file-only, with
-no `_exec` shell access implied. **On an already-extracted directory match (not under
-`rdfa-report/`):** read it in place; do not copy or move it. The fragment is read-only
-everywhere.
-
-**No match of either shape:** this fragment's `_trigger` evaluates false and it
-contributes nothing this run — same "absent is normal" contract `discover-live.md` uses
-for a missing `live-capture/manifest.json`. Output the informational block below once per
-Discover run, when no RDfA report is found AND the live-`az` main-window pre-work did not
-produce a manifest either for this attempt.
+A missing manifest means this fragment's trigger is false. The optional-accuracy block
+at the end of this file is output by the main window during detection, not from this
+unreachable fragment.
 
 ### Multiple subscriptions
 
-A tenant-wide `Run-AllSubscriptions.ps1` run bundles per-subscription ZIPs into one outer
-ZIP whose own `Compress-Archive` step adds the per-subscription `.zip` FILES flat into the
-outer archive — extracting the outer zip yields N sibling `.zip` files at the top level,
-not N directories. Do a genuine two-pass extraction: extract the outer zip into
-`$MIGRATION_DIR/rdfa-report/`, which yields one `.zip` file per subscription sitting
-directly in that directory; then extract each of those inner zips in turn, into its own
-subdirectory named after the inner zip's filename stem (so each subscription's
-`Inventory_*.json`/`Metrics_*.json`/`Consumption_*.csv` triple does not collide on name
-with another subscription's). Process every `Inventory_*.json`/`Metrics_*.json`/
-`Consumption_*.csv` triple found across all subscription subfolders, keyed by their own
-`Subscription`/`ID` fields — never assume a single-subscription layout.
+The main-window preparation genuinely performs two-pass extraction for an outer
+Run-AllSubscriptions ZIP and each sibling inner ZIP. Prepared paths retain subscription
+separation and all Inventory/Metrics batches are processed; filenames never overwrite
+one another.
 
 ### Corrupt or unreadable reports
 
@@ -130,41 +112,23 @@ every OTHER match (not just the count) in `rdfa_metadata.other_reports_found[]` 
 Output Files) as the matched filename plus its parsed (normalized) timestamp, so a stale
 second report is not silently invisible to the customer.
 
-## Step 1: Scale guard and extraction
+## Step 1: Read producer-compatible prepared data
 
-RDfA's `Metrics_ResourcesReport_<date>.json` is a flat array with one row **per
-(resource, metric) pair**, not one row per resource — as few as 2 metric rows per VM up
-to ~9 for a vCore-serverless SQL Database, all multiplied by however many resources
-exist. This is structurally bigger than `discover-live.md`'s `az resource list` dump (one
-row per resource, no per-metric fan-out).
+The main-window preparer reads every `Metrics_*.json` as the object RDfA actually emits:
+`{"Metrics": [...]}`. Concatenate each batch's `Metrics` array; an empty array is valid
+and contributes no evidence. Reject a top-level flat array rather than silently blessing
+the old synthetic fixture shape.
 
-**Write a throwaway extraction script, `$MIGRATION_DIR/_extract_rdfa.py` (mirroring
-`discover-live.md`'s `_extract_live.py` naming), any time `Metrics_ResourcesReport_*.json`
-exists at all** — not gated at the ~100-resource threshold `discover-live.md`'s own
-Security Contract states for its raw captures, because RDfA's metric fan-out multiplies
-resource count by metric-row count, so even a modest resource count can produce a large
-file. The script:
+Prepared metric rows retain only `ID`, `Service`, `Metric`, `MetricPercentile`,
+`MetricCount`, and `MetricError`. Current RDfA exports do not serialize query bounds, so
+they cannot prove a measured window. `MetricSeries`, aggregate/value fields, and inventory
+duplicates are omitted. Large inventory files are likewise projected in the executable
+pre-dispatch stage. This `rw` fragment reads only prepared files and never writes or runs
+`_extract_rdfa.py`.
 
-1. Streams the Metrics JSON (a flat array — safe to parse incrementally).
-2. Projects ONLY the fields Step 3 needs per row: **`ID`, `Service`, `Metric`,
-   `MetricPercentile`, `MetricCount`, `MetricError`, `StartTime`, `EndTime`**. Explicitly
-   drops `MetricSeries`, `MetricAggregate`, `MetricTimeGrain` (aggregation method and
-   sampling interval — never the window length), `MetricMeasure`, `MetricValue`,
-   `MetricTotalCount`, `Subscription`, `ResourceGroup`, `Name`, `Location` — fields the
-   inventory-mapping step (§ Step 2) gets from the Inventory JSON entry it is attaching
-   `measured_utilization` to, not from Metrics rows a second time.
-3. Writes its projected output to `$MIGRATION_DIR/rdfa-report/metrics-extracted.json`.
-4. Is deleted after it runs.
-
-The same rule applies to `Inventory_ResourcesReport_*.json` whenever it exceeds the live
-path's own ~100-resource threshold (same number — an Inventory JSON row has the same flat
-per-resource shape live `az`'s own capture does). This fragment's mapping steps read ONLY
-the extracted files (or the raw files directly when they were small enough that no
-extraction ran) — never a raw `Metrics_*.json`/`Inventory_*.json` file whose size crossed
-the threshold.
-
-The Consumption CSV is out of this fragment's parsing path entirely (§ Step 4), so it
-needs no scale-guard treatment here — the deferral itself is the mitigation.
+Every emitted metric carries `window_days: null` and provenance explaining that the
+producer omitted query bounds. `rdfa_metadata.lookback_days` remains display-only and
+must never be substituted for a row's unavailable window.
 
 ## Step 2: Map Inventory rows to inventory entries
 
@@ -226,8 +190,12 @@ or container-level identity — `ID` is always the parent's id):
   both sources produce the same shape for the same cluster and `discover-assemble.md`'s
   drift comparison can actually compare them), one array element per source row:
   `{ name: NodePoolName, mode: PoolMode, os_type: PoolOS, vm_size: NodeSize, node_count:
-  Nodes, min_count: AutoscaleMin, max_count: AutoscaleMax, max_pods_per_node:
-  MaxPodsPerNode }`.
+  Nodes, min_count, max_count, max_pods_per_node: MaxPodsPerNode }`. Normalize bounds using
+  `Autoscale` field: when `Autoscale != "true"`, RDfA's sentinel
+  `AutoscaleMin: "0"` / `AutoscaleMax: "0"` means absent, so emit
+  `min_count == max_count == node_count`; for an autoscaled pool preserve its actual bounds,
+  including a legitimate minimum zero. The downstream EKS contract must always satisfy
+  `min_count <= node_count <= max_count`.
 - **CONTAINER:** group all rows sharing one `ID` into a SINGLE inventory entry
   (`azure_type: Microsoft.ContainerInstance/containerGroups`). Take group-level fields
   (`Sku`, `InstanceOSType`) from the first row. Collect per-container fields into
@@ -253,7 +221,11 @@ comparison against an IaC-sourced duplicate of the same resource:
   Terraform-sourced one, breaking drift-matching, right-sizing lookups, and any
   merge-by-field logic).
 - `HybridBenefit` → license-info parity with live `az`'s row-5 `Lic` handling.
-- `OSDisk`/`OSDiskSizeGB` → `os_disk`/`os_disk_size_gb`.
+- `OSDisk` → `os_disk.storage_account_type` and `OSDiskSizeGB` →
+  `os_disk.disk_size_gb`. Omit `os_disk.caching`: RDfA does not collect it. Treat
+  `OSDisk` values `Custom VHD` and `None` as unknown/non-SKU rather than a storage tier.
+  This nested shape is the canonical inline root-volume contract consumed by
+  `disk-ebs-sizing.json`.
 - `PowerState` → `power_state`.
 - `Zones` → `zone_count`.
 
@@ -306,8 +278,8 @@ module name in `rdfa_metadata.unmapped_collectors[]` as before, now alongside th
 
 ## Step 3: Attach `measured_utilization`
 
-RDfA's `Metrics_ResourcesReport_<date>.json` is a flat array of (resource, metric) rows.
-Join onto the Step 2 inventory entries by `ID` (exact match — safe even on an obfuscated
+RDfA metrics arrive from Step 1 as the concatenation of each producer object's `Metrics`
+array. Join rows onto Step 2 inventory entries by `ID` (exact match — safe even on an obfuscated
 report, because `Extension/Metrics.ps1`'s obfuscation block looks up the same primary
 dictionary for both Inventory and Metrics rows, unlike Consumption's separate token
 cache — see § Step 4). For AKS/CONTAINER's grouped entries, the join is unaffected since
@@ -321,13 +293,11 @@ series; `MetricValue` is a rolled-up value using whichever aggregation
 requests, answering a different question per metric. Mixing the two would silently
 change what "P95 utilization" means across resource types.
 
-**`MetricError: true` means the call failed, not that the value is 0.** On a caught
-exception RDfA sets `MetricQueryResults = 0`, `MetricQueryResultsCount = 0`,
-`MetricPercentile = 0`, **and** `MetricError = true` in the same `catch` branch — so a
-genuine zero-usage resource and a failed Monitor call are bit-for-bit identical in every
-numeric field and are distinguished **only** by `MetricError`. Check `MetricError` before
-trusting any numeric field on that row; a value of `0` with `MetricError: false` is a
-real, trustworthy zero.
+**A metric is sizing evidence only when `MetricError == false` AND `MetricCount > 0`.**
+RDfA emits zero percentile/count both for exceptions and for successful responses with no
+usable samples; the error flag alone cannot distinguish an empty success. Keep every row
+for traceability, but treat error rows and zero-sample rows as absent sizing evidence. A
+genuine sampled zero (`MetricPercentile == 0`, `MetricCount > 0`, no error) remains valid.
 
 Write, per qualifying `resources[]` entry, `config.measured_utilization`:
 
@@ -338,14 +308,16 @@ Write, per qualifying `resources[]` entry, `config.measured_utilization`:
     "cpu_percent": {
       "p95": 42.3,                     // MetricPercentile, as-is
       "sample_count": 720,              // MetricCount — the non-null sample size the P95 was computed over
-      "window_days": 31,                // ceil((EndTime - StartTime).TotalDays) for THIS row
+      "window_days": null,              // current RDfA export omits query bounds
+      "window_provenance": "unavailable_rdfa_query_bounds",
       "metric_error": false,            // MetricError, verbatim — REQUIRED, caller must check before trusting p95
       "source_metric": "Percentage CPU" // RDfA's own metric name, kept for traceability/debugging — not re-derived
     },
     "memory_available_bytes": {
       "p95": 1073741824,
       "sample_count": 720,
-      "window_days": 31,
+      "window_days": null,
+      "window_provenance": "unavailable_rdfa_query_bounds",
       "metric_error": false,
       "source_metric": "Available Memory Bytes"
     }
@@ -355,24 +327,16 @@ Write, per qualifying `resources[]` entry, `config.measured_utilization`:
 
 - One entry per canonical metric name actually captured for that resource — never a
   placeholder for a metric RDfA did not define for that service.
-- `metric_error: true` rows are **still written** (not dropped) — a reader needs to know
-  the call was attempted and failed, not merely that no row exists. Design/Estimate
-  consumers MUST treat a `metric_error: true` entry as **absent** evidence for the
-  `measured` tier (fall back to `inferred`), never as a measurement of zero.
-- `sample_count` comes from `MetricCount` (the count AFTER null-filtering, i.e. how many
-  real samples the P95 was actually computed from), never `MetricTotalCount` (the raw page
-  size before filtering, which would overstate confidence on a resource with gaps).
-- **`window_days` is per-row**, computed as `ceil((EndTime - StartTime).TotalDays)` from
-  that row's own `StartTime`/`EndTime` — never assumed from `rdfa_metadata.lookback_days`
-  (the report-wide default setting, kept there purely for display/traceability). The
-  default RDfA lookback is 31 days, but several SQL Database metrics (`cpu_limit`,
-  `dtu_limit`, `app_cpu_billed`, `allocated_data_storage`, `storage`, `storage_percent`)
-  and every CosmosDB and ContainerRegistry metric use a fixed 1-day window instead — a
-  mixed 31-day/1-day population genuinely occurs within one report, and
-  `rightsizing-thresholds.json`'s `confidence_rules.min_window_days` (14) gates `measured`
-  vs `inferred` on this per-row length: a SQL Database's `storage_percent` row (1-day
-  window) fails the 14-day gate and downgrades to `inferred` even when the same
-  resource's `cpu_used` row (31-day window) passes.
+- Rows with `metric_error: true` or `sample_count <= 0` are still written for
+  traceability but are absent evidence for sizing. Only a non-error, positive-sample row
+  may enter the utilization rubric; `p95: 0` remains valid when samples are positive.
+- `sample_count` comes from `MetricCount` after null filtering, never
+  `MetricTotalCount`.
+- **`window_days` is `null` for current RDfA exports**, with
+  `window_provenance: "unavailable_rdfa_query_bounds"`. Unknown fails
+  `confidence_rules.min_window_days`; consumers fall back to `inferred` and explain that
+  query bounds were not serialized. Never infer a 31-day measured window from
+  `rdfa_metadata.lookback_days`, which is display-only.
 - `MetricSeries` is **never** parsed into this structure or written anywhere in the
   artifact.
 
@@ -381,41 +345,42 @@ Write, per qualifying `resources[]` entry, `config.measured_utilization`:
 RDfA's `Metric` field spelling is per-service. Map `(Service, Metric)` to one canonical
 signal name before writing `measured_utilization`:
 
-| RDfA `Service`                                                      | RDfA `Metric`                         | Canonical signal name                                                                                   | `StartTime` window |
+| RDfA `Service`                                                      | RDfA `Metric`                         | Canonical signal name                                                                                   | Serialized window |
 | ------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------| ------------------- |
-| Virtual Machines                                                     | `Percentage CPU`                       | `cpu_percent`                                                                                             | 31-day (default)    |
-| Virtual Machines                                                     | `Available Memory Bytes`               | `memory_available_bytes`                                                                                   | 31-day (default)    |
-| Virtual Machines Scale Sets                                          | `Percentage CPU`                       | `cpu_percent`                                                                                              | 31-day (default)    |
-| Virtual Machines Scale Sets                                          | `Available Memory Bytes`               | `memory_available_bytes`                                                                                   | 31-day (default)    |
-| Managed Disk                                                         | `Composite Disk Read Operations/sec`   | `disk_read_iops`                                                                                            | 31-day (default)    |
-| Managed Disk                                                         | `Composite Disk Write Operations/sec`  | `disk_write_iops`                                                                                           | 31-day (default)    |
-| Managed Disk                                                         | `Composite Disk Read Bytes/sec`        | `disk_read_bytes_per_sec`                                                                                   | 31-day (default)    |
-| Managed Disk                                                         | `Composite Disk Write Bytes/sec`       | `disk_write_bytes_per_sec`                                                                                  | 31-day (default)    |
-| SQL Database                                                         | `cpu_percent`                           | `cpu_percent`                                                                                               | 31-day (default)    |
-| SQL Database                                                         | `cpu_used`                              | `cpu_vcore_used`                                                                                            | 31-day (default)    |
-| SQL Database                                                         | `cpu_limit`                             | `cpu_vcore_limit`                                                                                           | **1-day (fixed)**   |
-| SQL Database                                                         | `dtu_used`                              | `dtu_used`                                                                                                   | 31-day (default)    |
-| SQL Database                                                         | `dtu_limit`                             | `dtu_limit`                                                                                                  | **1-day (fixed)**   |
-| SQL Database                                                         | `storage`                               | `storage_bytes`                                                                                              | **1-day (fixed)**   |
-| SQL Database                                                         | `storage_percent`                       | `storage_percent`                                                                                            | **1-day (fixed)**   |
-| SQL Database                                                         | `allocated_data_storage`                | `allocated_storage_bytes`                                                                                   | **1-day (fixed)**   |
-| SQL Database                                                         | `physical_data_read_percent`            | `physical_data_read_percent` (passthrough)                                                                  | 31-day (default)    |
-| SQL Database                                                         | `log_write_percent`                     | `log_write_percent` (passthrough)                                                                            | 31-day (default)    |
-| SQL Database (serverless only)                                       | `app_cpu_billed`                        | `cpu_billed_seconds` (not a utilization %, carried for completeness; never fed to the P95 rubric bands)      | **1-day (fixed)**   |
-| Functions                                                            | `FunctionExecutionCount`                | `invocation_count`                                                                                            | 31-day (default)    |
-| Functions                                                            | `FunctionExecutionUnits`                | `invocation_gb_seconds`                                                                                       | 31-day (default)    |
-| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `cpu_percent`                           | `cpu_percent`                                                                                                 | 31-day (default)    |
-| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `memory_percent`                        | `memory_percent`                                                                                               | 31-day (default)    |
-| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `storage_percent`                       | `storage_percent`                                                                                              | **1-day (fixed)**   |
-| CosmosDB                                                             | `TotalRequests`                         | `request_count`                                                                                                | **1-day (fixed)**   |
-| CosmosDB                                                             | `TotalRequestUnits`                     | `request_units_consumed`                                                                                       | **1-day (fixed)**   |
-| CosmosDB                                                             | `DataUsage`                             | `data_usage_bytes`                                                                                             | **1-day (fixed)**   |
-| CosmosDB                                                             | `ProvisionedThroughput`                 | `provisioned_throughput_ru`                                                                                     | **1-day (fixed)**   |
-| ContainerRegistry                                                    | `StorageUsed`                           | `storage_used_bytes`                                                                                           | **1-day (fixed)**   |
+| Virtual Machines                                                     | `Percentage CPU`                       | `cpu_percent`                                                                                             | unavailable    |
+| Virtual Machines                                                     | `Available Memory Bytes`               | `memory_available_bytes`                                                                                   | unavailable    |
+| Virtual Machines Scale Sets                                          | `Percentage CPU`                       | `cpu_percent`                                                                                              | unavailable    |
+| Virtual Machines Scale Sets                                          | `Available Memory Bytes`               | `memory_available_bytes`                                                                                   | unavailable    |
+| Managed Disk                                                         | `Composite Disk Read Operations/sec`   | `disk_read_iops`                                                                                            | unavailable    |
+| Managed Disk                                                         | `Composite Disk Write Operations/sec`  | `disk_write_iops`                                                                                           | unavailable    |
+| Managed Disk                                                         | `Composite Disk Read Bytes/sec`        | `disk_read_bytes_per_sec`                                                                                   | unavailable    |
+| Managed Disk                                                         | `Composite Disk Write Bytes/sec`       | `disk_write_bytes_per_sec`                                                                                  | unavailable    |
+| SQL Database                                                         | `cpu_percent`                           | `cpu_percent`                                                                                               | unavailable    |
+| SQL Database                                                         | `cpu_used`                              | `cpu_vcore_used`                                                                                            | unavailable    |
+| SQL Database                                                         | `cpu_limit`                             | `cpu_vcore_limit`                                                                                           | unavailable   |
+| SQL Database                                                         | `dtu_used`                              | `dtu_used`                                                                                                   | unavailable    |
+| SQL Database                                                         | `dtu_limit`                             | `dtu_limit`                                                                                                  | unavailable   |
+| SQL Database                                                         | `storage`                               | `storage_bytes`                                                                                              | unavailable   |
+| SQL Database                                                         | `storage_percent`                       | `storage_percent`                                                                                            | unavailable   |
+| SQL Database                                                         | `allocated_data_storage`                | `allocated_storage_bytes`                                                                                   | unavailable   |
+| SQL Database                                                         | `physical_data_read_percent`            | `physical_data_read_percent` (passthrough)                                                                  | unavailable    |
+| SQL Database                                                         | `log_write_percent`                     | `log_write_percent` (passthrough)                                                                            | unavailable    |
+| SQL Database (serverless only)                                       | `app_cpu_billed`                        | `cpu_billed_seconds` (not a utilization %, carried for completeness; never fed to the P95 rubric bands)      | unavailable   |
+| Functions                                                            | `FunctionExecutionCount`                | `invocation_count`                                                                                            | unavailable    |
+| Functions                                                            | `FunctionExecutionUnits`                | `invocation_gb_seconds`                                                                                       | unavailable    |
+| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `cpu_percent`                           | `cpu_percent`                                                                                                 | unavailable    |
+| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `memory_percent`                        | `memory_percent`                                                                                               | unavailable    |
+| MariaDB / MySQL / MySQL Flexible / PostgreSQL / PostgreSQL Flexible   | `storage_percent`                       | `storage_percent`                                                                                              | unavailable   |
+| CosmosDB                                                             | `TotalRequests`                         | `request_count`                                                                                                | unavailable   |
+| CosmosDB                                                             | `TotalRequestUnits`                     | `request_units_consumed`                                                                                       | unavailable   |
+| CosmosDB                                                             | `DataUsage`                             | `data_usage_bytes`                                                                                             | unavailable   |
+| CosmosDB                                                             | `ProvisionedThroughput`                 | `provisioned_throughput_ru`                                                                                     | unavailable   |
+| ContainerRegistry                                                    | `StorageUsed`                           | `storage_used_bytes`                                                                                           | unavailable   |
 
-The "`StartTime` window" column is informational — this fragment never hardcodes these
-values; `window_days` always comes from the row's own `StartTime`/`EndTime`, so this
-table does not need updating if a future RDfA release changes any of these.
+The `Serialized window` column is intentionally `unavailable`: current RDfA metric rows
+contain no query bounds. The tool may use different internal lookbacks, but this artifact
+cannot claim which window produced a row, so every row remains ineligible for measured
+confidence until a future producer serializes that evidence.
 
 The **only** canonical names the `measured` rubric bands in `rightsizing-thresholds.json`
 currently consume are `cpu_percent` and `memory_percent`/`memory_available_bytes`. Every
@@ -461,13 +426,19 @@ the CSV:
 (`found: false` when no `Consumption_*.csv` is present at all, e.g. the customer ran
 `-SkipConsumption`; `parsed` is always `false` on this build regardless of `found`.)
 
-## Step 5: Merge with IaC/live discovery
+## Step 5: Merge with IaC/live discovery and contribute AI provenance
 
-This step is deliberately thin — the actual precedence and drift-recording mechanics
-already live in `discover-assemble.md`'s Assembly rule 4 (RDfA loses to live `az` on
-state, wins on measurement, loses to neither on IaC's provenance claims). This fragment
-only needs to emit entries with `source: "rdfa"` and let the assembler apply the existing
-precedence; it performs no merge logic of its own.
+Emit inventory entries with `source: "rdfa"`; the assembler applies live > RDfA > IaC
+state precedence while RDfA measurement remains additive.
+
+For every RDfA Cognitive Services account/deployment or Machine Learning workspace,
+also contribute an `ai-workload-profile.json` infrastructure entry
+`{azure_id, type, source: "rdfa", config{}}`, with no Terraform `address`/`file` and a
+`detection_signals[]` row whose method is `rdfa_report`. Include deployment model data
+when RDfA actually captured it; never invent a model for a workspace. The assembler
+reconciles exact `azure_id` matches across IaC/live/RDfA and ORs source flags. This makes
+a report-only ML workspace satisfy the producer agreement without pretending the report
+was a live `az` observation.
 
 ## Step 6: Write output
 
@@ -477,9 +448,11 @@ Write `rdfa_metadata` to `azure-resource-inventory.json`'s top level, parallel t
 ```jsonc
 "rdfa_metadata": {
   "found": true,
-  "report_path": "<path to the ZIP or extracted directory the fragment read>",
+  "report_path": "<manifest.source_path: the selected customer ZIP or external directory>",
+  "source_type": "zip",               // zip | directory
+  "source_fingerprint": "<SHA-256 from the preparation manifest>",
   "obfuscated": true,                 // detected by scanning for prod_/nonprod_ token shapes in ID fields
-  "lookback_days": 31,                 // the report's own MetricsLookbackDays SETTING (display/traceability only — NEVER used to populate a measured_utilization row's window_days, which is always computed from that row's own StartTime/EndTime)
+  "lookback_days": 31,                // display-only report setting; current metric rows carry window_days: null
   "subscriptions": ["<name or token>"],
   "collectors_found": ["VirtualMachines", "PostgreSQLflexible", "AppServices"],
   "unmapped_collectors": [],           // module keys present but not in the § Step 2 table, each entry carrying its derived azure_type alongside the module name

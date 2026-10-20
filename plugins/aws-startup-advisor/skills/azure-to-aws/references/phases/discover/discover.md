@@ -11,7 +11,7 @@ _fragments:
     _trigger: { _when: "source code or a dependency manifest is present in the workspace (.py/.js/.ts/.go/.java/.cs, requirements.txt, package.json, go.mod, pom.xml, *.csproj)" }
     _file: phases/discover/discover-app-code.md
   - _id: rdfa
-    _trigger: { _when: "an RDfA report is reachable per discover-rdfa.md § Step 0 (an extracted rdfa-report/ directory already exists under $MIGRATION_DIR, OR a *ResourcesReport*.zip / already-extracted directory containing an Inventory_*.json is present in the workspace). This fragment ONLY reads that archive; it never runs anything and never prompts." }
+    _trigger: { _when: "$MIGRATION_DIR/rdfa-cache/manifest.json exists and identifies a successfully prepared RDfA source for THIS attempt. The main-window pre-dispatch action below selects, fingerprints, and prepares the source; this rw fragment reads only prepared JSON and never extracts ZIPs, runs Python, or prompts." }
     _file: phases/discover/discover-rdfa.md
   - _id: live
     _trigger: { _when: "$MIGRATION_DIR/live-capture/manifest.json exists AND is fresh for THIS attempt — i.e. the 'Pre-dispatch main-window action' below ran, the user consented, and (on a re-entry) any manifest from a prior attempt was invalidated per that section's decline rule. This dispatched fragment ONLY parses that directory; it never runs az or prompts. Absent (or invalidated) manifest ⇒ the trigger is false and the fragment does not run." }
@@ -39,10 +39,10 @@ _preconditions:
     _on_failure: _halt_and_inform
   - _assert: "a live-`az` disposition was recorded for THIS attempt before the entry gate below is evaluated (see 'Pre-dispatch main-window action' immediately below `_preconditions` in the body) — either $MIGRATION_DIR/live-capture/manifest.json exists (consent given, capture attempted), or the live-capture step was skipped/declined/unavailable and no STALE manifest from a prior attempt is left on disk (see the re-entry rule in that same section). This does not require az to be installed or the capture to succeed — only that the attempt-or-skip decision for this run was actually made and, on decline, any earlier manifest was invalidated."
     _on_failure: _halt_and_inform
-  - _assert: "at least one migratable source is available: an IaC source (a .tf file containing an azurerm_* resource, a .bicep file, or an ARM template whose $schema contains 'deploymentTemplate'), OR application source code / a dependency manifest that the app-code fragment can scan for an AI signal, OR a live-capture manifest ($MIGRATION_DIR/live-capture/manifest.json written by the live-az pre-work above). A workspace with NONE of these — no IaC, no source code, and no successful live capture — is the only unrecoverable case, matching gcp's 'stop only when nothing will produce any artifact'"
+  - _assert: "at least one migratable source is available: an IaC source (a .tf file containing an azurerm_* resource, a .bicep file, or an ARM template whose $schema contains 'deploymentTemplate'), OR application source code / a dependency manifest that the app-code fragment can scan for an AI signal, OR a live-capture manifest ($MIGRATION_DIR/live-capture/manifest.json written by the live-az pre-work above), OR a validated RDfA preparation manifest ($MIGRATION_DIR/rdfa-cache/manifest.json written by the RDfA pre-work below). A workspace with NONE of these is the only unrecoverable case, matching gcp's 'stop only when nothing will produce any artifact'"
     _on_failure: _unrecoverable
 _postconditions:
-  - _assert: "at least one discovery artifact was produced: azure-resource-inventory.json (when an IaC source was found OR live `az` capture produced resources) OR ai-workload-profile.json (when application code had an AI signal, or a live Cognitive Services / ML signal was captured). This is the completion anchor — an app-code-only run that produced only the AI profile satisfies discover, matching gcp's 'stop only when nothing will produce any artifact'. None of openai-usage-profile.json, openrouter-usage-profile.json, or anthropic-usage-profile.json satisfies this check on its own — each is a supplement, not an anchor."
+  - _assert: "at least one discovery artifact was produced: azure-resource-inventory.json (when an IaC source, live `az` capture, or prepared RDfA report produced resources) OR ai-workload-profile.json (when application code or an IaC/live/RDfA Cognitive Services / ML signal qualified). This is the completion anchor — an RDfA-only run and an app-code-only run both satisfy Discover. Usage profiles remain supplements, not anchors."
     _on_failure: _halt_and_inform
   - _assert: "if the 'OpenAI usage-API consent + capture' step ran (ai-workload-profile.json matched the ai_source condition, or the user mentioned OpenAI usage with no billing signal present), either $MIGRATION_DIR/openai-usage-profile.json exists, or the action was skipped/declined and no stale profile from a prior attempt is left on disk"
     _on_failure: _halt_and_inform
@@ -50,7 +50,7 @@ _postconditions:
     _on_failure: _halt_and_inform
   - _assert: "same contract as the OpenAI assert above, substituting the Anthropic step and anthropic-usage-profile.json; additionally, a $MIGRATION_DIR/anthropic-capture/manifest.json whose captures[] rows are ALL 'failed' (and whose retry_pending is not true) is itself a valid 'failed capture, no profile' terminal outcome, not a precondition for requiring anthropic-usage-profile.json — the manifest's mere existence never substitutes for at least one captures[].status == 'ok' row"
     _on_failure: _halt_and_inform
-  - _assert: "WHEN an IaC source (.tf/.bicep/ARM) was found OR live `az` capture produced at least one resource: azure-resource-inventory.json and azure-resource-clusters.json exist, validate as JSON, and the inventory has at least one resources[] entry with metadata carrying discovery_timestamp, discovery_sources, and subscriptions_discovered. WHEN the run is app-code-only (no IaC source found and no live capture): the inventory and clusters artifacts are ABSENT (not written empty — see discover-assemble.md) and this is vacuously satisfied"
+  - _assert: "WHEN an IaC source (.tf/.bicep/ARM) was found OR live `az` capture OR a prepared RDfA report produced at least one resource: azure-resource-inventory.json and azure-resource-clusters.json exist, validate as JSON, and the inventory has at least one resources[] entry with metadata carrying discovery_timestamp, discovery_sources, and subscriptions_discovered. WHEN the run is app-code-only (no infrastructure-producing source): the inventory and clusters artifacts are ABSENT (not written empty — see discover-assemble.md) and this is vacuously satisfied"
     _on_failure: _halt_and_inform
   - _assert: "WHEN azure-resource-inventory.json exists, every resources[] entry has azure_id (a full ARM resource ID), azure_type (a canonical Microsoft.* type string), azure_type_provenance from {table, derived, derived_uncorroborated, user_confirmed}, resource_group, subscription_id, and config — no entry carries a raw azurerm_* type in azure_type"
   - _assert: "WHEN an IaC dialect (terraform/bicep/arm) contributed to azure-resource-inventory.json, iac_metadata carries derived_types and untranslated_types as separate collections: derived_types lists Terraform types resolved by derivation with a namespace that namespace_routing recognises, and untranslated_types lists ONLY those whose derived namespace was NOT recognised. A type absent from the canonicalization table is DERIVED and retained, never silently dropped — see arm-type-canonicalization.md § Deriving a type that is not listed. WHEN the run is live-only (no IaC dialect contributed), iac_metadata is ABSENT (per schema-discover-azure.md 'present only when a dialect actually contributed') and the live fragment records its own derived types in live_metadata.derived_types instead — this is vacuously satisfied"
@@ -64,7 +64,7 @@ _postconditions:
   - _assert: "WHEN azure-resource-inventory.json exists, warnings[] is present on the inventory (empty is fine), and every entry carries a code from the closed vocabulary in schema-discover-azure.md § Warnings, a detail, and an azure_id or identifier"
   - _assert: "WHEN application code with an AI signal at >= 70% confidence was found: ai-workload-profile.json exists, validates against schema-discover-ai.md, and carries summary.ai_source from {azure_openai, openai, anthropic, both, other} (never gemini), a workloads[] array, and — only when an agentic framework was detected — an agentic_profile. WHEN no AI signal reached 70% (or no source code was found), ai-workload-profile.json is absent and this is vacuously satisfied — its absence is not a failure"
     _on_failure: _halt_and_inform
-  - _assert: "PRODUCER AGREEMENT: WHEN azure-resource-inventory.json contains a case-insensitive azure_type in {Microsoft.CognitiveServices/accounts, Microsoft.CognitiveServices/accounts/deployments, Microsoft.MachineLearningServices/workspaces}, ai-workload-profile.json MUST exist and validate against schema-discover-ai.md, and infrastructure[] contains every qualifying resource — one entry per resource, in the shape schema-discover-ai.md § infrastructure[] defines for that resource's own source (an IaC-sourced entry keyed by config.tf_address; a live-sourced entry keyed by azure_id, with no address/file). The profile-level fields are computed by OR-ing across ALL qualifying resources in the profile, per schema-discover-ai.md § profile_source and sources_analyzed — NOT assigned exclusively per producer: metadata.sources_analyzed.terraform is true iff AT LEAST ONE qualifying resource is IaC-sourced; metadata.sources_analyzed.live is true iff AT LEAST ONE qualifying resource is live-sourced; summary.inferred_from_iac is true iff AT LEAST ONE qualifying resource is IaC-sourced (both flags may be true simultaneously in a mixed run — this is not a contradiction, it is two true statements about the same profile). metadata.profile_source is iac_cognitive when infrastructure-only (IaC and/or live, no app-code contribution) or merged when app-code also qualified. A Cognitive Services deployment with a literal config.model.name (IaC-sourced) carries that model in models[] with detected_via including terraform; a captured deployment's model field (live-sourced) carries that model in models[] with the live signal recorded via a detection_signals[].method of live_az on that resource's entry (models[].detected_via has no live value per schema-discover-ai.md, so live provenance never goes there). Do NOT require tf_address on a live-sourced infrastructure[] entry, and do NOT force sources_analyzed.terraform or inferred_from_iac to false merely because a DIFFERENT qualifying resource in the same profile was live-sourced — check each flag against the full resource set, not against one resource in isolation. This check is not vacuously satisfied merely because app-code found no AI signal"
+  - _assert: "PRODUCER AGREEMENT: WHEN azure-resource-inventory.json contains a case-insensitive azure_type in {Microsoft.CognitiveServices/accounts, Microsoft.CognitiveServices/accounts/deployments, Microsoft.MachineLearningServices/workspaces}, ai-workload-profile.json MUST exist and validate against schema-discover-ai.md, and infrastructure[] contains every qualifying resource. IaC entries are keyed by config.tf_address; live and RDfA entries are keyed by azure_id with truthful source provenance and no address/file. Profile flags are OR'd across the full set: sources_analyzed.terraform, .live, and .rdfa are independently true iff that source contributed; inferred_from_iac is true iff IaC contributed. Exact azure_id matches reconcile to one entry while retaining every contributing source; RDfA must never be mislabeled as live_az or Terraform. This check is not vacuously satisfied merely because app-code found no AI signal"
     _on_failure: _halt_and_inform
   - _assert: "WHEN azure-resource-inventory.json exists, every edges[] entry's type appears in schema-discover-azure.md § Typed edges — a per-dialect ref may map new syntax onto an existing type but may not invent one"
     _on_failure: _halt_and_inform
@@ -79,6 +79,33 @@ _forbids_files:
 ---
 
 # Phase 1: Discover Azure Resources
+
+## Pre-dispatch main-window actions
+
+Run both actions BEFORE `_preconditions` and fragment dispatch. The main window has
+execution capability; the dispatched `_agent: rw` worker does not.
+
+### RDfA detection, guidance, and preparation
+
+1. Detect candidate `*ResourcesReport*.zip` files and extracted directories containing
+   `Inventory_*.json`, including a path explicitly named by the user. Do not treat files
+   under `$MIGRATION_DIR/rdfa-cache/` as source candidates.
+2. If no candidate exists, output `discover-rdfa.md`'s optional-accuracy informational
+   block now (when live capture also produced no manifest). This is deliberately here,
+   because an absent report makes the `rdfa` fragment trigger false.
+3. Select the newest candidate using `discover-rdfa.md`'s normalized timestamp rule, or
+   the newly user-confirmed source. Compute a deterministic SHA-256 fingerprint from the
+   selected source (ZIP bytes; for a directory, sorted relative paths plus file bytes).
+4. Compare `{source_path, source_type, fingerprint}` with
+   `$MIGRATION_DIR/rdfa-cache/manifest.json`. Reuse prepared files only on an exact match.
+   A confirmed replacement invalidates and rebuilds the derived cache. The source path
+   remains the external directory/ZIP; generated files are never source candidates.
+5. In this MAIN window, extract ZIPs (including nested subscription ZIPs), validate JSON,
+   flatten each producer metrics object by concatenating its `Metrics` array, and project
+   large inputs. Write prepared files under `$MIGRATION_DIR/rdfa-cache/prepared/` and the
+   identity manifest last. Use Python's standard `zipfile`/`json` libraries if needed;
+   delete any temporary script after it runs. The dispatched RDfA fragment only reads
+   these prepared files.
 
 ## Pre-dispatch main-window action (live `az` consent + capture)
 
@@ -185,8 +212,10 @@ only asserts that this pre-work already happened; it does not perform it, since 
 DSL's closed check-kind vocabulary has no kind for "run an interactive action"),
 writing to `$MIGRATION_DIR/live-capture/`, with the dispatched `live` fragment merely
 parsing that directory (its `_trigger` fires only when a fresh
-`live-capture/manifest.json` exists for this attempt). RDfA needs no such split:
-reading an archive the customer already handed over is not interactive.
+`live-capture/manifest.json` exists for this attempt). RDfA uses the same capability
+boundary for a different reason: archive extraction and projection are non-interactive but
+still executable work. They run in the main-window pre-dispatch action; the `rw` fragment
+only maps prepared JSON.
 
 ## Step: Run the phase
 
@@ -197,7 +226,9 @@ reading an archive the customer already handed over is not interactive.
    usage-API consent + capture steps below run AFTER assembly (step 4), so
    nothing else in this phase needs `_init` to have happened any earlier than
    here.
-2. Run each fragment whose `_trigger` holds.
+2. Run each fragment whose `_trigger` holds. RDfA ZIP extraction/projection has already
+   completed in the main-window pre-dispatch action; the `rw` fragment performs file-only
+   mapping.
 3. Run `discover-assemble.md`.
 4. Run the usage-API consent + capture steps, in order: OpenAI, then
    OpenRouter, then Anthropic (each in full, Steps 0–4 of its own file). This
@@ -325,7 +356,7 @@ reading an archive the customer already handed over is not interactive.
    attempt.
 
    **Billing-export precondition, named honestly:** azure's discover phase today has exactly
-   three fragments — `iac`, `app-code`, `live` — and no billing fragment at all; Azure Cost
+   four fragments — `iac`, `app-code`, `rdfa`, `live` — and no billing fragment at all; Azure Cost
    Management export discovery is not yet implemented in this skill. The three sub-sections
    above therefore read "no Azure Cost Management billing signal exists in this run," which
    today is unconditionally true (there is no billing fragment to produce one) — phrased this
@@ -350,11 +381,12 @@ reading an archive the customer already handed over is not interactive.
 
 **Discover phase writes files to `$MIGRATION_DIR/`. Possible outputs (depending on what runs):**
 
-1. `azure-resource-inventory.json` — from `discover-iac.md` and/or `discover-live.md`
-2. `azure-resource-clusters.json` — from `discover-iac.md` and/or `discover-live.md`
+1. `azure-resource-inventory.json` — from `discover-iac.md`, `discover-live.md`, and/or
+   `discover-rdfa.md`; `metadata.discovery_sources` records only actual contributors and
+   `rdfa_metadata` records the selected report provenance
+2. `azure-resource-clusters.json` — from any infrastructure-producing source (IaC, live, or RDfA)
 3. `ai-workload-profile.json` — from `discover-app-code.md` (confidence ≥ 70%, optionally merged)
-   and/or infrastructure-inferred (IaC Cognitive-Services-strong or live Cognitive Services / ML
-   signal)
+   and/or infrastructure-inferred (IaC, live, or RDfA Cognitive Services / ML signal)
 4. `openai-usage-profile.json` — from `discover-openai-api.md` (plus `openai-capture/` raw
    captures inside the gitignored run directory; the transient `.openai-admin-env` key file is
    deleted by that sub-file's Step 4 and is never a phase output)

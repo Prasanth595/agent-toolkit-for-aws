@@ -41,6 +41,7 @@ their single creator and owns the validation checklist at the bottom.
   ],
   "iac_metadata": {}, // present only when an IaC dialect (terraform/bicep/arm) actually contributed
   "live_metadata": {}, // present only when live `az` capture contributed — see § live_metadata
+  "rdfa_metadata": {}, // present only when a prepared RDfA report contributed — see § rdfa_metadata
   "warnings": [], // see § Warnings — ALWAYS present, `[]` when clean
   "unclustered": [] // azure_ids no cluster claimed
 }
@@ -145,6 +146,37 @@ no home on the per-resource entries:
 - **`drift`** — a run-level rollup `{ resources_live_only, resources_iac_only,
   conflicted_resources }` for reporting. The per-field disagreements themselves live on each
   resource as `resources[].drift` (see § Drift records), NOT here.
+
+## rdfa_metadata
+
+Present only when a prepared RDfA report contributed at least one resource. It records
+source identity and report-level provenance; generated cache paths are never reported as
+the source.
+
+```jsonc
+{
+  "found": true,
+  "report_path": "<selected customer ZIP or external extracted directory>",
+  "source_type": "zip", // zip | directory
+  "source_fingerprint": "<SHA-256>",
+  "obfuscated": false,
+  "lookback_days": 31, // display-only; never used as a measured metric window
+  "subscriptions": ["<subscription name or token>"],
+  "collectors_found": ["VirtualMachines"],
+  "unmapped_collectors": [],
+  "other_reports_found": [],
+  "consumption_csv": {
+    "found": false,
+    "parsed": false,
+    "reason": "<present when found is true>"
+  },
+  "metrics_found": true
+}
+```
+
+`report_path`, `source_type`, and `source_fingerprint` must match the preparation
+manifest. `lookback_days` is optional display provenance and cannot replace unavailable
+per-row query bounds. `other_reports_found[]` lists non-selected candidates.
 
 ## Warnings
 
@@ -251,6 +283,8 @@ discovery in a way a depth calculation is not.
 - [ ] `metadata.clarify_fast_path` is present with a boolean `eligible` and a `reasons_ineligible[]` that is empty iff `eligible` is `true`, and every reason is one of the rule-9 input names.
 - [ ] For each dialect whose files were found in the workspace, at least one resource carries that dialect as its `source`.
 - [ ] No app-setting value, connection-string value, storage key, or Key Vault secret value appears anywhere.
+- [ ] `rdfa_metadata`, when present, carries the selected source path/type/fingerprint and
+      never names a generated cache directory; `lookback_days` is display-only.
 - [ ] `warnings[]` is present (possibly empty), and every entry has a `code` from the closed vocabulary, a `detail`, and an `azure_id` or an `identifier`.
 - [ ] Every `edges[]` entry's `type` appears in the § Typed edges table.
 - [ ] Every inventory resource is either a cluster member or listed in `unclustered[]`.

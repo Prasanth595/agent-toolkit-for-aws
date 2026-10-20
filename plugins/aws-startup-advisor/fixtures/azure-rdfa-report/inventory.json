@@ -7,7 +7,7 @@
       "Name": "vm-web-01",
       "Location": "eastus",
       "Size": "Standard_D4s_v5",
-      "OSDisk": "ReadWrite",
+      "OSDisk": "Premium_LRS",
       "OSDiskSizeGB": 128,
       "PowerState": "VM running",
       "Zones": 1,
@@ -30,8 +30,9 @@
       "PoolOS": "Linux",
       "NodeSize": "Standard_D2s_v5",
       "Nodes": 3,
-      "AutoscaleMin": 1,
-      "AutoscaleMax": 5,
+      "Autoscale": "false",
+      "AutoscaleMin": "0",
+      "AutoscaleMax": "0",
       "MaxPodsPerNode": 30
     },
     {
@@ -49,6 +50,7 @@
       "PoolOS": "Linux",
       "NodeSize": "Standard_D4s_v5",
       "Nodes": 4,
+      "Autoscale": "true",
       "AutoscaleMin": 2,
       "AutoscaleMax": 8,
       "MaxPodsPerNode": 30
@@ -68,6 +70,7 @@
       "PoolOS": "Linux",
       "NodeSize": "Standard_NC4as_T4_v3",
       "Nodes": 1,
+      "Autoscale": "true",
       "AutoscaleMin": 0,
       "AutoscaleMax": 2,
       "MaxPodsPerNode": 30
@@ -105,6 +108,16 @@
       "Subscription": "contoso-prod",
       "ResourceGroup": "rg-platform",
       "Name": "aro-cluster"
+    }
+  ],
+  "MachineLearning": [
+    {
+      "ID": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-ai/providers/Microsoft.MachineLearningServices/workspaces/ml-platform",
+      "Subscription": "contoso-prod",
+      "ResourceGroup": "rg-ai",
+      "Name": "ml-platform",
+      "Location": "eastus",
+      "Sku": "Basic"
     }
   ],
   "SQLDB": [

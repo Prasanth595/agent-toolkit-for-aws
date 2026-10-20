@@ -176,12 +176,12 @@ rather than omitting the key, so its emptiness is visible to a reader.
 
 ### Metrics lookback affects confidence, not just precision
 
-When a metrics window does exist, read its actual length from the report metadata
-rather than assuming 31 days. Below `confidence_rules.min_window_days` in
-`knowledge/estimate/rightsizing-thresholds.json`, hold right-sizing confidence at
-`inferred` and say why: a P95 over a short window can sit entirely inside a quiet
-period, and a workload sized for a trough it will leave is worse than one sized
-from its SKU.
+When metrics exist, evaluate each row: `metric_error` must be false, `sample_count` must
+be positive, and `window_days` must be numeric and meet
+`confidence_rules.min_window_days`. Error/empty rows and null/unknown windows are
+traceability, not measured sizing evidence; fall back to `inferred` and say why. Current
+RDfA exports omit query bounds, so never replace null with
+`rdfa_metadata.lookback_days`. A P95 of zero remains eligible when positively sampled.
 
 ---
 
