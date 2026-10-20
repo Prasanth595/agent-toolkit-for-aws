@@ -38,9 +38,9 @@ def _workload(**overrides):
     return workload
 
 
-def _recommend(workload=None):
+def _recommend(workload=None, region="us-east-2"):
     return oai.recommend_openai_workload(
-        workload or _workload(), "us-east-2", OPENAI_CATALOG
+        workload or _workload(), region, OPENAI_CATALOG
     )
 
 
@@ -98,6 +98,10 @@ def test_governance_selects_runtime_converse():
     assert rec["decision_status"] == "recommended"
     assert rec["api_path"] == "runtime_converse"
     assert rec["primary_model"] == "anthropic.claude-sonnet-5"
+    assert rec["model_identity"]["display_name"] == (
+        "Claude Sonnet 5 (Converse tier match for GPT-5.6 Terra / 5.5 / 5.4)"
+    )
+    assert rec["model_identity"]["version"] == "5"
 
 
 def test_continuity_plus_runtime_only_returns_decision_required():
@@ -128,6 +132,278 @@ def test_decision_options_explain_tradeoffs():
     reasons = {o["api_path"]: o["reason"] for o in rec["decision_options"]}
     assert "OpenAI SDK" in reasons["mantle_openai_responses"]
     assert "Bedrock-native" in reasons["runtime_converse"]
+
+
+# --- GPT-6 exact-model routing --------------------------------------------
+
+_GPT6_MODELS = (
+    ("gpt-6-astra", "openai.gpt-6-astra"),
+    ("gpt-6-sol", "openai.gpt-6-sol"),
+    ("gpt-6-luna", "openai.gpt-6-luna"),
+    ("gpt-6.1-sol", "openai.gpt-6.1-sol"),
+)
+
+
+@pytest.mark.parametrize(("source_id", "target_id"), _GPT6_MODELS)
+def test_gpt6_supported_region_selects_exact_model_and_validates_schema(
+    source_id, target_id
+):
+    critical = ["image_input_vision"] if source_id in {"gpt-6-sol", "gpt-6-luna"} else []
+    workload = _workload(
+        source={"model_ids": [source_id]},
+        requirements={"api_continuity": "required", "critical_features": critical},
+    )
+    out = _full_recommend(workload, region="us-east-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert oai.detect_family(source_id) == "reasoning"
+    assert rec["decision_status"] == "recommended"
+    assert rec["primary_model"] == target_id
+    assert rec["api_path"] == "mantle_openai_responses"
+    if critical:
+        assert "image_input_vision" in rec["compatibility"]["native"]
+
+
+@pytest.mark.parametrize(("source_id", "target_id"), _GPT6_MODELS)
+@pytest.mark.parametrize(
+    ("residency", "extra_requirements", "prefix"),
+    (
+        ("global_allowed", {}, "global."),
+        ("geo_required", {"cris_geography": "us"}, "us."),
+    ),
+)
+def test_gpt6_governance_selects_exact_runtime_model_and_cris_id(
+    source_id, target_id, residency, extra_requirements, prefix
+):
+    requirements = {
+        "governance": ["guardrails"],
+        "data_residency": residency,
+        **extra_requirements,
+    }
+    rec = _recommend(
+        _workload(source={"model_ids": [source_id]}, requirements=requirements)
+    )
+    assert rec["decision_status"] == "recommended"
+    assert rec["primary_model"] == target_id
+    assert rec["api_path"] == "runtime_converse"
+    assert rec["invocation_model_id"] == prefix + target_id
+    delta = _delta_by_code(rec, "openai_sdk_to_converse")
+    assert "identity is preserved" in delta["description"]
+    assert "Bedrock-native model" not in delta["description"]
+
+
+@pytest.mark.parametrize(
+    ("source_id", "region", "geography", "unsupported_id"),
+    (
+        ("gpt-6-sol", "eu-west-1", "eu", "eu.openai.gpt-6-sol"),
+        ("gpt-6.1-sol", "ap-southeast-2", "au", "au.openai.gpt-6.1-sol"),
+    ),
+)
+def test_gpt6_unsupported_geo_profile_falls_back_without_fabricated_id(
+    source_id, region, geography, unsupported_id
+):
+    requirements = {
+        "governance": ["guardrails"],
+        "data_residency": "geo_required",
+        "cris_geography": geography,
+    }
+    rec = _recommend(
+        _workload(source={"model_ids": [source_id]}, requirements=requirements),
+        region=region,
+    )
+    assert rec["decision_status"] == "recommended"
+    assert rec["invocation_model_id"] != unsupported_id
+    assert not rec["invocation_model_id"].endswith(
+        f"openai.{source_id}"
+    )
+
+    conflict = _recommend(
+        _workload(
+            source={"model_ids": [source_id], "api_surface": "chat_completions"},
+            requirements={"api_continuity": "required", **requirements},
+        ),
+        region=region,
+    )
+    assert conflict["decision_status"] == "decision_required"
+    assert unsupported_id not in {
+        option["invocation_model_id"] for option in conflict["decision_options"]
+    }
+
+
+def test_active_catalog_contains_gpt6_profile_metadata_and_current_provenance():
+    assert OPENAI_CATALOG["verified_at"] == "2026-09-24"
+    for model_key, _ in _GPT6_MODELS:
+        catalog_key = oai._SOURCE_MODEL_KEYS[model_key]
+        assert set(OPENAI_CATALOG["models"][catalog_key]["inference_profiles"]) == {
+            "us",
+            "global",
+        }
+
+
+@pytest.mark.parametrize(("source_id", "target_id"), _GPT6_MODELS)
+def test_gpt6_chat_completions_preserves_chat_surface(source_id, target_id):
+    rec = _recommend(
+        _workload(
+            source={"model_ids": [source_id], "api_surface": "chat_completions"},
+            requirements={"api_continuity": "required"},
+        ),
+        region="us-east-1",
+    )
+    assert rec["primary_model"] == target_id
+    assert rec["api_path"] == "mantle_openai_chat"
+    assert "chat_completions_to_responses_required" not in _codes(rec["blocks"])
+
+
+def test_gpt6_mantle_skips_exact_model_outside_cataloged_region():
+    rec = _recommend(
+        _workload(
+            source={"model_ids": ["gpt-6-sol"]},
+            requirements={"api_continuity": "required"},
+        ),
+        region="us-west-2",
+    )
+    assert rec["decision_status"] == "recommended"
+    assert rec["primary_model"] != "openai.gpt-6-sol"
+    assert "fallback" in rec["rationale"][0]
+    assert "exact same model" not in rec["rationale"][0]
+
+
+def test_gpt6_chat_outside_every_mantle_footprint_returns_blocking_decision():
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements={"api_continuity": "required"},
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert rec["primary_model"] is None
+    assert "mantle_region_unavailable" in _codes(rec["blocks"])
+    assert "eu-west-1" in rec["blocks"][0]["message"]
+    assert {option["api_path"] for option in rec["decision_options"]} == {
+        "mantle_openai_chat",
+        "runtime_converse",
+    }
+
+
+def test_gpt6_chat_conflict_option_names_chat_completions_surface():
+    rec = _recommend(
+        _workload(
+            source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+            requirements={
+                "api_continuity": "required",
+                "governance": ["guardrails"],
+            },
+        ),
+        region="us-east-1",
+    )
+    option = next(
+        option
+        for option in rec["decision_options"]
+        if option["api_path"] == "mantle_openai_chat"
+    )
+    assert "Chat Completions surface" in option["reason"]
+    assert "Responses surface" not in option["reason"]
+
+
+def test_gpt6_chat_findings_preserve_chat_request_shapes():
+    rec = _recommend(
+        _workload(
+            source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+            requirements={
+                "api_continuity": "required",
+                "uses_n": True,
+                "uses_hosted_state": True,
+            },
+            detected_features=["tool_or_function_calling", "conversation_state"],
+        ),
+        region="us-east-1",
+    )
+    assert rec["api_path"] == "mantle_openai_chat"
+    assert "responses_no_n" not in _delta_codes(rec)
+    tool_delta = _delta_by_code(rec, "tool_result_shape")
+    assert "role: tool" in tool_delta["description"]
+    assert "tool_call_id" in tool_delta["description"]
+    assert "function_call_output" not in tool_delta["description"]
+    state_delta = _delta_by_code(rec, "conversation_state_ownership")
+    assert "application-owned message history" in state_delta["description"]
+    assert "previous_response_id" not in state_delta["description"]
+
+
+def test_gpt6_chat_conflict_outside_mantle_region_is_schema_valid():
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements={
+            "api_continuity": "required",
+            "governance": ["guardrails"],
+        },
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert {option["api_path"] for option in rec["decision_options"]} == {
+        "mantle_openai_chat",
+        "runtime_converse",
+    }
+    mantle = next(
+        option for option in rec["decision_options"]
+        if option["api_path"] == "mantle_openai_chat"
+    )
+    assert "Requires changing from eu-west-1" in mantle["reason"]
+
+
+def test_gpt6_chat_unknown_required_feature_outside_region_has_two_options():
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements={
+            "api_continuity": "required",
+            "critical_features": ["streaming"],
+        },
+        feature_status={"streaming": "unknown"},
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert len(rec["decision_options"]) >= 2
+
+
+@pytest.mark.parametrize(
+    "requirements",
+    (
+        {
+            "api_continuity": "preferred",
+            "governance": ["guardrails"],
+            "critical_features": ["streaming"],
+        },
+        {
+            "api_continuity": "preferred",
+            "governance": ["guardrails"],
+            "expected_output_tokens": 10000000,
+        },
+    ),
+)
+def test_runtime_unresolved_branches_outside_mantle_region_are_schema_valid(
+    requirements,
+):
+    workload = _workload(
+        source={"model_ids": ["gpt-6-sol"], "api_surface": "chat_completions"},
+        requirements=requirements,
+    )
+    out = _full_recommend(workload, region="eu-west-1")
+    jsonschema.validate(out, _OUT_SCHEMA)
+    rec = out["workloads"]["chat-svc"]
+    assert rec["decision_status"] == "decision_required"
+    assert {option["api_path"] for option in rec["decision_options"]} == {
+        "mantle_openai_chat",
+        "runtime_converse",
+    }
+    mantle = next(
+        option for option in rec["decision_options"]
+        if option["api_path"] == "mantle_openai_chat"
+    )
+    assert "Requires changing from eu-west-1" in mantle["reason"]
 
 
 # --- 11.2 Model-generation analysis ---------------------------------------
@@ -496,10 +772,10 @@ _OUT_SCHEMA = _json.loads(
 )
 
 
-def _full_recommend(workload):
+def _full_recommend(workload, region="us-east-2"):
     data = {
         "schema_version": 2,
-        "region": "us-east-2",
+        "region": region,
         "primary_unit": workload["workload_id"],
         "workloads": [workload],
     }
@@ -598,7 +874,7 @@ def test_tier_map_sol_cross_family_fallback_is_opus():
     from openai_model_recommendation import _converse_candidate_order
     order = _converse_candidate_order({"model_ids": ["gpt-5.6-sol"]})
     assert order[0] == "openai_gpt_5_6_sol"
-    assert order[1] == "anthropic_claude_opus_4_8"
+    assert order[1] == "anthropic_claude_opus_5_5"
 
 def test_tier_map_luna_source_maps_to_haiku_on_converse():
     # Same-model-first (2026-08-21): Luna keeps Luna; Haiku is the cross-family

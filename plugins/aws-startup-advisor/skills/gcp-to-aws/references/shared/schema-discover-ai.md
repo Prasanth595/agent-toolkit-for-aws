@@ -23,7 +23,9 @@ Focused profile of AI/ML workloads including models, capabilities, integration p
       "terraform": true,
       "application_code": true,
       "billing_data": false,
-      "openai_usage_api": false
+      "openai_usage_api": false,
+      "openrouter_usage_api": false,
+      "anthropic_usage_api": false
     }
   },
 
@@ -116,9 +118,11 @@ Focused profile of AI/ML workloads including models, capabilities, integration p
   "current_costs": {
     "monthly_ai_spend": 450,
     "services_detected": ["Vertex AI Predictions", "Generative AI API"],
-    "source": "billing_data|openai_usage_api|mixed",
+    "source": "billing_data|openai_usage_api|openrouter_usage_api|anthropic_usage_api|mixed",
     "breakdown": [
       { "provider": "openai", "monthly_spend": 105, "source": "openai_usage_api" },
+      { "provider": "openrouter", "monthly_spend": 60, "source": "openrouter_usage_api" },
+      { "provider": "anthropic", "monthly_spend": 40, "source": "anthropic_usage_api" },
       { "provider": "gcp", "monthly_spend": 345, "source": "billing_data" }
     ],
     "conflicting_sources": []
@@ -166,12 +170,12 @@ Focused profile of AI/ML workloads including models, capabilities, integration p
 - `integration.pattern` — How the app connects to AI (`direct_sdk`, `framework`, `rest_api`, `mixed`, or `unknown` for IaC-only)
 - `integration.capabilities_summary` — Union of all capabilities across all models
 - `infrastructure[]` — Terraform resources related to AI (empty array if no Terraform provided)
-- `current_costs` — Present ONLY if billing data OR OpenAI usage API data was provided; omitted entirely otherwise. `source` records provenance. Merge is provider-aware: billing CSVs measure GCP/Vertex spend, the usage API measures OpenAI spend — when both exist for DIFFERENT providers, `monthly_ai_spend` is their SUM with `source: "mixed"` and the per-provider split in `breakdown[]` (never max/pick-one — that drops a provider). Same-provider overlap: the usage API wins and the displaced figure lands in `conflicting_sources[]` (never silently resolved). `breakdown` is present only for `source: "mixed"`.
-- `detection_signals[]` — Raw signals from AI detection for transparency. `method` values include `terraform`, `code`, `live_gcloud`, and `openai_usage_api`.
+- `current_costs` — Present ONLY if billing data OR OpenAI usage API data OR OpenRouter usage API data OR Anthropic usage API data was provided; omitted entirely otherwise. `source` records provenance. Merge is provider-aware: billing CSVs measure GCP/Vertex spend, the OpenAI usage API measures OpenAI-direct spend, the OpenRouter usage API measures OpenRouter (router) spend, the Anthropic usage API measures Anthropic-direct spend — when sources exist for DIFFERENT providers, `monthly_ai_spend` is their SUM with `source: "mixed"` and the per-provider split in `breakdown[]` (never max/pick-one — that drops a provider). Same-provider overlap: the usage API wins and the displaced figure lands in `conflicting_sources[]` (never silently resolved). `breakdown` is present only for `source: "mixed"`. **`partial_window`/`cost_status` provenance (finding 14):** the Anthropic usage-API merge (`discover-anthropic-api.md` Step 4, both the single-provider and `mixed` cases) stamps that provider's own `metadata.partial_window` and `metadata.cost_status` onto its `current_costs`/`breakdown[]` entry at merge time, mirroring Azure's identical fix. Unlike Azure, neither of GCP's own Clarify files (`clarify-ai.md`'s full-flow Q15, `clarify-ai-only.md`'s Q3) auto-resolves `ai_monthly_spend` from `current_costs.monthly_ai_spend` at all today — both just ask the question with a plain default, with no shortcut that could trust a merged figure without checking it — so GCP has no equivalent of finding 14's bug to fix; the stamped fields exist here for forward compatibility if GCP's Clarify later adds the same auto-resolve shortcut Azure has. GCP's OpenAI/OpenRouter merges (`discover-openai-api.md`, `discover-openrouter-api.md`) do not yet stamp these fields — out of scope for finding 14, same as Azure's OpenRouter merge. A billing-only entry (no usage API contributed) has no `partial_window`/`cost_status` of its own — billing exports are always full-window, complete figures by construction.
+- `detection_signals[]` — Raw signals from AI detection for transparency. `method` values include `terraform`, `code`, `live_gcloud`, `openai_usage_api`, `openrouter_usage_api`, and `anthropic_usage_api`.
 
 **Conditional sections:**
 
-- `current_costs` — Include ONLY if billing data was provided (billing discovery ran) or OpenAI usage API discovery ran (`discover-openai-api.md`). Omit entirely if neither.
+- `current_costs` — Include ONLY if billing data was provided (billing discovery ran), OpenAI usage API discovery ran (`discover-openai-api.md`), OpenRouter usage API discovery ran (`discover-openrouter-api.md`), or Anthropic usage API discovery ran (`discover-anthropic-api.md`). Omit entirely if none.
 - `infrastructure` — Set to `[]` if no Terraform files were provided (IaC discovery did not run).
 - `agentic_profile` — Include ONLY if agentic signals detected (`is_agentic: true`). Omit entirely otherwise.
 - `tool_manifest` — Include ONLY if `agentic_profile` exists. Set to `[]` if agentic but no tools detected.
@@ -237,8 +241,10 @@ Generated by `discover-app-code.md` Step 5B. Splits the detected AI usage into d
 - `workloads[]` is always present (empty array if no AI detected)
 - Every `workloads[].model_id` MUST exist in `models[].model_id`
 - `workload_id` is unique within the array and deterministic across re-runs
-- `call_sites` is non-empty for every workload entry
-- `call_sites[].file` uses repo-relative POSIX paths (forward slashes, no absolute paths)
+- `call_sites` is non-empty for every workload entry — EXCEPT a usage-only workload (see below), where the sentinel form satisfies "non-empty" without inventing a location that was never observed
+- `call_sites[].file` uses repo-relative POSIX paths (forward slashes, no absolute paths) — EXCEPT the usage-only sentinel `"<usage_api>"`, which is not a real path and must not be treated as one
+
+**Usage-only workloads (a model billed via a usage API but never located in code — e.g. `discover-openrouter-api.md` Step 4).** A usage-only model has no call site to report; do NOT invent one (a fabricated `{file, line}` would misattribute the finding to code that doesn't call that model). Instead: `sdk_method: "usage_api"`, `structured_output: false`, `capability_confidence: "low"` (never located in code, so capability is a guess from usage volume alone — `"text_generation"` unless the usage API's own data names something more specific), and `call_sites: [{"file": "<usage_api>", "line": 0}]` — a fixed sentinel, not a real path, satisfying the non-empty-`call_sites` rule above without fabricating a location. Every consumer of `call_sites[].file` (there are none downstream today — Design reads only `workload_id`/`model_id`/`capability`/`capability_confidence`, per `design-ai.md`) must treat this sentinel as "no location," not as a literal file to open.
 
 ---
 
