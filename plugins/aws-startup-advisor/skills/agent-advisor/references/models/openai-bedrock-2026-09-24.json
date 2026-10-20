@@ -237,6 +237,106 @@
         }
       }
     },
+    "openai_gpt_6_astra": {
+      "display_name": "OpenAI GPT-6 Astra (on Bedrock)",
+      "family": "openai_gpt_6",
+      "generation": "reasoning",
+      "version": "6",
+      "class": "reasoning",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
+      "region_availability": {
+        "commercial": ["us-east-1", "us-west-2"],
+        "govcloud": [],
+        "evidence": "AWS GPT-6 Astra model card and regional table, retrieved 2026-10-10."
+      },
+      "capabilities": ["reasoning", "tool_or_function_calling", "image_input_vision"],
+      "capability_source": "AWS GPT-6 Astra model card, retrieved 2026-10-10: text and image input, tool calling, 1.05M context and 128K output.",
+      "paths": {
+        "mantle_openai_responses": {"available": true, "model_id": "openai.gpt-6-astra", "requires_cris": false, "evidence": "AWS model card: Mantle Responses in us-east-1 and us-west-2."},
+        "mantle_openai_chat": {"available": true, "model_id": "openai.gpt-6-astra", "requires_cris": false, "evidence": "AWS model card: Mantle Chat Completions supported."},
+        "runtime_converse": {"available": true, "model_id": "openai.gpt-6-astra", "requires_cris": true, "evidence": "AWS model card: US and Global CRIS support Responses, Chat Completions, and Converse; Invoke is unsupported."}
+      }
+    },
+    "openai_gpt_6_sol": {
+      "display_name": "OpenAI GPT-6 Sol (on Bedrock)",
+      "family": "openai_gpt_6",
+      "generation": "reasoning",
+      "version": "6",
+      "class": "reasoning",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
+      "region_availability": {
+        "commercial": ["us-east-1"],
+        "govcloud": [],
+        "evidence": "AWS GPT-6 Sol model card and regional table, retrieved 2026-10-10."
+      },
+      "capabilities": ["reasoning", "tool_or_function_calling", "image_input_vision"],
+      "capability_source": "AWS GPT-6 Sol model card, retrieved 2026-10-10: text and image input, tool calling, 1.05M context and 128K output.",
+      "paths": {
+        "mantle_openai_responses": {"available": true, "model_id": "openai.gpt-6-sol", "requires_cris": false, "evidence": "AWS model card: Mantle Responses in us-east-1."},
+        "mantle_openai_chat": {"available": true, "model_id": "openai.gpt-6-sol", "requires_cris": false, "evidence": "AWS model card: Mantle Chat Completions supported."},
+        "runtime_converse": {"available": true, "model_id": "openai.gpt-6-sol", "requires_cris": true, "evidence": "AWS model card: US and Global CRIS support Responses, Chat Completions, Converse, and Invoke; EU/AU Geo profiles are unsupported."}
+      }
+    },
+    "openai_gpt_6_luna": {
+      "display_name": "OpenAI GPT-6 Luna (on Bedrock)",
+      "family": "openai_gpt_6",
+      "generation": "reasoning",
+      "version": "6",
+      "class": "reasoning",
+      "context_window": 1050000,
+      "output_token_ceiling": 128000,
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
+      "region_availability": {
+        "commercial": ["us-east-1"],
+        "govcloud": [],
+        "evidence": "AWS GPT-6 Luna model card and regional table, retrieved 2026-10-10."
+      },
+      "capabilities": ["reasoning", "tool_or_function_calling", "image_input_vision"],
+      "capability_source": "AWS GPT-6 Luna model card, retrieved 2026-10-10: text and image input, tool calling, 1.05M context and 128K output.",
+      "paths": {
+        "mantle_openai_responses": {"available": true, "model_id": "openai.gpt-6-luna", "requires_cris": false, "evidence": "AWS model card: Mantle Responses in us-east-1."},
+        "mantle_openai_chat": {"available": true, "model_id": "openai.gpt-6-luna", "requires_cris": false, "evidence": "AWS model card: Mantle Chat Completions supported."},
+        "runtime_converse": {"available": true, "model_id": "openai.gpt-6-luna", "requires_cris": true, "evidence": "AWS model card: US and Global CRIS support Responses, Chat Completions, Converse, and Invoke."}
+      }
+    },
+    "openai_gpt_6_1_sol": {
+      "display_name": "OpenAI GPT-6.1 Sol (on Bedrock)",
+      "family": "openai_gpt_6",
+      "generation": "reasoning",
+      "version": "6.1",
+      "class": "reasoning",
+      "context_window": 1050000,
+      "output_token_ceiling": 131072,
+      "inference_profiles": {
+        "us": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"],
+        "global": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
+      },
+      "region_availability": {
+        "commercial": ["us-east-1"],
+        "govcloud": [],
+        "evidence": "AWS GPT-6.1 Sol model card and regional table, retrieved 2026-10-10."
+      },
+      "capabilities": ["reasoning", "tool_or_function_calling", "image_input_vision"],
+      "capability_source": "AWS GPT-6.1 Sol model card, retrieved 2026-10-10: text and image input, tool calling, 1.05M context and 131072 output.",
+      "paths": {
+        "mantle_openai_responses": {"available": true, "model_id": "openai.gpt-6.1-sol", "requires_cris": false, "evidence": "AWS model card: Mantle Responses in us-east-1."},
+        "mantle_openai_chat": {"available": true, "model_id": "openai.gpt-6.1-sol", "requires_cris": false, "evidence": "AWS model card: Mantle Chat Completions supported."},
+        "runtime_converse": {"available": true, "model_id": "openai.gpt-6.1-sol", "requires_cris": true, "evidence": "AWS model card: US and Global CRIS support Responses, Chat Completions, Converse, and Invoke; EU/AU Geo profiles are unsupported."}
+      }
+    },
     "anthropic_claude_sonnet_5": {
       "display_name": "Claude Sonnet 5 (Converse tier match for GPT-5.6 Terra / 5.5 / 5.4)",
       "family": "anthropic_claude",
