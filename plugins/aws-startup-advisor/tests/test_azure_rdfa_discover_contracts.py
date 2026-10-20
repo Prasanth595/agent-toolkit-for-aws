@@ -54,7 +54,13 @@ def _normalize_pool(row: dict) -> dict:
         desired > 0 and minimum == maximum == 0
     ):
         minimum = maximum = desired
+    # EKS requires maxSize >= 1 (Capacity minimum). A legitimate zero-node Azure
+    # user pool would otherwise normalize to max_size 0 and be rejected by the EKS
+    # API. Floor the maximum to 1 while keeping desired/minimum at their real zero.
+    if maximum == 0:
+        maximum = 1
     assert minimum <= desired <= maximum
+    assert maximum >= 1
     return {"desired_size": desired, "min_size": minimum, "max_size": maximum}
 
 
@@ -234,6 +240,14 @@ def test_fixed_and_autoscaled_aks_bounds_are_valid() -> None:
     autoscaled = _normalize_pool(pools[2])
     assert fixed == {"desired_size": 3, "min_size": 3, "max_size": 3}
     assert autoscaled == {"desired_size": 1, "min_size": 0, "max_size": 2}
+
+
+def test_zero_node_aks_pool_gets_eks_valid_max_size() -> None:
+    """Azure permits a user pool with zero nodes. Normalizing its absent 0/0 bounds
+    to 0/0/0 would emit max_size 0, which the EKS API rejects (maxSize minimum 1).
+    Keep desired/minimum at the real zero and floor the maximum to 1."""
+    zero_node = {"Nodes": "0", "Autoscale": "false", "AutoscaleMin": "0", "AutoscaleMax": "0"}
+    assert _normalize_pool(zero_node) == {"desired_size": 0, "min_size": 0, "max_size": 1}
 
 
 def test_vm_os_disk_maps_to_canonical_nested_shape() -> None:

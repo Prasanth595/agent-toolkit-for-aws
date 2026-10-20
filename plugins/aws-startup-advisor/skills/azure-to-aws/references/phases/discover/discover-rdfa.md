@@ -179,8 +179,11 @@ or container-level identity — `ID` is always the parent's id):
   `AutoscaleMax: "0"`, treat those zero bounds as the producer's absent-bounds sentinel and
   emit `min_count == max_count == node_count`. Otherwise preserve the autoscaled pool's
   actual bounds, including a legitimate minimum zero (for example min `0`, desired `1`,
-  max `2`). The downstream EKS contract must always satisfy
-  `min_count <= node_count <= max_count`.
+  max `2`). **Zero-node pools:** Azure permits a user pool with `Nodes: "0"`, which the
+  rule above would normalize to `0 / 0 / 0`; EKS rejects that because `maxSize` has a
+  minimum of `1` (the EKS Capacity contract), so floor `max_count` to `1` while keeping
+  `node_count` and `min_count` at their real `0`. The downstream EKS contract must always
+  satisfy `min_count <= node_count <= max_count` **and** `max_count >= 1`.
 - **CONTAINER:** group all rows sharing one `ID` into a SINGLE inventory entry
   (`azure_type: Microsoft.ContainerInstance/containerGroups`). Take group-level fields
   (`Sku`, `InstanceOSType`) from the first row. Collect per-container fields into
