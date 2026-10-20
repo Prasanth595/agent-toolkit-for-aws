@@ -92,12 +92,23 @@ reuse the Anthropic `preserve_messages_api` switch):
 - minimum context window and expected output-token ceiling?
 - allow Global CRIS or require a geography-scoped profile (runtime Converse only)?
 
-OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-09-24.json` catalog):
-GPT-5.x on Mantle is Responses-only, so a Chat Completions source is reshaped, not routed to
-`mantle_openai_chat`. GPT-5.6 sources additionally carry a SAME-MODEL `runtime_converse`
-candidate via CRIS ids (verified 2026-08-21) — governance requirements no longer force a
-family switch for them, while GPT-5.5/5.4 remain mantle-only. Azure OpenAI remains an
-explicit `provider_module_pending` generic result.
+OpenAI is handled by a dedicated provider module (`openai-bedrock-2026-09-24.json` catalog).
+Recognized GPT-5.6 and GPT-6 source identities are evaluated against their exact same-model
+catalog entry before capability/numeric fallbacks. GPT-5.x on Mantle is Responses-only, so a Chat
+Completions source is reshaped rather than routed to `mantle_openai_chat`. GPT-6 Chat Completions
+sources with required or preferred API continuity instead keep that surface through
+`mantle_openai_chat`; GPT-6 Responses sources use `mantle_openai_responses`. Both Mantle paths are
+in-region only and enforce the selected model's cataloged `region_availability`: Astra reaches
+us-east-1 and us-west-2, while Sol, Luna, and 6.1 Sol reach us-east-1 only. Outside that footprint,
+the engine skips the same-model Mantle candidate and evaluates its existing capability/numeric
+fallbacks. Governance requirements select the exact same GPT-5.6 or GPT-6 model through
+`runtime_converse` only when the requested Global or geography-scoped CRIS profile is cataloged
+for that model and source region; an unsupported profile falls through to an eligible documented
+runtime candidate or remains an explicit decision. GPT-5.5/5.4 remain mantle-only. GPT-6 Astra's
+runtime surface lacks `Invoke` support (Responses/Chat Completions/Converse only), while
+Sol/Luna/6.1 Sol support all four APIs. Every selected path remains provisional until it is probed
+in the target account and region. Azure OpenAI remains an explicit `provider_module_pending`
+generic result.
 
 **OpenRouter/LiteLLM-sourced OpenAI models still use the OpenAI module.** Discover records the
 underlying `provider` (e.g. `openai`) even when the calls transit a gateway — see `discover.md`'s
@@ -256,11 +267,11 @@ uv run --with boto3 --with anthropic python "$SCRIPTS/verify_model_path.py" \
 ```
 
 **Each API path needs its own client library.** The line above covers the Anthropic and runtime
-paths. A workload on `mantle_openai_responses` additionally needs `--with openai --with
-aws-bedrock-token-generator`; without them that workload comes back `failed` with a
-`RuntimeError` naming the missing package, while every other workload still probes normally. So a
-`failed` status here can mean "the dependency was absent", not "the model is unavailable" — read
-the error type before treating it as a capability finding.
+paths. A workload on `mantle_openai_responses` or `mantle_openai_chat` additionally needs
+`--with openai --with aws-bedrock-token-generator`; without them that workload comes back
+`failed` with a `RuntimeError` naming the missing package, while every other workload still
+probes normally. So a `failed` status here can mean "the dependency was absent", not "the model
+is unavailable" — read the error type before treating it as a capability finding.
 
 The verifier must call only the recorded `invocation_model_id`; it never substitutes another
 model. Runtime recommendations with an unresolved CRIS profile produce `needs_resolution`.
