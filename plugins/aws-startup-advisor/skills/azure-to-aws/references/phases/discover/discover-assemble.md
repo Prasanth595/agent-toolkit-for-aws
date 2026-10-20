@@ -5,6 +5,7 @@ _reads:
   - iac (fragment contribution)
   - live (fragment contribution, when a live-capture/manifest.json was written by the live-az pre-work)
   - rdfa (fragment contribution, when rdfa-cache/manifest.json identifies prepared report data)
+  - rdfa-cache/preparation-result.json (main-window warnings, including when no success manifest exists)
   - app-code (fragment contribution, when source code with an AI signal is present)
 _produces:
   - azure-resource-inventory.json
@@ -50,8 +51,12 @@ the validation checklist.
 5. **Every disagreement becomes a drift entry.** Record both values, both sources,
    and which won, so the report can say "your Terraform declares `Standard_D2s_v3`,
    your tenant is running `Standard_D4s_v3`" instead of quietly picking one.
-6. **Merge the fragments' `warnings[]` into one top-level array** on the inventory,
-   preserving every entry. The array is always present, `[]` when clean. Every `code`
+6. **Merge the fragments' `warnings[]` and RDfA preparation warnings into one top-level
+   array** on the inventory, preserving every entry. Always read
+   `rdfa-cache/preparation-result.json` when present, even when no RDfA success manifest
+   exists and the fragment did not dispatch. If another producer creates the inventory,
+   retain those preparation warnings there; on a failed-RDfA-only run, surface them in the
+   diagnostic before stopping. The array is always present, `[]` when clean. Every `code`
    comes from the closed vocabulary in `schema-discover-azure.md` § Warnings — do not
    invent one, because an invented code makes the report's grouping unstable and any
    fixture assertion on a code unreliable.

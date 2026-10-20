@@ -88,8 +88,13 @@ execution capability; the dispatched `_agent: rw` worker does not.
 ### RDfA detection, guidance, and preparation
 
 1. Detect candidate `*ResourcesReport*.zip` files and extracted directories containing
-   `Inventory_*.json`, including a path explicitly named by the user. Do not treat files
-   under `$MIGRATION_DIR/rdfa-cache/` as source candidates.
+   `Inventory_*.json`, including a path explicitly named by the user. On re-entry, first
+   seed candidates from the existing manifest's `source_path` when that external path
+   still exists and can be fingerprinted; the user does not need to name it again. A
+   newly confirmed replacement supersedes that recorded candidate. Do not treat files
+   under `$MIGRATION_DIR/rdfa-cache/` as source candidates. If the recorded source is
+   gone or its fingerprint changed, invalidate its prepared cache; a changed source that
+   still exists remains a candidate and must be prepared again.
 2. If no candidate exists, output `discover-rdfa.md`'s optional-accuracy informational
    block now (when live capture also produced no manifest). This is deliberately here,
    because an absent report makes the `rdfa` fragment trigger false.
@@ -102,10 +107,25 @@ execution capability; the dispatched `_agent: rw` worker does not.
    remains the external directory/ZIP; generated files are never source candidates.
 5. In this MAIN window, extract ZIPs (including nested subscription ZIPs), validate JSON,
    flatten each producer metrics object by concatenating its `Metrics` array, and project
-   large inputs. Write prepared files under `$MIGRATION_DIR/rdfa-cache/prepared/` and the
-   identity manifest last. Use Python's standard `zipfile`/`json` libraries if needed;
-   delete any temporary script after it runs. The dispatched RDfA fragment only reads
-   these prepared files.
+   large inputs. Write prepared files under `$MIGRATION_DIR/rdfa-cache/prepared/`. Before
+   preparation, create `$MIGRATION_DIR/rdfa-cache/preparation-result.json`; update it
+   atomically with `selected_source`, `status` (`prepared`, `partial`, or `failed`), the
+   count of valid reports, and schema-shaped `warnings[]`. Write the successful identity
+   manifest last, and only when at least one report was prepared. Use Python's standard
+   `zipfile`/`json` libraries if needed; delete any temporary script after it runs. The
+   dispatched RDfA fragment only reads these prepared files.
+6. The MAIN window owns every preparation failure because the RDfA fragment cannot
+   dispatch without a success manifest. Catch a corrupt or password-protected ZIP, an
+   invalid `Inventory_*.json`/`Metrics_*.json`, and a matching archive with no report
+   files. Record `rdfa_report_unreadable` in `preparation-result.json`, with the failing
+   path in `identifier` and the failure in `detail`. Skip only that report: for a bad
+   nested archive, continue preparing every other valid inner ZIP and use `partial` when
+   any succeeds. For a corrupt selected report with no valid content, use `failed`, leave
+   `manifest.json` absent, and output the warning plus the optional-accuracy fallback.
+   Such a failed preparation is not itself a migratable source: continue through assembly
+   when IaC, live capture, or app code can produce an artifact; otherwise surface the
+   warning and fallback before the entry gate reports that no artifact-producing source
+   remains.
 
 ## Pre-dispatch main-window action (live `az` consent + capture)
 

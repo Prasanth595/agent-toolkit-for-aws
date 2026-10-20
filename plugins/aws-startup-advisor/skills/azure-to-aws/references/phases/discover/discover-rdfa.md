@@ -64,29 +64,12 @@ one another.
 
 ### Corrupt or unreadable reports
 
-A report that exists but cannot actually be read is a real, documented failure mode for
-this tool (RDfA's own `docs/consumption-data.md` has a "Recovering from a consumption
-crash" section for exactly this reason). Wrap the extraction step and every
-`Inventory_*.json`/`Metrics_*.json` parse in a try/except. On any of:
-
-- (a) a corrupt or password-protected ZIP that extraction raises on,
-- (b) a file that extracts/exists but fails to parse as JSON (a truncated run), or
-- (c) a ZIP that matched `*ResourcesReport*.zip` by name but, once extracted, contains
-  none of `Inventory_*.json`/`Metrics_*.json`/`Consumption_*.csv`,
-
-do **not** silently treat the run as "no RDfA report found" (that would discard the
-informational block's context, which specifically distinguishes "nothing to read" from
-"something was there but broken") and do **not** halt the whole Discover phase over one
-bad file. Instead: record one `warnings[]` entry with code `rdfa_report_unreadable`
-(`schema-discover-azure.md` § Warnings), naming the file (`identifier`, since a corrupt
-report has no reliable `azure_id` to attach to) and the failure in `detail` (e.g. "RDfA
-report `AllSubscriptions_ResourcesReport_2024-03-01.zip` could not be read: zip extraction
-failed (corrupt or password-protected archive). RDfA-sourced resources and measured
-utilization are unavailable this run."); skip that one file/report only (if the outer
-multi-subscription case hits this on one inner zip, continue processing the other inner
-zips normally — the failure is per-file, not per-run); and fall back to the informational
-block for every other purpose, exactly as if no RDfA report had been found at all (the
-warning is additive context, not a replacement for that fallback).
+`discover.md`'s executable main-window action owns corrupt ZIP, invalid JSON, empty-report,
+and partial nested-archive handling. It writes
+`$MIGRATION_DIR/rdfa-cache/preparation-result.json` before a success manifest can exist,
+so assembly can retain every `rdfa_report_unreadable` warning even when this fragment does
+not dispatch. This file-only fragment must not retry extraction or redefine that failure
+result.
 
 ### Tie-break when multiple ZIPs match
 

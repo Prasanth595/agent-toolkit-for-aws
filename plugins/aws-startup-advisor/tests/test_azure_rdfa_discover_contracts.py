@@ -83,6 +83,47 @@ def _source_manifest(path: str, source_type: str, files: dict[str, bytes]) -> di
     }
 
 
+def _discover_candidates(workspace: Path, prior_manifest: dict | None = None) -> list[Path]:
+    candidates = list(workspace.rglob("*ResourcesReport*.zip"))
+    candidates.extend({path.parent for path in workspace.rglob("Inventory_*.json")})
+    if prior_manifest:
+        prior_source = Path(prior_manifest["source_path"])
+        if prior_source.exists() and prior_source not in candidates:
+            candidates.append(prior_source)
+    return candidates
+
+
+def _prepare_zip(source: Path, output: Path) -> tuple[list[dict], list[dict]]:
+    inventories = []
+    warnings = []
+
+    def prepare_archive(archive: Path) -> None:
+        try:
+            with zipfile.ZipFile(archive) as report:
+                report.extractall(output / archive.stem)
+        except (OSError, zipfile.BadZipFile, RuntimeError) as error:
+            warnings.append({
+                "code": "rdfa_report_unreadable",
+                "identifier": archive.name,
+                "detail": str(error),
+            })
+            return
+        for nested in (output / archive.stem).rglob("*.zip"):
+            prepare_archive(nested)
+        for inventory in (output / archive.stem).rglob("Inventory_*.json"):
+            try:
+                inventories.append(json.loads(inventory.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError) as error:
+                warnings.append({
+                    "code": "rdfa_report_unreadable",
+                    "identifier": inventory.name,
+                    "detail": str(error),
+                })
+
+    prepare_archive(source)
+    return inventories, warnings
+
+
 def _discover_outputs(*, iac=False, live=False, rdfa=False, app_ai=False) -> set[str]:
     outputs = set()
     if iac or live or rdfa:
@@ -147,6 +188,44 @@ def test_source_identity_reuses_only_exact_source_and_replacement_wins() -> None
     assert first != changed_zip
 
 
+def test_external_directory_reentry_seeds_recorded_source_without_new_input(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    external = tmp_path / "outside-workspace" / "report"
+    workspace.mkdir()
+    external.mkdir(parents=True)
+    inventory = external / "Inventory_external.json"
+    inventory.write_text('{"VirtualMachines": []}', encoding="utf-8")
+    prior = _source_manifest(str(external), "directory", {inventory.name: inventory.read_bytes()})
+
+    assert _discover_candidates(workspace, prior) == [external]
+
+
+def test_corrupt_selected_report_records_preparation_warning(tmp_path: Path) -> None:
+    corrupt = tmp_path / "Selected_ResourcesReport_2025.zip"
+    corrupt.write_bytes(b"not a zip")
+
+    inventories, warnings = _prepare_zip(corrupt, tmp_path / "prepared")
+
+    assert inventories == []
+    assert warnings[0]["code"] == "rdfa_report_unreadable"
+    assert warnings[0]["identifier"] == corrupt.name
+
+
+def test_partial_nested_report_keeps_valid_inner_and_warns_for_bad_inner(tmp_path: Path) -> None:
+    good_inner = tmp_path / "good.zip"
+    with zipfile.ZipFile(good_inner, "w") as report:
+        report.writestr("Inventory_good.json", '{"VirtualMachines": []}')
+    outer = tmp_path / "AllSubscriptions_ResourcesReport_2025.zip"
+    with zipfile.ZipFile(outer, "w") as report:
+        report.write(good_inner, "good.zip")
+        report.writestr("bad.zip", b"not a zip")
+
+    inventories, warnings = _prepare_zip(outer, tmp_path / "prepared")
+
+    assert inventories == [{"VirtualMachines": []}]
+    assert any(warning["identifier"] == "bad.zip" for warning in warnings)
+
+
 def test_fixed_and_autoscaled_aks_bounds_are_valid() -> None:
     pools = _load("inventory.json")["AKS"]
     fixed = _normalize_pool(pools[0])
@@ -193,6 +272,17 @@ def test_absent_report_guidance_is_reachable_before_trigger() -> None:
     guidance = phase.index("If no candidate exists, output")
     dispatch = phase.index("Run each fragment whose `_trigger` holds")
     assert guidance < dispatch
+
+
+def test_main_window_owns_reentry_and_preparation_failure_contracts() -> None:
+    phase = _text(DISCOVER)
+    assembler = _text(DISCOVER_ASSEMBLE)
+    assert "existing manifest's `source_path`" in phase
+    assert "preparation-result.json" in phase
+    assert "rdfa_report_unreadable" in phase
+    assert "corrupt or password-protected ZIP" in phase
+    assert "continue preparing every other valid inner ZIP" in phase
+    assert "preparation-result.json" in assembler
 
 
 def test_discover_and_assembler_include_rdfa_everywhere() -> None:
