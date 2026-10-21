@@ -1,20 +1,15 @@
 # Behavior Delta Detection
 
-This skill enumerates known parameter-surface differences between a source LLM provider (OpenAI, Gemini) and Bedrock. The **analyzer** uses it to find user-visible occurrences in source code; the **rewriter** uses it to confirm each user-visible change with the user before modifying code.
+This skill enumerates known parameter-surface differences between a source LLM provider (OpenAI, Gemini, Anthropic) and Bedrock. The **analyzer** uses it to find user-visible occurrences in source code; the orchestration checkpoint confirms each user-visible change before the **rewriter** applies it.
 
 The motivation is to prevent silent UX changes during migration. Example: OpenAI accepts `temperature ∈ [0, 2]` but Bedrock/Claude only accepts `[0, 1]`. A naive rewriter sees a UI slider with `max=2` and silently caps it to `1`, removing the upper half of the range without consent. This skill is the safeguard.
 
 ## When to load
 
-For Track 2 with `source_provider` equal to `openai` or `google`, use the resolved
-source/target mapping to select the section below. Do not skip OpenAI endpoint/API deltas
-just because `same_model_family` is true. Anthropic same-model and custom OpenAI-compatible
-providers retain their existing v1 behavior (`behavior_deltas: []`).
+- Track 2 migration AND
+- `source_provider ∈ {openai, google, anthropic}` (the analyzer emits `google` for both Gemini API and Vertex AI).
 
-`same_model_family` means the exact model is preserved, not merely the vendor. Compare the
-source id with the target after removing supported Bedrock profile/provider prefixes for
-identity comparison only. Keep the actual invocation id unchanged. Pro-to-Astra is a model
-change and requires quality evaluation.
+`same_model_family` means exact model identity/version, verified with `scripts/model_identity.py` for every source→validated-target pair. It does not mean the same provider. Anthropic version changes (including Opus 4.8 → 5.5) load all target checks in `references/anthropic-to-bedrock.md`; exact same-model moves still check the target API/path. Custom OpenAI-compatible providers (Together, Fireworks, etc.) remain outside these recipes — emit `behavior_deltas: []`.
 
 | Source | Resolved target                                                        | What to load                                                    |
 | ------ | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -29,12 +24,13 @@ selected model/API; do not infer unchanged parameters from unchanged model ident
 
 ## Choose the right reference
 
-| source_provider | reference file                  |
-| --------------- | ------------------------------- |
-| openai          | references/openai-to-bedrock.md |
-| google          | references/gemini-to-bedrock.md |
+| source_provider | reference file                     |
+| --------------- | ---------------------------------- |
+| openai          | references/openai-to-bedrock.md    |
+| google          | references/gemini-to-bedrock.md    |
+| anthropic       | references/anthropic-to-bedrock.md |
 
-Read ONLY the matching reference. Do not read both.
+Read the matching reference and any target-specific sections it explicitly references.
 
 ---
 

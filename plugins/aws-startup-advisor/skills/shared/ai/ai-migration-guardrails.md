@@ -38,7 +38,7 @@ AgentCore services have different regional footprints. Always validate via `aws_
 
 Bedrock Mantle serves OpenAI-compatible and Anthropic-compatible APIs on Bedrock.
 
-### OpenAI proprietary models (GPT-5.6 / 5.5 / 5.4) — TPM only, no RPM
+### OpenAI proprietary models (GPT-6 / GPT-5.6 / 5.5 / 5.4) — TPM only, no RPM
 
 Inference on `bedrock-mantle` for these models is governed by **two per-model, per-region quotas: input tokens per minute and output tokens per minute. There is no requests-per-minute quota.** Exceeding a TPM quota returns HTTP 429. Cached input tokens read through prompt caching **do not count** against the input-TPM quota.
 
@@ -48,9 +48,9 @@ Inference on `bedrock-mantle` for these models is governed by **two per-model, p
 | Medium          | Medium     | Monitor 429s against **token** throughput, not request rate; enable prompt caching                 |
 | High            | High       | Enable prompt caching first (cached input is exempt from input TPM), then request a quota increase |
 
-**GPT-6 Astra and GPT-5.6 have `bedrock-runtime` alternatives.** GPT-5.5 and GPT-5.4 are `bedrock-mantle` only and in-region only — for them, "switch to `bedrock-runtime`" requires moving to a different model (Bedrock-native or `gpt-oss`), a model change with its own eval cost. GPT-5.6 Sol/Terra/Luna have a runtime path via CRIS profiles (`us.`/`in.`/`global.`); use their own quota family and Global pricing. Astra uses only `us.` / `global.` CRIS and its separate caller-region matrix. Scaling levers for GPT-5.x mantle, in order:
+**The `bedrock-runtime` fallback exists only for GPT-5.6 and GPT-6 (Astra, Sol, Luna, 6.1 Sol).** GPT-5.5 and GPT-5.4 are `bedrock-mantle` only and in-region only — for them, "switch to `bedrock-runtime`" requires moving to a different model (Bedrock-native or `gpt-oss`), a model change with its own eval cost. GPT-5.6 Sol/Terra/Luna and GPT-6 Astra/Sol/Luna/6.1 Sol DO have a `bedrock-runtime` path via CRIS inference profiles (GPT-5.6 `us.`/`in.`/`global.`, GPT-6 `us.`/`global.` prefixed ids; the model cards recommend runtime for new applications) — a legitimate endpoint option with its own quota family, and on Global CRIS it is also the cost-parity option. Scaling levers on the mantle path, in order:
 
-1. Prompt caching (GPT-5.6 only) — 90% off cached input and exempt from the input-TPM quota
+1. Prompt caching (GPT-5.6 and GPT-6 only) — 90% off cached input and exempt from the input-TPM quota
 2. Exponential backoff with a bounded retry count (`max_retries` on the OpenAI SDK)
 3. Spreading load across minutes and ramping request rate gradually rather than bursting
 4. A Service Quotas increase for that model's input/output TPM in that region
@@ -131,7 +131,7 @@ Before recommending any Bedrock model in an agentic design:
 
 For agentic workload cost estimation:
 
-1. **Primary:** `references/shared/pricing-cache.md` (±5-10% accuracy)
+1. **Primary:** `references/vendored/ai/bedrock-pricing-cache.md` (±15-25% accuracy)
 2. **Fallback:** `references/shared/pricing-fallback.md` (cache-miss → `estimated`/`unavailable`)
 
 AgentCore Runtime and Harness pricing: consumption-based, no upfront cost. Include in estimate only if the user selects Harness or Strands path.

@@ -59,14 +59,15 @@ def is_embedding_model(model_id: str) -> bool:
 
 def is_mantle_model(model_id: str) -> bool:
     """Pure: ids that must be probed via the mantle Responses API rather than
-    Converse/InvokeModel. Matches BARE GPT-5 ids and `openai.gpt-6-astra`,
+    Converse/InvokeModel. Matches the BARE proprietary GPT ids (`openai.gpt-5*`,
+    `openai.gpt-6*` — covers GPT-5.5/5.4/5.6 and GPT-6 Astra/Sol/Luna/6.1 Sol),
     which are mantle-served. Deliberately does NOT match:
     - gpt-oss ids (Converse-capable on bedrock-runtime), and
-    - GPT-6 Astra / GPT-5.6 CRIS profile ids — those are
+    - GPT-5.6/GPT-6 CRIS profile ids (`us.`/`in.`/`global.` prefixed) — those are
       bedrock-runtime targets where Converse IS supported, so falling through to
       the standard Converse probe is the correct behavior, not an accident."""
     mid = model_id.lower()
-    return (mid.startswith("openai.gpt-5") or mid == "openai.gpt-6-astra") and "oss" not in mid
+    return (mid.startswith("openai.gpt-5") or mid.startswith("openai.gpt-6")) and "oss" not in mid
 
 
 
@@ -222,6 +223,12 @@ def _embed_request_body(model_id: str) -> dict | None:
 
 def probe_model(client, model_id: str) -> dict:
     """Real minimal probe: Converse for chat models, InvokeModel for embeddings."""
+    region = getattr(getattr(client, "meta", None), "region_name", None)
+    if model_id == "anthropic.claude-opus-5-5" and region != "eu-west-2":
+        return {"ok": False, "reason": "inference_profile_required",
+                "detail": "Opus 5.5 runtime in-region access is documented only in eu-west-2 "
+                          "(verified 2026-10-03). Elsewhere, use a supported Geo/Global "
+                          "profile for Converse, or verify a supported Mantle Messages path separately."}
     from botocore.exceptions import BotoCoreError, ClientError
     try:
         if is_embedding_model(model_id):

@@ -39,7 +39,7 @@ Read from `ai-workload-profile.json`:
 | ------------------------- | -------------------------- | ---------------------------------------------------------------------------------- |
 | `model_count`             | `ai-workload-profile.json` | Count of distinct entries in `models[]`                                            |
 | `is_agentic`              | `ai-workload-profile.json` | `agentic_profile.is_agentic == true`                                               |
-| `has_multi_model_routing` | `ai-workload-profile.json` | `integration.gateway_type` is `"openrouter"`, `"litellm"`, `"kong"`, or `"apigee"` |
+| `has_multi_model_routing` | `ai-workload-profile.json` | `integration.gateway_type` is `"openrouter"`, `"litellm"`, `"kong"`, `"apigee"`, or `"llm_router"` |
 | `has_multiple_providers`  | `ai-workload-profile.json` | `summary.ai_source == "both"` or distinct provider values across `models[]` > 1    |
 | `capability_count`        | `ai-workload-profile.json` | Count of `true` values in `integration.capabilities_summary`                       |
 
@@ -80,7 +80,7 @@ for spend, AI-only Q7 for usage volume).
 
 For each model in `models[]` of `ai-workload-profile.json`, map to the closest Bedrock
 equivalent using the table below, then look up both source and Bedrock per-token prices
-from `references/shared/pricing-cache.md` (Source Provider Pricing + Bedrock Models sections).
+from `references/shared/pricing-cache.md` (Source Provider Pricing) and `references/vendored/ai/bedrock-pricing-cache.md` (Bedrock Models).
 
 **Source model → Bedrock equivalent mapping:**
 
@@ -89,20 +89,28 @@ For GPT-5.x, in-region costs about 10% above OpenAI standard; GPT-5.6 Global CRI
 Astra prices depend on inference option and context tier; verify the source price before assigning a cost
 comparison. See `references/shared/openai-on-bedrock.md`.
 
-| Source model pattern                   | Bedrock equivalent | Bedrock model ID                                                    |
-| -------------------------------------- | ------------------ | ------------------------------------------------------------------- |
-| `gpt-6-astra`                          | GPT-6 Astra        | `openai.gpt-6-astra` (mantle); `us.` / `global.` prefixed (runtime) |
-| `gpt-5.6-sol`, `gpt-5.6` flagship      | GPT-5.6 Sol        | `openai.gpt-5.6-sol`                                                |
-| `gpt-5.6-terra`                        | GPT-5.6 Terra      | `openai.gpt-5.6-terra`                                              |
-| `gpt-5.6-luna`                         | GPT-5.6 Luna       | `openai.gpt-5.6-luna`                                               |
-| `gpt-5.5` (not `-pro`)                 | GPT-5.5            | `openai.gpt-5.5`                                                    |
-| `gpt-5.4` (not `-pro`/`-mini`/`-nano`) | GPT-5.4            | `openai.gpt-5.4`                                                    |
+| Source model pattern                   | Bedrock equivalent | Bedrock model ID       |
+| -------------------------------------- | ------------------ | ---------------------- |
+| `gpt-6-astra`                           | GPT-6 Astra         | `openai.gpt-6-astra`   |
+| `gpt-6.1-sol`, `gpt-6-1-sol`            | GPT-6.1 Sol         | `openai.gpt-6.1-sol`   |
+| `gpt-6-sol`                             | GPT-6 Sol           | `openai.gpt-6-sol`     |
+| `gpt-6-luna`                            | GPT-6 Luna          | `openai.gpt-6-luna`    |
+| `gpt-5.6-sol`, `gpt-5.6` flagship      | GPT-5.6 Sol        | `openai.gpt-5.6-sol`   |
+| `gpt-5.6-terra`                        | GPT-5.6 Terra      | `openai.gpt-5.6-terra` |
+| `gpt-5.6-luna`                         | GPT-5.6 Luna       | `openai.gpt-5.6-luna`  |
+| `gpt-5.5` (not `-pro`)                 | GPT-5.5            | `openai.gpt-5.5`       |
+| `gpt-5.4` (not `-pro`/`-mini`/`-nano`) | GPT-5.4            | `openai.gpt-5.4`       |
 
-Astra Standard mantle is available in Virginia (`us-east-1`) and Oregon (`us-west-2`); its runtime path uses US Geo / Global CRIS with its own caller-region matrix.
-On the mantle endpoint the GPT-5.x models above are in-region only (us-east-1, us-east-2; us-west-2 additionally for Terra, Luna,
-and GPT-5.4; AWS GovCloud us-gov-west-1 / us-gov-east-1 for Terra and Luna, us-gov-west-1 also for GPT-5.4).
-GPT-5.6 additionally reaches most commercial regions via `bedrock-runtime` CRIS ids; GPT-5.5 / GPT-5.4 have no
-CRIS. At Discover time the target region may not be known — record the same-model mapping and let Design apply
+For the GPT-5.x rows, the mantle endpoint is in-region only (us-east-1, us-east-2; us-west-2 additionally for
+Terra, Luna, and GPT-5.4; AWS GovCloud us-gov-west-1 / us-gov-east-1 for Terra and Luna, us-gov-west-1 also for
+GPT-5.4). GPT-5.6 additionally reaches most commercial regions via `bedrock-runtime` CRIS ids; GPT-5.5 / GPT-5.4
+have no CRIS.
+
+For the GPT-6 rows, mantle is us-east-1 only, except GPT-6 Astra which is also available in us-west-2. All four
+GPT-6 models additionally reach a broad set of commercial regions via `bedrock-runtime` CRIS (`us.` / `global.`
+prefixes).
+
+At Discover time the target region may not be known — record the same-model mapping and let Design apply
 the region gate. See `references/shared/openai-on-bedrock.md`.
 
 **Pro sources need a choice.** For `gpt-*-pro`, `o1-pro`, and `o3-pro`, offer GPT-6 Astra as the
@@ -281,7 +289,7 @@ Read from available discovery artifacts:
 | `has_bigquery`           | `gcp-resource-inventory.json` or `billing-profile.json` | Any `google_bigquery_*` resource or BigQuery billing SKU                        |
 | `has_ai_profile`         | File presence                                           | `ai-workload-profile.json` exists                                               |
 | `is_agentic`             | `ai-workload-profile.json`                              | `agentic_profile.is_agentic == true` (if file exists)                           |
-| `billing_monthly_usd`    | `billing-profile.json`                                  | `summary.total_monthly_spend` (null if absent)                                  |
+| `billing_monthly_usd`    | `billing-profile.json`                                  | `summary.total_monthly_spend` (`null` if absent **or if the profile is a skip record** — empty `services[]` + non-empty `warnings[]`; a skip record's `0` is "nothing parsed," not "zero spend") |
 
 **Classify (first match wins, top to bottom):**
 
@@ -412,15 +420,18 @@ If the gate fires:
 2. Set `cost_preview.aws_monthly_range_usd` to `null`.
 3. Set `cost_preview.quote_suppressed` to `true`, `quote_suppressed_reason` to `"authored_sizes_exceed_preview_defaults"`, and `authored_size_signals` to the ordered list from above (`"address: field value"` format, max 5).
 4. Set `cost_preview.disclaimer` to: `"Discover does not quote a monthly AWS range when Terraform sizes exceed the preview's hardcoded development defaults. Estimate after Clarify prices the authored (or user-confirmed) sizes."`
-5. Still set `gcp_monthly_usd` from billing when present (that number is real). Never invent GCP spend.
+5. Still set `gcp_monthly_usd` from billing when present AND usable (that number is real).
+   Never invent GCP spend, and never present a skip-record's `0` as if it were spend.
 
 If the gate does **not** fire, keep the existing stub-range behavior (`quote_suppressed: false` or omit the new fields).
 
-**If `billing-profile.json` exists:** Set `gcp_monthly_usd` from `summary.total_monthly_spend`. Show GCP actual. Show the AWS range **only** when the authored-size gate did not fire.
+**If `billing-profile.json` exists with non-empty `services[]`:** Set `gcp_monthly_usd` from `summary.total_monthly_spend`. Show GCP actual. Show the AWS range **only** when the authored-size gate did not fire.
+
+**If `billing-profile.json` is a skip record** (empty `services[]`, non-empty `warnings[]` — every billing file was an unrecognized non-GCP export): treat it as "no billing signal," same as the "If only IaC" / "If neither" rows below — do NOT set `gcp_monthly_usd` from its `total_monthly_spend` (that field is `0` because nothing was parsed, not because GCP spend is actually zero).
 
 **If only IaC:** Set `gcp_monthly_usd: null`. Show the AWS range **only** when the authored-size gate did not fire.
 
-**If neither IaC nor billing:** Omit cost preview entirely (`cost_preview: null`).
+**If neither IaC nor usable billing:** Omit cost preview entirely (`cost_preview: null`).
 
 ---
 

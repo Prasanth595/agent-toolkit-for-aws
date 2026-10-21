@@ -14,7 +14,7 @@ Read `$MIGRATION_DIR/ai-workload-profile.json`:
 - `models[]` — Detected AI models with service, capabilities, evidence
 - `integration` — SDK, frameworks, languages, gateway type, capability summary
 - `infrastructure[]` — Terraform resources related to AI (may be empty)
-- `current_costs` — Present only if billing data or OpenAI usage API data was provided (`source` field records which)
+- `current_costs` — Present only if billing data, OpenAI usage API data, or OpenRouter usage API data was provided (`source` field records which)
 
 Read `$MIGRATION_DIR/preferences.json` → `ai_constraints` (if present). If absent: use defaults (prefer managed Bedrock, no latency constraint, no budget cap).
 
@@ -28,7 +28,18 @@ Read `$MIGRATION_DIR/preferences.json` → `ai_constraints` (if present). If abs
   caching). OpenAI's proprietary GPT models run on Bedrock, so the source model is often itself the target — the
   mapping guide's Tier 0 path is the default, not a cross-family swap.
 - `"anthropic"` → load `references/vendored/ai/ai-anthropic-to-bedrock.md` (Anthropic SDK → Bedrock Converse API client swap; do NOT use ai-openai-to-bedrock.md for Anthropic SDK users)
-- `"both"` → load both `ai-gemini-to-bedrock.md` and `ai-openai-to-bedrock.md`
+- `"both"` → `both` never means exactly "Gemini+OpenAI" — per
+  `discover-anthropic-api.md` Step 4.5, `both` is also reached when Anthropic
+  usage joins a Gemini-or-OpenAI codebase, so it can mean "Gemini+Anthropic"
+  or "OpenAI+Anthropic" too. Select guides from which providers are ACTUALLY
+  present in `models[]`/`summary` (checking `service` values —
+  `vertex_ai_generative`/`vertex_ai_embeddings` for Gemini,
+  `openai_api` for OpenAI, `anthropic_api` for Anthropic): load
+  `ai-gemini-to-bedrock.md` when a Gemini/Vertex model is present, load
+  `ai-openai-to-bedrock.md` when an OpenAI model is present, and, if an
+  Anthropic model is also present, also load `ai-anthropic-to-bedrock.md`
+  (mirroring Azure's existing conditional pattern for its own `"both"`
+  branch)
 - `"other"` or absent → load `references/design-refs/ai.md` (traditional ML rubric — Vision API, Speech API, Document AI, custom models only; do NOT use for Anthropic SDK users)
 
 **Additional load, independent of `ai_source` above:** If any entry in `workloads[]` (from `preferences.json`, falling back to `ai-workload-profile.json`) has `capability` equal to `document_extraction`, `image_analysis`, or `speech_transcription`, ALSO load `references/design-refs/ai.md` — even when a generative `ai_source` already selected a different ref above. A workload's non-generative capability is evaluated independently of the codebase's primary LLM provider; e.g. an `ai_source: "openai"` codebase that also calls `documentai.process_document` needs both `ai-openai-to-bedrock.md` (for its GPT workload) and `ai.md` (for its Document AI workload).
@@ -94,7 +105,18 @@ Record what was applied: every constraint that changed a model choice or region 
 
 ## Part 1: Bedrock Model Selection
 
-**Restricted models — applies whichever guide Step 0 loaded and whatever the compliance value:** a row whose `Status` in `shared/pricing-cache.md` is `restricted (…)` (Covered Models such as Claude Fable 5 / 5.1, gated previews such as Claude Mythos) is never `recommended_model` or `backup_model` and never a default in any mapping guide. Offer one only when the user explicitly asks for a frontier model, and state its data-retention opt-in and any endpoint-specific regional or CRIS-only restrictions in the same sentence.
+**New-target eligibility — before every selection or same-model shortcut, including the
+per-model fallback:** apply `references/vendored/ai/bedrock-pricing-cache.md`'s target policy and the
+model lifecycle restrictions first. Active availability alone does not make a model eligible.
+For an Opus 4.8 source, follow the Opus 5.5 mapping in
+`references/vendored/ai/ai-anthropic-to-bedrock.md`, subject to region, compliance and feature
+constraints; never retain Opus 4.8 as a new target or automatic fallback. If no eligible
+target satisfies those constraints, report the block instead. Preserve source model IDs and
+historical pricing, and retain the explicitly accepted, verified Opus 4.6 Batch alternative.
+Derive `model_change` from the final source/target identities: Opus 4.8 → 5.5 requires
+`model_change: true`; an eligible exact same-model selection remains false.
+
+**Restricted models — applies whichever guide Step 0 loaded and whatever the compliance value:** a row whose `Status` in `references/vendored/ai/bedrock-pricing-cache.md` is `restricted (…)` (Covered Models such as Claude Fable 5 / 5.1, gated previews such as Claude Mythos) is never `recommended_model` or `backup_model` and never a default in any mapping guide. Offer one only when the user explicitly asks for a frontier model, and state its data-retention opt-in and any endpoint-specific regional or CRIS-only restrictions in the same sentence.
 
 **Multi-workload iteration (when `workloads[]` is present):**
 
@@ -126,11 +148,11 @@ For each `workloads[]` entry:
    - `honest_assessment` (Part 1 continued, below) does not apply — these are feature/service swaps, not a cost-driven model migration decision. Set `honest_assessment: "not_applicable"` for these workloads in the output.
 
 2. **For text/reasoning capabilities:** Apply the override hierarchy from `ai_constraints`:
-   - Q17 special features (hard override) > **same-model availability** > Q16 priority > Q18/Q21 volume and latency >
+   - Q17 special features (hard override within eligible targets) > **same-model availability among eligible targets** > Q16 priority > Q18/Q21 volume and latency >
      source model baseline
-   - **Same-model availability outranks Q16 priority.** If the source model is available on Bedrock and the target
+   - **Eligible same-model availability outranks Q16 priority.** If the source model is eligible as a new target, available on Bedrock and the target
      region carries it, keep it — a `balanced` or unset priority must not silently move the workload to a different
-     model family. Only a Q17 hard feature override (a capability the source model cannot serve) beats it. An
+     model family. Within the eligible pool, only a Q17 hard feature override (a capability the source model cannot serve) beats it. An
      explicit `ai_priority = "cost"` does not override it either; it adds a cost alternative alongside the same-model
      recommendation (see the mapping guide's Tier 2).
    - This ensures single-workload sophistication is preserved per workload
@@ -188,25 +210,35 @@ Treat model mapping as compatibility-guided, not 1:1 parity. Before cutover, req
 | `ai_priority = "quality"` | Prefer Claude Sonnet/Opus regardless of cost                                                                                                                                     |
 | `ai_priority = "speed"`   | Prefer Claude Sonnet (fastest integration)                                                                                                                                       |
 | `ai_latency = "critical"` | Prefer smaller/faster models (Haiku, Nova Lite)                                                                                                                                  |
-| `ai_latency = "flexible"` | Any model; flag Batch API for 50% savings — but only for confirmed-batch models (skip the discount for models whose batch cells are `_unverified_` in `shared/pricing-cache.md`) |
+| `ai_latency = "flexible"` | Any model; flag Batch API for 50% savings — but only for confirmed-batch models (skip the discount for models whose batch cells are `_unverified_` in `references/vendored/ai/bedrock-pricing-cache.md`) |
 
 **Stay-or-migrate assessment per model:**
 
-Check the same-model case FIRST — it short-circuits the cost comparison:
+Check the same-model case FIRST after eligibility filtering and final target selection;
+otherwise use the cost-comparison cases below with `model_change` reflecting the selected target:
 
-- **Source model is available on Bedrock** (per `shared/openai-on-bedrock.md`) AND the target region carries it →
-  `"strong_migrate"`. Set `model_change: false`. The rationale is reduced model-change risk plus AWS commitments,
-  governance, and residency; endpoint/API compatibility still needs evaluation. Derive the cost comparison from
-  the selected model's inference option/context tier and verified source rate. A verified $60 source and $60
-  Astra Global target is parity; do not impose a fixed premium. If source pricing is unavailable, retain that
-  unavailable comparison in Design rather than borrowing another model's rate. Above 272K input tokens, use
-  Astra's dedicated long-context prices before computing the difference. A material increase can change the
-  recommendation according to the user's cost priority and non-cost drivers below.
+- **Selected target is the same eligible source model**, available on Bedrock AND carried by the target region →
+  `"strong_migrate"`. Set `model_change: false`. The rationale is risk (no behavior delta) plus AWS commitments,
+  governance, and residency — **not** an assumed cost saving. Price the actual model and inference option using
+  the model-specific rules below; same identity does not imply cost parity or a universal premium.
+
+  If source pricing is unavailable, retain that unavailable comparison. Derive the
+  difference from verified source and selected target inference/context-tier rates.
 - Source model on Bedrock but the target region does not carry it → treat as no-same-model below, and record the
   region as the cause in `regional_warnings[]`. Do not report this as a model-quality judgment.
 - Bedrock cheaper → `"strong_migrate"`
 - Bedrock within 25% of source AND priority != cost → `"moderate_migrate"`
 - Source > 25% cheaper AND priority = cost → `"weak_migrate"` or `"recommend_stay"`
+
+**Model-specific same-model pricing:** for OpenAI GPT targets, read
+`references/shared/openai-on-bedrock.md`: verified In-Region/Geo options use the
+data-residency-tier premium, while supported Global CRIS uses standard-rate parity.
+Report the actual option; do not downgrade solely for the modest verified premium.
+**GPT-5.6/GPT-6 only:** above 272K context, apply 2.0x input and 1.5x output rates only when
+the selected model and inference option support that tier; the resulting gap may change
+the assessment. GPT-5.5/5.4 have no 1M tier. **Opus 5.5:** use the selected region/profile's
+flat rates from `references/vendored/ai/bedrock-pricing-cache.md` throughout the full 1M context;
+do not apply the GPT multiplier. Verify other models' tiers individually.
 
 Overall assessment = weakest across all models. If any `"recommend_stay"`, flag prominently.
 
@@ -281,7 +313,7 @@ If `models[]` contains more than one model, check for coordination patterns and 
    > ⚠️ "Multiple models detected ([count]). Recommend a tiered migration strategy: migrate and validate one model at a time, starting with the lowest-risk (highest-volume, simplest task). See Part 1B for tiered routing recommendations."
 
 4. **Text generation + image generation** — If `models[]` contains both text generation AND image generation capabilities:
-   > ⚠️ "Image generation migration (e.g., DALL-E/gpt-image → Stability AI) requires separate evaluation. Image quality is subjective — plan for human evaluation alongside automated metrics. Default to Stable Image Core (cost-first) or Stable Image Ultra (quality-first); do not recommend Nova Canvas."
+   > ⚠️ "Image generation migration (e.g., DALL-E/gpt-image → Stability AI) requires separate evaluation. Image quality is subjective — plan for human evaluation alongside automated metrics. Default to Stable Image Core (cost-first) or Stable Image Ultra (quality-first); do not recommend Nova Canvas (past EOL 2026-09-30)."
 
 5. **Speech models** — If `models[]` contains speech-to-text or text-to-speech capabilities:
    > ⚠️ "Speech model migration targets different AWS services (Whisper → Amazon Transcribe, TTS → Amazon Polly or Nova Sonic) with different pricing models and APIs. These are not Bedrock model swaps — they require separate integration work."
@@ -371,20 +403,35 @@ Astra Chat solely because it is proprietary GPT. Record `model_change: false` on
 the exact source model is retained; a Pro-to-Astra upgrade is a model change requiring eval.
 GPT-5.x retains its separately dated API evidence and any selected Chat-to-Responses reshape.
 
-**Runtime alternative:** Astra and GPT-5.6 also have supported runtime CRIS paths. When that
-path satisfies the selected governance requirements, record `migration_path: "runtime_openai_cris"`
-and preserve the validated profile id; a runtime endpoint change alone is not a model change.
-Astra uses only supported `us.` / `global.` profiles and its own caller-region matrix.
-GPT-5.5 / 5.4 remain Mantle-only. Check each model's capabilities before selecting an alternative;
-do not infer that every Bedrock feature is available on every runtime API.
+**A Chat Completions source is a supported near-drop-in for GPT-6 and GPT-5.6 — not a mandatory reshape.** All four GPT-6 models and the GPT-5.6 family list Chat Completions as a supported API on both mantle and runtime CRIS (per `openai-on-bedrock.md` § Access Paths); if `integration` evidence shows `chat.completions.create` for one of these models, the design may keep `chat.completions.create`/`choices[0].message` parsing — reshape to `responses.create` is optional, only for a Responses-only feature (runtime prompt caching, reasoning-item round-trips) or a demonstrated constraint. **GPT-5.5 and GPT-5.4 are the exception**: Chat Completions support is unconfirmed on their model cards (Responses on mantle is the only verified surface), so a Chat Completions source on either model still needs a planned reshape, probed against the target account before committing.
 
-Record `code_migration.runtime_api` as `converse`, `responses` or `chat_completions` for
-`runtime_openai_cris`; absent on a legacy plan means `converse`. When the advisor supplied a
+**No Converse fallback for GPT-5.5/GPT-5.4 — GPT-5.6 and GPT-6 differ.** GPT-5.5 and GPT-5.4 are
+`bedrock-mantle` only and in-region only — there is no `bedrock-runtime` path and no cross-region
+inference profile for these two models. GPT-5.6 Sol/Terra/Luna and all four GPT-6 models (Astra,
+Sol, Luna, 6.1 Sol) DO have a `bedrock-runtime` CRIS path (`us.`/`global.` prefixed IDs, per
+`openai-on-bedrock.md` § Access Paths) — for these models, a region or feature need (Guardrails,
+Knowledge Bases, invocation logging, or a region outside the mantle matrix) is satisfied by
+**switching endpoint, not model**: record `migration_path: "runtime_openai_cris"` with
+`model_change: false`. Reserve `migration_path: "converse"` with `model_change: true` for
+GPT-5.5/GPT-5.4 only, or when the GPT-6/5.6 CRIS path itself cannot serve the need (e.g. a feature
+CRIS does not support — see the runtime-side feature splits in `openai-on-bedrock.md`). Note:
+`runtime_openai_cris` for GPT-6 Astra is valid only via Responses/Chat Completions/Converse —
+Astra does not support `Invoke`, so a design that needs Guardrails or Application Inference
+Profiles (Converse-only features that also require Invoke-adjacent plumbing on some other models)
+must verify against Astra's model card per-feature, not assume parity with Sol/Luna/6.1 Sol.
+**When Guardrails is the driving need and the design keeps `runtime_openai_cris` (endpoint
+switch, not model switch), it MUST also record `bedrock_models[].required_client_api` so the
+generated client uses a Guardrails-capable surface — `converse` for Astra; `converse` /
+`chat_completions` / `invoke` (never `responses`) for 6.1 Sol and the other non-Astra GPT-6/5.6
+CRIS models. Do not leave the client on `responses` when Guardrails is required.** `Responses`
+stays the default for a region-only CRIS move with no Guardrails need.
+
+When the advisor supplied a
 per-unit model contract, retain its exact `invocation_model_id` in that unit's `aws_model_id`
 (including a system-profile ARN when supplied), and translate `runtime_converse` to
-`runtime_openai_cris` plus `runtime_api: "converse"`. A missing invocation ID requires resolution;
+`runtime_openai_cris` plus `required_client_api: "converse"`. A missing invocation ID requires resolution;
 do not manufacture a profile from the region. Keep each unit's model/API/profile together.
-For multiple advisor units, write `migration_path` and `runtime_api` on each corresponding
+For multiple advisor units, write `migration_path` and `required_client_api` on each corresponding
 `bedrock_models[]` row with its `aws_model_id`; `code_migration` remains the primary-unit default.
 
 **Throughput:** load `references/vendored/ai/ai-migration-guardrails.md` and apply the selected
@@ -431,7 +478,7 @@ Write `aws-design-ai.json` to `$MIGRATION_DIR/`.
 | `ai_architecture.tiered_strategy`          | object/null | Tiered model routing (null for low/medium volume)                                                                                                                                                                                                |
 | `ai_architecture.bedrock_models`           | array       | Per-model: `gcp_model_id`, `aws_model_id`, `capabilities_matched[]`, `capability_gaps[]`, `honest_assessment`, `source_provider_price`, `bedrock_price`, `price_comparison`, `migration_complexity`                                              |
 | `ai_architecture.capability_mapping`       | object      | Per-capability: `parity` (full/partial/none), `notes`                                                                                                                                                                                            |
-| `ai_architecture.code_migration`           | object      | `primary_pattern`, `framework`, `files_to_modify[]`, `dependency_changes`, `migration_path`; `runtime_api` for `runtime_openai_cris` (`converse` when absent on a legacy plan) |
+| `ai_architecture.code_migration`           | object      | `primary_pattern`, `framework`, `files_to_modify[]`, `dependency_changes`, `migration_path`; per-model `required_client_api` selects the runtime API |
 | `ai_architecture.infrastructure`           | array       | GCP resource → AWS equivalent mappings with confidence                                                                                                                                                                                           |
 | `ai_architecture.services_to_migrate`      | array       | GCP service → AWS service with effort and notes                                                                                                                                                                                                  |
 | `regional_warnings`                        | array       | Per-service: `service`, `target_region`, `nearest_available`, `impact` (empty array if all services available)                                                                                                                                   |
@@ -451,7 +498,9 @@ Write `aws-design-ai.json` to `$MIGRATION_DIR/`.
 - [ ] `honest_assessment` logic is consistent (weakest model drives overall)
 - [ ] If `ai_source` includes `"openai"`: every model that `shared/openai-on-bedrock.md` lists as available on Bedrock, and whose target region carries it, is mapped to **itself** with `model_change: false` — not to a Claude/Nova substitute
 - [ ] If `honest_assessment == "recommend_stay"`: `honest_assessment_reason` names a non-cost blocker (cost parity alone is never sufficient for an OpenAI source)
-- [ ] No `bedrock_models[]` entry pairs a proprietary `openai.gpt-*` model ID with a Converse/`bedrock-runtime` migration path (those models are mantle-only)
+- [ ] No `bedrock_models[]` entry pairs **GPT-5.5 or GPT-5.4** with a Converse/`bedrock-runtime`
+      migration path (those two models only — mantle-only, no CRIS). GPT-5.6 and GPT-6 models MAY
+      use `migration_path: "runtime_openai_cris"` on `bedrock-runtime` — this is NOT a violation.
 - [ ] `regional_warnings` is present (empty array `[]` if no issues; populated if any service unavailable in target region)
 - [ ] `multi_model_warnings` is present (empty array `[]` if single model or no coordination issues)
 - [ ] If `agentic_profile.is_agentic == true`: `agentic_design` object is present with `migration_approach` matching `preferences.json`

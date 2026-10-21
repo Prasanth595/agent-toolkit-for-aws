@@ -308,9 +308,9 @@ def test_astra_shared_contract_survives_each_vendored_consumer(name):
 def test_astra_policy_has_consumer_local_facts_and_prices(skill):
     refs = PLUGIN / "skills" / skill / "references/shared"
     facts = (refs / "openai-on-bedrock.md").read_text()
-    prices = (refs / "pricing-cache.md").read_text()
+    prices = (refs.parent / "vendored/ai/bedrock-pricing-cache.md").read_text()
     assert "openai.gpt-6-astra" in facts and "us-west-2" in facts
-    assert "30m cache write" in prices and "GPT-6 Astra" in prices
+    assert "30-minute cache-write" in facts and "GPT-6 Astra" in prices
     assert "Global CRIS" in prices and "82.50" in prices
 
 
@@ -336,7 +336,7 @@ def test_azure_runtime_parent_gate_contract(model_id, region, allowed):
 
     This is a source-contract test, not execution of the natural-language DSL.
     """
-    catalog = json.loads((PLUGIN / "skills/agent-advisor/references/models/openai-bedrock-2026-09-09.json").read_text())
+    catalog = json.loads((PLUGIN / "skills/agent-advisor/references/models/openai-bedrock-2026-09-24.json").read_text())
     runtime = catalog["models"]["openai_gpt_6_astra"]["paths"]["runtime_converse"]
     witness = {"aws_model_id": model_id, "migration_path": "runtime_openai_cris", "model_change": False}
     assert (region in runtime["inference_profile_regions"].get(witness["aws_model_id"], [])) is allowed
@@ -364,8 +364,10 @@ def test_final_recommendation_uses_computed_roi(skill):
 @pytest.mark.parametrize("api_path,endpoint", [
     ("mantle_openai_chat", "chat/completions"),
     ("mantle_openai_responses", "responses"),
+    ("runtime_openai_cris", "chat/completions"),
+    ("runtime_openai_cris", "responses"),
 ])
-def test_gcp_generated_mantle_target_uses_real_sdk_wire_contract(region, api_path, endpoint, monkeypatch):
+def test_gcp_generated_target_uses_real_sdk_wire_contract(region, api_path, endpoint, monkeypatch):
     """Execute the actual generation template with the real SDK and offline HTTP."""
     import httpx
     import openai
@@ -375,8 +377,10 @@ def test_gcp_generated_mantle_target_uses_real_sdk_wire_contract(region, api_pat
     section = path.read_text().split("## Step 2: Generate Test Comparison Harness", 1)[1].split(
         "## Step 3:", 1)[0]
     code = textwrap.dedent(re.search(r"  ```python\n(.*?)\n  ```", section, re.S).group(1))
+    model_id = "global.openai.gpt-6-astra" if api_path == "runtime_openai_cris" else "openai.gpt-6-astra"
     code = (code.replace("{target_region}", region)
-            .replace("{aws_model_id}", "openai.gpt-6-astra")
+            .replace("{aws_model_id}", model_id)
+            .replace("{required_client_api}", "chat_completions" if endpoint == "chat/completions" else "responses")
             .replace("{migration_path}", api_path))
     requests = []
 
@@ -395,19 +399,21 @@ def test_gcp_generated_mantle_target_uses_real_sdk_wire_contract(region, api_pat
                             "type": "output_text", "text": "answer", "annotations": []}]}]}
         return httpx.Response(200, json=body)
 
-    real_client = openai.BedrockOpenAI
+    client_name = "OpenAI" if api_path == "runtime_openai_cris" else "BedrockOpenAI"
+    real_client = getattr(openai, client_name)
     with httpx.Client(transport=httpx.MockTransport(transport)) as http_client:
         monkeypatch.setattr(aws_bedrock_token_generator, "provide_token",
                             lambda **kwargs: "fixture-token")
-        monkeypatch.setattr(openai, "BedrockOpenAI",
+        monkeypatch.setattr(openai, client_name,
                             lambda **kwargs: real_client(http_client=http_client, **kwargs))
         ns = {}
         exec(compile(code, str(path), "exec"), ns)  # nosec B102 - committed generator template
         assert ns["call_bedrock"]("ping") == "answer"
     assert len(requests) == 1
-    assert str(requests[0].url) == f"https://bedrock-mantle.{region}.api.aws/openai/v1/{endpoint}"
+    host = f"bedrock-runtime.{region}.amazonaws.com" if api_path == "runtime_openai_cris" else f"bedrock-mantle.{region}.api.aws"
+    assert str(requests[0].url) == f"https://{host}/openai/v1/{endpoint}"
     payload = json.loads(requests[0].content)
-    assert payload["model"] == "openai.gpt-6-astra"
+    assert payload["model"] == model_id
     assert ("messages" in payload) is (endpoint == "chat/completions")
     assert ("input" in payload) is (endpoint == "responses")
     assert "provider_adapter" not in code
@@ -525,6 +531,7 @@ def test_astra_system_profile_arn_keeps_invocation_price_and_permissions(
     policy = iam_policy.generate_policy([arn], "us-west-2", "111122223333")
     assert policy["Statement"][0]["Resource"] == sorted([
         arn, "arn:aws:bedrock:*::foundation-model/openai.gpt-6-astra",
+        "arn:aws:bedrock:us-west-2:111122223333:project/default",
     ])
     price = bedrock_pricing.lookup("us-west-2", arn)
     assert price["input_per_1k_usd"] == input_rate

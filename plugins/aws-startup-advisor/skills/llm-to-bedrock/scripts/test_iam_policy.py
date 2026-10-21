@@ -8,8 +8,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from iam_policy import (
+    default_project_arn,
     foundation_model_arn,
     generate_policy,
+    is_gpt6_cris_model,
     is_mantle_model,
     mantle_project_arn,
     inference_profile_arn,
@@ -124,6 +126,25 @@ def test_mantle_model_detection_excludes_gpt_oss():
     assert is_mantle_model("anthropic.claude-sonnet-4-6") is False
 
 
+def test_is_mantle_model_matches_bare_gpt6_ids():
+    assert is_mantle_model("openai.gpt-6-astra") is True
+    assert is_mantle_model("openai.gpt-6-sol") is True
+    assert is_mantle_model("openai.gpt-6-luna") is True
+    assert is_mantle_model("openai.gpt-6.1-sol") is True
+    assert is_mantle_model("us.openai.gpt-6-sol") is False
+    assert is_mantle_model("openai.gpt-oss-120b-1:0") is False
+
+
+def test_generate_policy_grants_mantle_actions_for_bare_gpt6():
+    # A bare GPT-6 id must get the same mantle-only treatment as bare GPT-5.x —
+    # no InvokeModel statement (there is no foundation-model ARN for it) and a
+    # BedrockMantleInference statement granting bedrock-mantle:* actions.
+    pol = generate_policy(["openai.gpt-6-sol"], "us-east-1", "123456789012")
+    sids = {s["Sid"] for s in pol["Statement"]}
+    assert "BedrockMantleInference" in sids
+    assert "BedrockInvokeModelScoped" not in sids
+
+
 def test_mantle_target_gets_mantle_actions_not_invoke_model():
     # Regression: the generated policy emitted only bedrock:InvokeModel against a
     # foundation-model ARN, which cannot authorize a mantle call — the migrated app
@@ -191,4 +212,46 @@ def test_astra_cris_id_grants_runtime_foundation_and_profile_arns(prefix):
     assert set(statements[0]["Resource"]) == {
         "arn:aws:bedrock:*::foundation-model/openai.gpt-6-astra",
         f"arn:aws:bedrock:us-west-2:{ACCOUNT}:inference-profile/{mid}",
+        f"arn:aws:bedrock:us-west-2:{ACCOUNT}:project/default",
     }
+
+
+class TestGpt6CrisProjectArn:
+    """Finding 1: a GPT-6 CRIS id's model card 'Call the model' section grants
+    InvokeModel on both the inference-profile ARN AND the default project ARN."""
+
+    def test_is_gpt6_cris_model_matches_geo_prefixed_gpt6_ids(self):
+        assert is_gpt6_cris_model("global.openai.gpt-6-sol")
+        assert is_gpt6_cris_model("us.openai.gpt-6-astra")
+        assert is_gpt6_cris_model("us.openai.gpt-6.1-sol")
+        assert is_gpt6_cris_model("global.openai.gpt-6-luna")
+
+    def test_is_gpt6_cris_model_excludes_bare_and_non_gpt6(self):
+        assert not is_gpt6_cris_model("openai.gpt-6-sol")  # bare — mantle, not CRIS
+        assert not is_gpt6_cris_model("us.anthropic.claude-sonnet-5")
+        assert not is_gpt6_cris_model("us.openai.gpt-5.6-sol")
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "global.openai.gpt-6-sol",
+            "us.openai.gpt-6-astra",
+            "us.openai.gpt-6.1-sol",
+            "global.openai.gpt-6-luna",
+        ],
+    )
+    def test_generate_policy_grants_project_default_for_gpt6_cris(self, model_id):
+        pol = generate_policy([model_id], REGION, ACCOUNT)
+        resources = pol["Statement"][0]["Resource"]
+        assert default_project_arn(REGION, ACCOUNT) in resources
+        assert any("inference-profile/" in r for r in resources)
+
+    def test_non_gpt6_runtime_id_does_not_get_project_default(self):
+        pol = generate_policy(["us.anthropic.claude-sonnet-5"], REGION, ACCOUNT)
+        resources = pol["Statement"][0]["Resource"]
+        assert default_project_arn(REGION, ACCOUNT) not in resources
+
+    def test_bare_gpt6_mantle_id_still_yields_no_invoke_model_statement(self):
+        pol = generate_policy(["openai.gpt-6-sol"], REGION, ACCOUNT)
+        sids = {s["Sid"] for s in pol["Statement"]}
+        assert "BedrockInvokeModelScoped" not in sids

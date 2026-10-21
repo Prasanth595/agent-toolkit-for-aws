@@ -197,6 +197,19 @@ def test_mantle_model_detection_excludes_gpt_oss_and_cris_forms():
     assert p.is_mantle_model("amazon.nova-lite-v1:0") is False
 
 
+def test_is_mantle_model_matches_bare_gpt6_ids():
+    # Bare GPT-6 ids (Astra, Sol, Luna, 6.1 Sol) are mantle-served, same as the
+    # bare GPT-5.x ids above. Their CRIS forms (us./global. prefixed) stay on the
+    # standard Converse/runtime path, unchanged.
+    assert p.is_mantle_model("openai.gpt-6-astra") is True
+    assert p.is_mantle_model("openai.gpt-6-sol") is True
+    assert p.is_mantle_model("openai.gpt-6-luna") is True
+    assert p.is_mantle_model("openai.gpt-6.1-sol") is True
+    assert p.is_mantle_model("us.openai.gpt-6-sol") is False
+    assert p.is_mantle_model("global.openai.gpt-6.1-sol") is False
+    assert p.is_mantle_model("openai.gpt-oss-120b-1:0") is False
+
+
 def test_mantle_authz_error_points_at_mantle_actions_not_invoke_model():
     # Regression: sending the user to bedrock:InvokeModel is a dead end for these
     # models — mantle inference needs bedrock-mantle:* actions.

@@ -357,12 +357,15 @@ For every matched, model-bearing unit, compare the plan's model and migration pa
 that unit's `design.json` model contract, including its separate `invocation_model_id`.
 Carry the injected invocation identifier into the corresponding GCP `aws_model_id` unchanged.
 For a proprietary GPT `runtime_converse` decision, GCP represents the same API as
-`migration_path: "runtime_openai_cris"` with `runtime_api: "converse"` in `code_migration`.
+`migration_path: "runtime_openai_cris"` with `required_client_api: "converse"` on the matched model row.
 An absent `runtime_api` on a legacy runtime plan means Converse; an explicit Chat/Responses
 choice is not equivalent. Do not replace a confirmed Global profile with US Geo or strip an ARN.
-Read each matched model row's `migration_path` and `runtime_api`; use the `code_migration`
+Read each matched model row's `migration_path` and `required_client_api`; use legacy `runtime_api` and the `code_migration`
 defaults only for a single-unit legacy plan. A secondary unit must not inherit the primary's
 API or invocation profile. Missing per-unit data requires re-running Design with the injection.
+
+Pass the resolved per-model API to `runtime_api` below. A current Design plan with no
+explicit API defaults to Responses and cannot satisfy an advisor Converse decision.
 
 Use this comparison for each unit (including the single-unit case). It separates logical model
 identity from the invocation identifier while preserving the existing exact comparison for other paths:
@@ -370,7 +373,7 @@ identity from the invocation identifier while preserving the existing exact comp
 ```python
 def matches_advisor_model(advisor, plan_model, migration_path, runtime_api=None):
     model = advisor["model"]
-    proprietary_runtime = model == "openai.gpt-6-astra" or model.startswith("openai.gpt-5.6-")
+    proprietary_runtime = model.startswith(("openai.gpt-6", "openai.gpt-5.6-"))
     if advisor["api_path"] == "runtime_converse" and proprietary_runtime:
         invocation = advisor.get("invocation_model_id")
         if not invocation:
