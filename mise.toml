@@ -31,9 +31,13 @@ run = "uv run --with jsonschema --with pyyaml python tools/validate_spec.py"
 description = "Run tests for the repo validation tools"
 run = "python3 -m unittest discover -s tools/tests -v"
 
+[tasks."test:hooks"]
+description = "Run aws-core secret-safety hook tests (Claude Code and Devin protocols)"
+run = "python3 -m unittest discover -s plugins/aws-core/tests -v"
+
 [tasks.validate]
 description = "Run all validation"
-depends = ["lint:manifests", "lint:skill-parity", "lint:spec", "test:tools"]
+depends = ["lint:manifests", "lint:skill-parity", "lint:spec", "test:tools", "test:hooks"]
 
 [tasks.security]
 description = "Run security scans"

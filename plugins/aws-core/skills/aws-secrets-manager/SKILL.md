@@ -152,7 +152,10 @@ any attempt to call `get-secret-value` or `batch-get-secret-value` -- via AWS CL
 MCP tools, or direct SMA access. No manual configuration needed.
 
 The hook is defined at `plugins/aws-core/com.anthropic.claude-code/hooks/hooks.json`
-and activates automatically when the plugin is installed.
+and activates automatically when the plugin is installed. Devin reads the same
+policy from `plugins/aws-core/hooks.json`. Devin runs plugin hooks best effort and
+fails open: if a hook fails to load or run, the tool call proceeds, so treat the
+hook there as a guardrail, not a guarantee.
 
 ## Troubleshooting
 

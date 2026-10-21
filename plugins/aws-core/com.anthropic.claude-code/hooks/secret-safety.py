@@ -5,6 +5,12 @@ Reads JSON from stdin, checks tool_name and tool_input, and returns
 a deny decision if the call would fetch secret values directly.
 
 Use {{resolve:secretsmanager:secret-id:SecretString:key}} with asm-exec instead.
+
+One policy, two hosts. With no arguments it speaks the Claude Code hook protocol
+(also used by Codex), wired from com.anthropic.claude-code/hooks/hooks.json.
+With --devin it maps Devin's tool names onto the same checks and answers in
+Devin's format; that mode is wired from the plugin-root hooks.json, which only
+Devin reads.
 """
 
 import json
@@ -100,14 +106,118 @@ def _has_sdk_call_in_inline_code(command):
     return False
 
 
-def deny():
-    json.dump({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": DENY_MSG
-        }
-    }, sys.stdout)
+def _aws_tool_input_denied(tool_input):
+    """Structured AWS tool calls (use_aws or MCP AWS tools)."""
+    service = (tool_input.get("service_name") or tool_input.get("service") or tool_input.get("serviceName") or "").lower()
+    operation = tool_input.get("operation_name") or tool_input.get("operation") or tool_input.get("operationName") or ""
+    if service == "secretsmanager" and _normalize_op(operation) in GSV_OPERATIONS:
+        return True
+    # Only deny if tool input contains an actual SDK call shape (not just a mention)
+    input_str = json.dumps(tool_input)
+    if SDK_CALL_PATTERN.search(input_str):
+        if "secretsmanager" in input_str.lower():
+            return True
+    # AWS CLI command strings routed through an MCP proxy (e.g. call_aws's
+    # cli_command), which carry neither structured fields nor SDK call syntax.
+    if CLI_GSV_PATTERN.search(input_str):
+        return True
+    return False
+
+
+def _shell_command_denied(command):
+    # AWS CLI secret fetching (shape-aware: actual `aws secretsmanager get-secret-value`)
+    if CLI_GSV_PATTERN.search(command):
+        return True
+    # Direct SMA access (shape-aware: actual URL to the agent)
+    if SMA_PATTERN.search(command):
+        return True
+    # Skip read-only commands that merely mention the API name,
+    # but only for simple commands (no compound operators that could
+    # chain a secret-fetching command after the read-only prefix).
+    if _is_read_only_command(command) and not _COMPOUND_OPERATORS_RE.search(command):
+        return False
+    # SDK call invocations in inline interpreter code
+    if _has_sdk_call_in_inline_code(command):
+        return True
+    # Piped interpreter execution with SDK calls (e.g., heredoc | python3)
+    if SDK_CALL_PATTERN.search(command) and "secretsmanager" in command.lower():
+        return True
+    return False
+
+
+def claude_denied(tool_name, tool_input):
+    if tool_name == "use_aws" or tool_name.startswith("mcp__"):
+        return _aws_tool_input_denied(tool_input)
+
+    # Check run_script tools for secret fetching in code
+    if "run_script" in tool_name:
+        for key, val in tool_input.items():
+            if isinstance(val, str) and SDK_CALL_PATTERN.search(val):
+                return True
+        return False
+
+    if tool_name == "Bash":
+        return _shell_command_denied(tool_input.get("command", ""))
+
+    return False
+
+
+def devin_denied(tool_name, tool_input):
+    """Devin's names for the same tools (docs.devin.ai lifecycle-hooks).
+
+    exec is the documented shell tool. The CLI also has shell_command (an
+    alternative shell tool) and write_to_process (types into a running shell),
+    so a command sent through either is checked the same way.
+    """
+    if tool_name in ("exec", "shell_command"):
+        command = tool_input.get("command") or ""
+        if isinstance(command, list):
+            command = " ".join(str(part) for part in command)
+        return _shell_command_denied(command)
+
+    if tool_name == "write_to_process":
+        # The schema takes exactly one of text_input or bytes_input; the latter
+        # spells keys in angle brackets, e.g. "<CR>" for Enter.
+        typed = (tool_input.get("text_input") or "") + "\n" + (tool_input.get("bytes_input") or "")
+        return _shell_command_denied(re.sub(r"<(CR|LF)>", "\n", typed))
+
+    if tool_name.startswith("mcp__"):
+        return _aws_tool_input_denied(tool_input)
+
+    # Devin's generic MCP invoker. The hooks.json matcher cannot see which
+    # server is called, so scope it here to the same AWS servers that the
+    # mcp__aws matcher selects. If no server is named, check the call anyway.
+    if tool_name == "mcp_call_tool":
+        server = str(tool_input.get("server_name") or tool_input.get("server") or "")
+        if server and not server.lower().startswith("aws"):
+            return False
+        arguments = tool_input.get("arguments") or {}
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                pass
+        if not isinstance(arguments, dict):
+            arguments = {"arguments": arguments}
+        return _aws_tool_input_denied(arguments)
+
+    return False
+
+
+def deny(host):
+    if host == "devin":
+        # Exit 0 with a JSON decision rather than exit 2: in the hooks.json
+        # wrapper (python3 || python || py -3) a non-zero exit runs the next
+        # interpreter, whose exit status replaces the 2 and lets the call through.
+        json.dump({"decision": "block", "reason": DENY_MSG}, sys.stdout)
+    else:
+        json.dump({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": DENY_MSG
+            }
+        }, sys.stdout)
     sys.exit(0)
 
 
@@ -116,55 +226,14 @@ def allow():
 
 
 def main():
+    host = "devin" if "--devin" in sys.argv[1:] else "claude"
     data = json.load(sys.stdin)
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
 
-    # Check structured AWS tool calls (use_aws or MCP AWS tools)
-    if tool_name == "use_aws" or tool_name.startswith("mcp__"):
-        service = (tool_input.get("service_name") or tool_input.get("service") or tool_input.get("serviceName") or "").lower()
-        operation = tool_input.get("operation_name") or tool_input.get("operation") or tool_input.get("operationName") or ""
-        if service == "secretsmanager" and _normalize_op(operation) in GSV_OPERATIONS:
-            deny()
-        # Only deny if tool input contains an actual SDK call shape (not just a mention)
-        input_str = json.dumps(tool_input)
-        if SDK_CALL_PATTERN.search(input_str):
-            if "secretsmanager" in input_str.lower():
-                deny()
-        # AWS CLI command strings routed through an MCP proxy (e.g. call_aws's
-        # cli_command), which carry neither structured fields nor SDK call syntax.
-        if CLI_GSV_PATTERN.search(input_str):
-            deny()
-        allow()
-
-    # Check run_script tools for secret fetching in code
-    if "run_script" in tool_name:
-        for key, val in tool_input.items():
-            if isinstance(val, str) and SDK_CALL_PATTERN.search(val):
-                deny()
-        allow()
-
-    # Check Bash commands
-    if tool_name == "Bash":
-        command = tool_input.get("command", "")
-        # AWS CLI secret fetching (shape-aware: actual `aws secretsmanager get-secret-value`)
-        if CLI_GSV_PATTERN.search(command):
-            deny()
-        # Direct SMA access (shape-aware: actual URL to the agent)
-        if SMA_PATTERN.search(command):
-            deny()
-        # Skip read-only commands that merely mention the API name,
-        # but only for simple commands (no compound operators that could
-        # chain a secret-fetching command after the read-only prefix).
-        if _is_read_only_command(command) and not _COMPOUND_OPERATORS_RE.search(command):
-            allow()
-        # SDK call invocations in inline interpreter code
-        if _has_sdk_call_in_inline_code(command):
-            deny()
-        # Piped interpreter execution with SDK calls (e.g., heredoc | python3)
-        if SDK_CALL_PATTERN.search(command) and "secretsmanager" in command.lower():
-            deny()
-
+    denied = devin_denied if host == "devin" else claude_denied
+    if denied(tool_name, tool_input):
+        deny(host)
     allow()
 
 

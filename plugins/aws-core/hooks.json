@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(exec|shell_command|write_to_process)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'python3 \"$0\" \"$@\" 2>/dev/null || python \"$0\" \"$@\" 2>/dev/null || py -3 \"$0\" \"$@\"' \"${DEVIN_PLUGIN_ROOT}/com.anthropic.claude-code/hooks/secret-safety.py\" --devin",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^mcp__aws|^mcp_call_tool$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'python3 \"$0\" \"$@\" 2>/dev/null || python \"$0\" \"$@\" 2>/dev/null || py -3 \"$0\" \"$@\"' \"${DEVIN_PLUGIN_ROOT}/com.anthropic.claude-code/hooks/secret-safety.py\" --devin",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
