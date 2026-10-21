@@ -11,6 +11,19 @@
 - When uncertain about specific AWS details (API parameters, permissions,
   limits, error codes), verify against documentation rather than guessing.
   State uncertainty explicitly if you cannot confirm.
+- Before reporting a count, a total, or that something does not exist, read
+  every page of the results and search every Region and scope where it could
+  be. If you could not, say the result is partial and name what you checked.
+- To say what a system currently does, read what the runtime uses: the
+  completed deployment, the alias or version that is invoked, the template the
+  stack is running. A newer stored version, a draft, or a description field is
+  not evidence of live behavior.
+- Present a cause as confirmed only if data, configuration, or logs you read
+  show it. Label anything else as unverified, and say what you would check
+  next.
+- When the user asks a specific question or names a suspected cause, confirm 
+  or rule out each cause they raised, and do not offer alternatives your evidence 
+  does not support.
 - When creating infrastructure, prefer infrastructure-as-code (AWS CDK or
   CloudFormation) over direct CLI commands.
 - When working with infrastructure, follow AWS Well-Architected Framework
