@@ -15,15 +15,25 @@ before opening a pull request.
 | `bedrock-quotas.md`                  | TPM/RPM quota-risk assessment (works without an AWS account)   |
 | `ai-openai-to-bedrock.md`            | OpenAI-protocol (incl. Azure OpenAI) → Bedrock model selection |
 | `ai-anthropic-to-bedrock.md`         | Anthropic SDK → Bedrock Converse client swap                   |
+| `ai-gemini-to-bedrock.md`            | Gemini (incl. Vertex AI) → Bedrock model selection             |
+| `ai-openrouter-to-bedrock.md`        | OpenRouter gateway → per-upstream Bedrock routing              |
 | `design-ref-harness.md`              | AgentCore Harness design reference                             |
 | `design-ref-agentic-to-agentcore.md` | Strands Agents + AgentCore Runtime design reference            |
 | `sdk-capability-map.json`            | SDK method → capability lookup used by app-code discovery      |
+| `ai-capability-catalog.json`         | Target-only source-provider/gateway capability catalog (schema_version, provider/gateway status, no implemented-adapter claim) |
 | `bedrock-pricing-cache.md`           | Provider-neutral Bedrock model and service pricing             |
 | `schema-design-aws-ai.md`            | Target-only `aws-design-ai.json` contract; `metadata.ai_sources[]`/`gateways[]` mirror `ai-workload-profile.schema.json` exactly |
 
-Deliberately NOT here: a source-cloud's own mapping guide (e.g. gcp-to-aws's
-`ai-gemini-to-bedrock.md`) and its `schema-discover-ai.md`, both of which are
-written against one provider's SDK surface.
+The Gemini and OpenRouter guides are source-cloud agnostic (the Bedrock target
+depends on the upstream model, not the source cloud), so they are canonical here
+and vendored like the OpenAI and Anthropic guides. A consuming skill's own
+runtime routing may still point at an adapter-local copy (gcp-to-aws keeps
+`references/design-refs/ai-gemini-to-bedrock.md` for its Gemini adapter)
+until the extraction stages repoint it; that is a separate decision from this
+shared guide existing.
+
+Deliberately NOT here: a source-cloud's `schema-discover-ai.md`, which is written
+against one provider's SDK surface.
 
 **Consumer contract.** A skill that consumes Bedrock pricing must vendor
 `references/vendored/ai/bedrock-pricing-cache.md` from this canonical set. Source-cloud

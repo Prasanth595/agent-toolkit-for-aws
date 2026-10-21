@@ -24,9 +24,12 @@ if this skill needs one, add the copy **and** a row in the table below.
 | --------------------------------------- | ----------------------------------------------------- |
 | `workshop/workshop-invariants.md`       | `skills/shared/workshop/workshop-invariants.md`       |
 | `ai/ai-anthropic-to-bedrock.md`         | `skills/shared/ai/ai-anthropic-to-bedrock.md`         |
+| `ai/ai-capability-catalog.json`         | `skills/shared/ai/ai-capability-catalog.json`         |
 | `ai/ai-migration-guardrails.md`         | `skills/shared/ai/ai-migration-guardrails.md`         |
 | `ai/ai-model-lifecycle.md`              | `skills/shared/ai/ai-model-lifecycle.md`              |
 | `ai/ai-openai-to-bedrock.md`            | `skills/shared/ai/ai-openai-to-bedrock.md`            |
+| `ai/ai-gemini-to-bedrock.md`            | `skills/shared/ai/ai-gemini-to-bedrock.md`            |
+| `ai/ai-openrouter-to-bedrock.md`        | `skills/shared/ai/ai-openrouter-to-bedrock.md`        |
 | `ai/bedrock-pricing-cache.md`           | `skills/shared/ai/bedrock-pricing-cache.md`           |
 | `ai/bedrock-quotas.md`                  | `skills/shared/ai/bedrock-quotas.md`                  |
 | `ai/design-ref-agentic-to-agentcore.md` | `skills/shared/ai/design-ref-agentic-to-agentcore.md` |
