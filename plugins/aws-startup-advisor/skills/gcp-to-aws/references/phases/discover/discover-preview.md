@@ -85,9 +85,9 @@ from `references/shared/pricing-cache.md` (Source Provider Pricing) and `referen
 **Source model → Bedrock equivalent mapping:**
 
 **Same-model rows first.** Match GPT-6 Astra and the GPT-5.x sources below before cross-family rows.
-For GPT-5.x, in-region costs about 10% above OpenAI standard; GPT-5.6 Global CRIS uses the standard rate.
-Astra prices depend on inference option and context tier; verify the source price before assigning a cost
-comparison. See `references/shared/openai-on-bedrock.md`.
+For each same-model row, derive the price direction from verified source rates and the selected Bedrock
+inference option and context tier. Do not assume a fixed premium or parity.
+See `references/shared/openai-on-bedrock.md` for the model-specific pricing rules.
 
 | Source model pattern                   | Bedrock equivalent | Bedrock model ID       |
 | -------------------------------------- | ------------------ | ---------------------- |
