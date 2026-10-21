@@ -21,8 +21,8 @@
 - Present a cause as confirmed only if data, configuration, or logs you read
   show it. Label anything else as unverified, and say what you would check
   next.
-- When the user asks a specific question or names a suspected cause, confirm 
-  or rule out each cause they raised, and do not offer alternatives your evidence 
+- When the user asks a specific question or names a suspected cause, confirm
+  or rule out each cause they raised, and do not offer alternatives your evidence
   does not support.
 - When creating infrastructure, prefer infrastructure-as-code (AWS CDK or
   CloudFormation) over direct CLI commands.
