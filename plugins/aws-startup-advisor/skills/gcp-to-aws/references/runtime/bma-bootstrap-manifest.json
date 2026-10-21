@@ -1,0 +1,23 @@
+{
+  "classifier": {
+    "path": "scripts/bma-route-classifier.py",
+    "sha256": "2f42aa3f7fdf3638c67200be9f1e24bf30330e32a8e35c6ef7be2983e0afe862"
+  },
+  "closure": {
+    "path": "references/runtime/closure.json",
+    "sha256": "8fdd688889e00dae72ab235201320adcd97c2e4eb04077497b8e44e214aa63a6"
+  },
+  "compatibility": {
+    "classifier_schema": 1,
+    "closure_schema": 1,
+    "patterns_schema": 1
+  },
+  "destination_identity": "gcp-to-aws",
+  "patterns": {
+    "path": "references/runtime/bma-input-patterns.json",
+    "sha256": "de228aea7f9ec4f5dfc93375151b2bb0fa456b7fed72dd6591db8a18b977f465"
+  },
+  "schema_version": 1,
+  "selected_base": "4a51ac3f086499dcd1e1154992109e77f0bebaa6",
+  "self_hash": "d45f71559fd0131aafbcf192c561a25ff04896956c5eadddc13c9ed45a2e70c7"
+}

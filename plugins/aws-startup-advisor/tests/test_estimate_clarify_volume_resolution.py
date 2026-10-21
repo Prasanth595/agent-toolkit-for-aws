@@ -57,7 +57,7 @@ AZURE_ESTIMATE_AI = (
 GCP_ESTIMATE_AI = (
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "estimate"
@@ -75,7 +75,7 @@ AZURE_CLARIFY_AI_ONLY = (
 GCP_DISCOVER_ANTHROPIC = (
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"

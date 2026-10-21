@@ -4,6 +4,10 @@
 
 **Execute ALL steps in order. Do not skip or optimize.**
 
+## Contribution boundary
+
+For an active AI track, consume exactly one validated set of BMA `ai.*` report contributions, sorted by numeric bucket, numeric source order, then UTF-8 ID. Invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with the final report contribution set; write `migration-report.html` only through that production entrypoint and retain its audit row. Reject duplicate IDs/order keys, inactive targets, invalid markup, traceability mismatches, or an existing final target before writing. This GCP assembler remains the sole combined `migration-report.html` writer.
+
 ## Overview
 
 Generate a single self-contained HTML report (`migration-report.html`) combining an executive summary with detailed appendix. The HTML file uses inline CSS — no external dependencies required. Users can open it in any browser and use "Print to PDF" if a PDF is needed.

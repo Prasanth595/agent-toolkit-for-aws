@@ -50,7 +50,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 ANTHROPIC_DISCOVER_FILES = [
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"
@@ -67,7 +67,7 @@ ANTHROPIC_DISCOVER_FILES = [
 OPENROUTER_DISCOVER_FILES = [
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"
@@ -84,7 +84,7 @@ OPENROUTER_DISCOVER_FILES = [
 ESTIMATE_AI_FILES = [
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "estimate"

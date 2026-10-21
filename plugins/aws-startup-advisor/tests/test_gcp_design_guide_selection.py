@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-GCP_DESIGN_AI = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "design" / "design-ai.md"
+GCP_DESIGN_AI = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "design" / "design-ai.md"
 
 
 def test_both_branch_no_longer_hardcodes_gemini_and_openai_only() -> None:

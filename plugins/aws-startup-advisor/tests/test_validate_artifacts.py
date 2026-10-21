@@ -698,6 +698,30 @@ def test_documented_default_run_dir_command_passes_for_a_valid_run(tmp_path: Pat
     # is still audited for stale entries: test_stale_baseline_entry_fails_the_gate.
 
 
+def test_bma_and_delegated_validator_contexts_have_matching_verdicts(tmp_path: Path):
+    base = {
+        "migration_id": "0101-0000",
+        "run_id": "00000000-0000-4000-8000-000000000001",
+        "last_updated": "2026-01-01T00:00:00Z",
+        "current_phase": "clarify",
+        "phases": {"discover": "completed", "clarify": "pending"},
+    }
+    for skill, owner in (("bedrock-migration-assessment", "BEDROCK_MIGRATION_ASSESSMENT"), ("gcp-to-aws", "GCP_TO_AWS")):
+        status = {**base, "owning_skill": owner}
+        run = _write_run(tmp_path, f"valid-{skill}", ".phase-status.json", status)
+        result = _run("--run-dir", str(run), "--skill", skill, "--no-baseline", "--json")
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    invalid = {**base, "owning_skill": "BEDROCK_MIGRATION_ASSESSMENT", "unexpected": True}
+    codes = []
+    for skill in ("bedrock-migration-assessment", "gcp-to-aws"):
+        run = _write_run(tmp_path, f"invalid-{skill}", ".phase-status.json", invalid)
+        result = _run("--run-dir", str(run), "--skill", skill, "--no-baseline", "--json")
+        assert result.returncode == 1
+        codes.append([(item["code"], item["path"]) for item in json.loads(result.stdout)["errors"]])
+    assert codes[0] == codes[1] == [("SCHEMA_VIOLATION", "unexpected")]
+
+
 def test_heroku_complete_example_enums_are_enforced_after_merge(tmp_path: Path):
     """Review finding on #385: merging the Heroku Complete Example cleared the declared enums
     on confidence / heroku_generation / discovery_status / dyno_type."""

@@ -103,7 +103,8 @@ skill's own directory. It does **not** depend on `${CLAUDE_PLUGIN_ROOT}`. **When
 installed, `gcp-to-aws` wins** — it is this skill's original, more deeply tested integration,
 so this preserves today's default behavior for every existing user with both skills installed.
 
-- `$ASSESS_SKILL` resolved (either value) → proceed to Step 1.
+- `$ASSESS_SKILL` resolved to `gcp-to-aws` → before Step 1, resolve `$BMA_BASE = <SKILL_BASE>/../bedrock-migration-assessment` and run the GCP-local first pass plus candidate-only exact-sibling 65-entry closure preflight. This occurs immediately after GCP selection and before usage-baseline reads, telemetry persistence, run/state creation, source mutation, or artifact writes. A missing/tampered BMA stops with no mutation and MUST NOT fall through to Azure. The `gcp-to-aws` assessment installation therefore requires all three siblings: `llm-to-bedrock`, `gcp-to-aws`, and `bedrock-migration-assessment`.
+- `$ASSESS_SKILL` resolved to `azure-to-aws` → proceed to Step 1 without inspecting BMA; Azure convergence is issue #389 stage 3d.
 - `ASSESS_SIBLING_MISSING` → **stop here — do not proceed.** Tell the user:
 
   > "This migration needs either the `gcp-to-aws` or the `azure-to-aws` skill installed
@@ -112,8 +113,8 @@ so this preserves today's default behavior for every existing user with both ski
   > plugin as this skill, so if you installed the whole plugin one of them should already be
   > next to me — it looks like only some of the plugin's skills were installed. Install the pair
   > together with:
-  > `npx skills add aws/agent-toolkit-for-aws/plugins/aws-startup-advisor/skills --skill llm-to-bedrock --skill gcp-to-aws`
-  > (or substitute `azure-to-aws` if your source infra runs on Azure; use the same `--agent` and
+  > `npx skills add aws/agent-toolkit-for-aws/plugins/aws-startup-advisor/skills --skill llm-to-bedrock --skill gcp-to-aws --skill bedrock-migration-assessment`
+  > (or use the separate Azure pair: `--skill llm-to-bedrock --skill azure-to-aws` if your source infra runs on Azure; use the same `--agent` and
   > `--global`/project scope you used for this skill), or run that same `npx skills add` command
   > with `--skill '*'` instead of naming individual skills to get every skill at once. Then
   > restart your agent and ask me to migrate again."

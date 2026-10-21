@@ -270,7 +270,7 @@
     },
     {
       "category": "cloud",
-      "description": "AWS Startup Advisor puts an AWS Startups Solutions Architect in your coding assistant. It recommends the smallest architecture that fits your stage, credits, and team, then can scaffold it, migrate you from Azure, Google Cloud, or Heroku, move your model calls to Amazon Bedrock, and investigate production incidents. It also answers your AWS Activate credits eligibility questions and finds startup offers you can use.",
+      "description": "AWS Startup Advisor puts an AWS Startups Solutions Architect in your coding assistant. It recommends the smallest architecture that fits your stage, credits, and team, then can scaffold it, migrate you from Azure, Google Cloud, or Heroku, assess and plan source-neutral AI migrations to Amazon Bedrock, rewrite model calls, and investigate production incidents. It also answers your AWS Activate credits eligibility questions and finds startup offers you can use.",
       "keywords": [
         "aws",
         "startups",
@@ -333,6 +333,7 @@
         "mvp",
         "rag",
         "bedrock-migration",
+        "bedrock-migration-assessment",
         "rewrite-sdk-calls",
         "deploy-ai-agent",
         "choose-agent-runtime",

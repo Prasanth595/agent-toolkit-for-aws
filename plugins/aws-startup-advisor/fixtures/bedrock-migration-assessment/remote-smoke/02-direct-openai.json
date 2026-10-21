@@ -1,0 +1,1 @@
+{"scenario_id":"direct-openai-design","mode":"direct","profile":{"provider":"openai","source_service":"openai_api","models":["gpt-5.6-terra"],"gateway":null},"preferences":{"priority":"balanced","region":"us-east-1"},"question":"Who owns the run and what source/model identity is preserved?"}

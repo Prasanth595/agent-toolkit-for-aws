@@ -1,5 +1,9 @@
 # Phase 4: Estimate AWS Costs (Orchestrator)
 
+## BMA delegation boundary
+
+When the AI route is active, pass the existing `$MIGRATION_DIR` through the restricted `estimate-ai.md` shim to the exact preflighted BMA sibling. BMA is the sole `estimation-ai.json` writer; GCP retains infrastructure/billing routing, the Decision gate, workshop, outer state, and handoff emission.
+
 ## Telemetry boundary
 
 Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BMA_AI_CLARIFY_RESULT",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "constraints",
+    "workloads",
+    "question_metadata"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "kind": {
+      "const": "BMA_AI_CLARIFY_RESULT"
+    },
+    "constraints": {
+      "type": "object"
+    },
+    "workloads": {
+      "type": "array"
+    },
+    "question_metadata": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,748 @@
+#!/usr/bin/env python3
+"""Deterministic contracts shared by direct and delegated BMA execution.
+
+Direct preflight loads `scripts/bma-route-classifier.py`; route inventory uses
+`references/runtime/bma-input-patterns.json`. The classifier is the only closure
+validator used here, by delegated preflight, packaging, and reference lint.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import sys
+import tempfile
+import types
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+OWNER_DIRECT = "BEDROCK_MIGRATION_ASSESSMENT"
+OWNER_DELEGATED = "GCP_TO_AWS"
+BMA_OWNER = "bedrock-migration-assessment"
+GCP_OWNER = "gcp-to-aws"
+PHASES = ("discover", "clarify", "design", "estimate", "generate")
+
+# Closed, canonical final-writer surface. Directory policies below cover only
+# provider capture material and generated AI migration files.
+WRITERS = {
+    "direct": {
+        ".phase-status.json": BMA_OWNER,
+        ".gate-failures.json": BMA_OWNER,
+        "migration-preview.json": BMA_OWNER,
+        "ai-workload-profile.json": BMA_OWNER,
+        "openai-usage-profile.json": BMA_OWNER,
+        "anthropic-usage-profile.json": BMA_OWNER,
+        "openrouter-usage-profile.json": BMA_OWNER,
+        "preferences-draft.json": BMA_OWNER,
+        "preferences.json": BMA_OWNER,
+        "aws-design-ai.json": BMA_OWNER,
+        "estimation-ai.json": BMA_OWNER,
+        "generation-ai.json": BMA_OWNER,
+        "STARTUP_PROGRAMS.md": BMA_OWNER,
+        "MIGRATION_GUIDE.md": BMA_OWNER,
+        "README.md": BMA_OWNER,
+        "decision-report.html": BMA_OWNER,
+        "DECISION.md": BMA_OWNER,
+        "migration-report.html": BMA_OWNER,
+    },
+    "delegated": {
+        ".phase-status.json": GCP_OWNER,
+        ".gate-failures.json": GCP_OWNER,
+        "migration-preview.json": GCP_OWNER,
+        "ai-workload-profile.json": BMA_OWNER,
+        "openai-usage-profile.json": BMA_OWNER,
+        "anthropic-usage-profile.json": BMA_OWNER,
+        "openrouter-usage-profile.json": BMA_OWNER,
+        "preferences-draft.json": GCP_OWNER,
+        "preferences.json": GCP_OWNER,
+        "aws-design-ai.json": BMA_OWNER,
+        "estimation-ai.json": BMA_OWNER,
+        "generation-ai.json": BMA_OWNER,
+        "STARTUP_PROGRAMS.md": BMA_OWNER,
+        "MIGRATION_GUIDE.md": GCP_OWNER,
+        "README.md": GCP_OWNER,
+        "decision-report.html": GCP_OWNER,
+        "DECISION.md": GCP_OWNER,
+        "migration-report.html": GCP_OWNER,
+    },
+}
+MUTABLE_OUTPUTS = {
+    ".phase-status.json", ".gate-failures.json", "migration-preview.json",
+    "ai-workload-profile.json", "openai-usage-profile.json",
+    "anthropic-usage-profile.json", "openrouter-usage-profile.json",
+    "preferences-draft.json",
+}
+TRANSIENT_OUTPUTS = {".anthropic-admin-env", ".openai-admin-env", ".openrouter-key-env"}
+CAPTURE_PREFIXES = ("openai-capture/", "anthropic-capture/", "openrouter-capture/")
+GENERATED_PREFIX = "ai-migration/"
+
+
+def resolve_region(compliance: list[str], explicit_regions: list[str], cross_cloud: str,
+                   delegated_region: str | None = None) -> dict[str, Any]:
+    values = sorted(set(explicit_regions))
+    compliance_set = set(compliance)
+    if "fedramp" in compliance_set:
+        return {"region": "us-gov-west-1", "source": "compliance"}
+    if "gdpr" in compliance_set:
+        return {"region": "eu-west-1", "source": "compliance"}
+    if "hipaa" in compliance_set:
+        return {"region": "us-east-1", "source": "compliance"}
+    if delegated_region:
+        return {"region": delegated_region, "source": "delegated_source_region"}
+    if len(values) > 1:
+        return {"region": None, "source": "clarify_required", "candidates": values}
+    if values:
+        return {"region": values[0], "source": "application_region"}
+    if cross_cloud == "latency-critical":
+        return {"region": None, "source": "clarify_required", "candidates": []}
+    return {"region": "us-east-1", "source": "fallback"}
+
+
+def route(mode: str, has_ai_profile: bool, source_containing: bool,
+          iac_vertex: bool = False) -> dict[str, Any]:
+    if mode not in {"direct", "delegated"}:
+        raise ValueError("mode_invalid")
+    active = has_ai_profile or iac_vertex
+    return {
+        "mode": mode,
+        "scan_neutral_source": source_containing,
+        "ai_route_active": active,
+        "owning_skill": OWNER_DIRECT if mode == "direct" else OWNER_DELEGATED,
+        "telemetry_owner": None if mode == "direct" else GCP_OWNER,
+    }
+
+
+def state_decision(state: dict[str, Any], execute_requested: bool = False) -> dict[str, Any]:
+    if not isinstance(state, dict) or not isinstance(state.get("phases"), dict):
+        return {"action": "reconstruct", "phase": "discover", "write_state": False}
+    phases = state["phases"]
+    dirty = state.get("dirty_state")
+    if isinstance(dirty, dict) and dirty.get("phase") == "generate":
+        return {"action": "resume_dirty", "phase": "generate", "write_state": False}
+    if state.get("stale_downstream"):
+        return {"action": "confirm_reentry", "phase": state.get("current_phase"), "write_state": False}
+    for phase in PHASES[:-1]:
+        if phases.get(phase) != "completed":
+            return {"action": "run", "phase": phase, "write_state": False}
+    if phases.get("workshop") == "in_progress":
+        return {"action": "resume_workshop", "phase": "workshop", "write_state": False}
+    if phases.get("generate") == "completed":
+        return {"action": "complete", "phase": None, "write_state": False}
+    if state.get("run_mode") == "decide_and_execute" or execute_requested:
+        return {"action": "run", "phase": "generate", "write_state": False}
+    return {"action": "offer_generate", "phase": None, "write_state": False}
+
+
+def next_phase(state: dict[str, Any], execute_requested: bool = False) -> str:
+    decision = state_decision(state, execute_requested)
+    return decision["phase"] or "complete"
+
+
+def writer(mode: str, artifact: str) -> str:
+    try:
+        return WRITERS[mode][artifact]
+    except KeyError as exc:
+        if artifact.startswith(CAPTURE_PREFIXES) or artifact in TRANSIENT_OUTPUTS or artifact.startswith(GENERATED_PREFIX):
+            return BMA_OWNER
+        raise ValueError("writer_not_registered") from exc
+
+
+def consent_decision(status: str, requests: int = 0, retry_pending: bool = False,
+                     cost: int | float | None = None) -> dict[str, Any]:
+    """Normalize provider-capture outcomes without converting unknown cost to zero."""
+    if status not in {"declined", "all_failed", "succeeded"}:
+        raise ValueError("consent_status_invalid")
+    if not isinstance(requests, int) or requests < 0 or not isinstance(retry_pending, bool):
+        raise ValueError("consent_request_invalid")
+    if cost is not None and (not isinstance(cost, (int, float)) or isinstance(cost, bool)):
+        raise ValueError("consent_cost_invalid")
+    if status == "declined":
+        if requests or retry_pending or cost is not None:
+            raise ValueError("consent_decline_invalid")
+        return {"status": status, "requests": 0, "profile_written": False,
+                "retry_pending": False, "next": "continue", "cost": None}
+    if status == "all_failed":
+        if requests == 0 or cost is not None:
+            raise ValueError("consent_failure_invalid")
+        return {"status": status, "requests": requests, "profile_written": False,
+                "retry_pending": retry_pending, "next": "retry" if retry_pending else "continue",
+                "cost": None}
+    if requests == 0 or retry_pending:
+        raise ValueError("consent_success_invalid")
+    return {"status": status, "requests": requests, "profile_written": True,
+            "retry_pending": False, "next": "continue", "cost": cost}
+
+
+MODEL_TARGETS = {
+    "claude-3-5-sonnet-20240620": ("anthropic.claude-sonnet-4-5-v1:0", "anthropic_sdk", 3.0, 15.0),
+    "claude-3-haiku-20240307": ("anthropic.claude-haiku-4-5-v1:0", "anthropic_sdk", 0.25, 1.25),
+    "gpt-4o": ("openai.gpt-5.6-terra", "direct_api", 2.2, 13.2),
+    "gemini-2.5-pro": ("amazon.nova-pro-v1:0", "google_genai_sdk", 0.8, 3.2),
+}
+GENERATED_FILES = {
+    "anthropic_sdk": ["ai-migration/anthropic-adapter.ts"],
+    "direct_api": ["ai-migration/bedrock-client.py"],
+    "google_genai_sdk": ["ai-migration/gemini-adapter.py"],
+    "vertex_adapter": ["ai-migration/vertex-adapter.py"],
+    "openrouter_byok": ["ai-migration/openrouter-config.json", "ai-migration/model-map.json"],
+}
+REPORT_SCOPES = {
+    "none": [],
+    "decision": ["DECISION.md", "decision-report.html"],
+    "full": ["DECISION.md", "decision-report.html", "MIGRATION_GUIDE.md", "README.md", "migration-report.html"],
+    "migration": ["MIGRATION_GUIDE.md", "README.md", "migration-report.html"],
+}
+
+
+def _capture_outcome(value: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) not in (
+        {"decision"}, {"decision", "attempts", "retry_pending", "observed_cost"},
+    ):
+        raise ValueError("trace_capture_invalid")
+    if value["decision"] == "declined":
+        return consent_decision("declined")
+    attempts = value.get("attempts")
+    retry_pending = value.get("retry_pending")
+    if (value["decision"] != "approved" or not isinstance(attempts, list)
+            or not attempts or not all(isinstance(item, bool) for item in attempts)
+            or not isinstance(retry_pending, bool)):
+        raise ValueError("trace_capture_invalid")
+    succeeded = any(attempts)
+    cost = value.get("observed_cost") if succeeded else None
+    return consent_decision(
+        "succeeded" if succeeded else "all_failed",
+        requests=len(attempts), retry_pending=retry_pending, cost=cost,
+    )
+
+
+def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
+    """Derive cross-phase outcomes under the following known limitation.
+
+    The equivalence harness carries its own copy of model-mapping, pricing, generated-file, and report-section rules. The Markdown phase files the agent executes do not read those tables. The harness therefore proves the extracted runtime matches the selected base as of this change, but will NOT detect a future edit to the Markdown that changes mappings, prices, or report composition. Reviewers must check such edits by hand until the tables are moved into shared data files consumed by both (tracked as a follow-up to issue #389).
+    """
+    required = {
+        "schema_version", "mode", "source_containing", "has_ai_profile",
+        "iac_vertex", "source_evidence", "state", "user_decisions",
+        "capture_observations",
+    }
+    if set(request) != required or request["schema_version"] != 2:
+        raise ValueError("trace_request_invalid")
+    mode = request["mode"]
+    route_result = route(
+        mode, request["has_ai_profile"], request["source_containing"],
+        request["iac_vertex"],
+    )
+    decisions = request["user_decisions"]
+    if not isinstance(decisions, dict) or set(decisions) != {
+        "execute_requested", "generate", "include_rollback", "report_scope"
+    } or not all(isinstance(decisions[key], bool) for key in (
+        "execute_requested", "generate", "include_rollback"
+    )) or decisions["report_scope"] not in REPORT_SCOPES:
+        raise ValueError("trace_decisions_invalid")
+    evidence = request["source_evidence"]
+    if not isinstance(evidence, list):
+        raise ValueError("trace_request_invalid")
+    associations = []
+    mappings = []
+    source_models = []
+    source_costs = []
+    target_costs = []
+    migration_paths = []
+    for source_order, row in enumerate(evidence):
+        if not isinstance(row, dict) or set(row) != {
+            "provider", "source_service", "gateway", "models", "call_sites",
+            "observed_monthly_cost", "monthly_input_tokens", "monthly_output_tokens",
+        }:
+            raise ValueError("trace_source_invalid")
+        models = row["models"]
+        call_sites = row["call_sites"]
+        if not isinstance(models, list) or not models or len(models) != len(set(models)):
+            raise ValueError("trace_source_invalid")
+        if not isinstance(call_sites, list):
+            raise ValueError("trace_source_invalid")
+        pairs = []
+        for site in call_sites:
+            if not isinstance(site, dict) or set(site) != {"file", "line"}:
+                raise ValueError("trace_source_invalid")
+            pair = (site["file"], site["line"])
+            if (not isinstance(pair[0], str) or not pair[0] or pair[0].startswith(("/", "../"))
+                    or not isinstance(pair[1], int) or pair[1] < 0):
+                raise ValueError("trace_source_invalid")
+            pairs.append(pair)
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("trace_source_invalid")
+        observed_cost = row["observed_monthly_cost"]
+        if observed_cost is not None and (not isinstance(observed_cost, (int, float)) or isinstance(observed_cost, bool)):
+            raise ValueError("trace_source_invalid")
+        source_costs.append(observed_cost)
+        token_values = (row["monthly_input_tokens"], row["monthly_output_tokens"])
+        if any(value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0) for value in token_values):
+            raise ValueError("trace_source_invalid")
+        for model in models:
+            if not isinstance(model, str) or model not in MODEL_TARGETS or model in source_models:
+                raise ValueError("trace_source_invalid")
+            source_models.append(model)
+            target, migration_path, input_rate, output_rate = MODEL_TARGETS[model]
+            if row["gateway"] == "openrouter":
+                migration_path = "openrouter_byok"
+            elif row["source_service"] == "vertex_ai":
+                migration_path = "vertex_adapter"
+            associations.append({
+                "source_order": source_order, "provider": row["provider"],
+                "source_service": row["source_service"], "gateway": row["gateway"],
+                "model": model, "call_sites": call_sites,
+            })
+            mappings.append({
+                "source_model": model, "target_model": target,
+                "migration_path": migration_path,
+            })
+            migration_paths.append(migration_path)
+            if None in token_values:
+                target_costs.append(None)
+            else:
+                target_costs.append(round(
+                    token_values[0] / 1_000_000 * input_rate
+                    + token_values[1] / 1_000_000 * output_rate, 2
+                ))
+    source_monthly = None if not source_costs or any(value is None for value in source_costs) else round(sum(source_costs), 2)
+    target_monthly = None if not target_costs or any(value is None for value in target_costs) else round(sum(target_costs), 2)
+    delta = None if source_monthly is None or target_monthly is None else round(target_monthly - source_monthly, 2)
+    if not route_result["ai_route_active"]:
+        pricing_source = "not_applicable" if not request["source_containing"] else "unresolved"
+    elif target_monthly is None:
+        pricing_source = "unavailable"
+    elif source_monthly == 0 and target_monthly == 0:
+        pricing_source = "known_zero"
+    else:
+        pricing_source = "bedrock_cache"
+    generation_route = "none"
+    generated_files: list[str] = []
+    if route_result["ai_route_active"] and decisions["generate"]:
+        unique_paths = list(dict.fromkeys(migration_paths))
+        generation_route = unique_paths[0] if len(unique_paths) == 1 else "combined"
+        for migration_path in unique_paths:
+            generated_files.extend(GENERATED_FILES[migration_path])
+        if decisions["include_rollback"]:
+            generated_files.append("ai-migration/rollback.md")
+    report_targets = REPORT_SCOPES[decisions["report_scope"]]
+    captures = request["capture_observations"]
+    if not isinstance(captures, list):
+        raise ValueError("trace_capture_invalid")
+    consent_trace = [_capture_outcome(value) for value in captures]
+    active_artifacts = []
+    if route_result["ai_route_active"]:
+        active_artifacts = [
+            "ai-workload-profile.json", "preferences.json", "aws-design-ai.json",
+            "estimation-ai.json", "generation-ai.json",
+        ]
+    return {
+        "schema_version": 2,
+        "route": route_result,
+        "associations": associations,
+        "design_mappings": mappings,
+        "estimate": {
+            "source_monthly": source_monthly, "target_monthly": target_monthly,
+            "monthly_delta": delta, "pricing_source": pricing_source,
+        },
+        "generation": {
+            "route": generation_route, "files": generated_files,
+            "writer": BMA_OWNER if generated_files else None,
+        },
+        "state_decision": state_decision(request["state"], decisions["execute_requested"]),
+        "consent": consent_trace,
+        "writers": {artifact: writer(mode, artifact) for artifact in active_artifacts},
+        "report_writers": {target: writer(mode, target) for target in report_targets},
+    }
+
+
+def validate_clarify_result(value: dict[str, Any]) -> dict[str, Any]:
+    if set(value) != {"schema_version", "kind", "constraints", "workloads", "question_metadata"}:
+        raise ValueError("clarify_result_schema_invalid")
+    if value["schema_version"] != 1 or value["kind"] != "BMA_AI_CLARIFY_RESULT":
+        raise ValueError("clarify_result_schema_invalid")
+    if not isinstance(value["constraints"], dict) or not isinstance(value["workloads"], list) or not isinstance(value["question_metadata"], dict):
+        raise ValueError("clarify_result_schema_invalid")
+    ids = [row.get("workload_id") for row in value["workloads"]]
+    if any(not item for item in ids) or len(ids) != len(set(ids)):
+        raise ValueError("clarify_result_workload_invalid")
+    for row in value["workloads"]:
+        sites = row.get("call_sites", [])
+        pairs = [(site.get("file"), site.get("line")) for site in sites]
+        if any(not file or str(file).startswith(("/", "../")) or not isinstance(line, int) or line < 0 for file, line in pairs):
+            raise ValueError("clarify_result_call_site_invalid")
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("clarify_result_call_site_invalid")
+    return value
+
+
+CONTRIBUTION_KINDS = {
+    "DECISION.md": {"callout", "subsection", "table_row"},
+    "decision-report.html": {"callout", "subsection", "table_row"},
+    "MIGRATION_GUIDE.md": {"callout", "rollback_addition", "step", "subsection", "table_row"},
+    "README.md": {"callout", "catalog_row", "subsection", "table_row"},
+    "migration-report.html": {"callout", "subsection", "table_row"},
+}
+CONTRIBUTION_FIELDS = {"id", "bucket", "source_order", "target", "kind", "content"}
+CONTENT_FIELDS = {"text", "links", "traceability"}
+TRACEABILITY_FIELDS = {"provider", "source_service", "model", "call_sites"}
+MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\s*\(")
+MARKDOWN_LINK_DEFINITION = re.compile(r"(?m)^[ \t]*\[[^\]\n]+\]:")
+MARKDOWN_HEADING = re.compile(
+    r"(?m)^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|(?:=+|-+)[ \t]*$)"
+)
+RAW_URL = re.compile(r"(?i)(?:https?://|www\.)")
+TRACE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
+LINK_LABEL = re.compile(r"^[^<>\[\]\r\n]+$")
+HTTPS_LINK = re.compile(r"^https://[^\s/@:?#]+(?::[0-9]+)?(?:/[^\s]*)?$")
+FRAGMENT_LINK = re.compile(r"^#[a-z0-9][a-z0-9-]*$")
+
+
+def _validate_link(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != {"label", "href"}:
+        raise ValueError("contribution_link_invalid")
+    label, href = value["label"], value["href"]
+    if not isinstance(label, str) or not LINK_LABEL.fullmatch(label):
+        raise ValueError("contribution_link_invalid")
+    if not isinstance(href, str) or any(character.isspace() for character in href):
+        raise ValueError("contribution_link_invalid")
+    if FRAGMENT_LINK.fullmatch(href):
+        return
+    parsed = urlsplit(href)
+    if (not HTTPS_LINK.fullmatch(href) or parsed.scheme != "https" or not parsed.netloc
+            or parsed.username is not None or parsed.password is not None):
+        raise ValueError("contribution_link_invalid")
+
+
+def _validate_traceability(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != TRACEABILITY_FIELDS:
+        raise ValueError("contribution_traceability_invalid")
+    if any(not isinstance(value[field], str) or not TRACE_TOKEN.fullmatch(value[field])
+           for field in ("provider", "source_service", "model")):
+        raise ValueError("contribution_traceability_invalid")
+    sites = value["call_sites"]
+    if not isinstance(sites, list) or not sites:
+        raise ValueError("contribution_traceability_invalid")
+    identities = []
+    for site in sites:
+        if not isinstance(site, dict) or set(site) != {"file", "line"}:
+            raise ValueError("contribution_traceability_invalid")
+        file, line = site["file"], site["line"]
+        if (not isinstance(file, str) or not file or Path(file).is_absolute()
+                or ".." in Path(file).parts or Path(file).as_posix() != file
+                or not isinstance(line, int) or isinstance(line, bool) or line < 0):
+            raise ValueError("contribution_traceability_invalid")
+        identities.append((file, line))
+    if len(identities) != len(set(identities)):
+        raise ValueError("contribution_traceability_invalid")
+
+
+def _validate_content(value: Any) -> None:
+    if not isinstance(value, dict) or set(value) != CONTENT_FIELDS:
+        raise ValueError("contribution_content_invalid")
+    text, links = value["text"], value["links"]
+    if (not isinstance(text, str) or not text or "<" in text or ">" in text
+            or MARKDOWN_HEADING.search(text) or MARKDOWN_LINK.search(text)
+            or MARKDOWN_LINK_DEFINITION.search(text) or RAW_URL.search(text)
+            or any(ord(character) < 32 and character not in "\n\t" for character in text)):
+        raise ValueError("contribution_content_invalid")
+    if not isinstance(links, list):
+        raise ValueError("contribution_link_invalid")
+    for link in links:
+        _validate_link(link)
+    _validate_traceability(value["traceability"])
+
+
+def order_contributions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        raise ValueError("contribution_schema_invalid")
+    identities = [value.get("id") if isinstance(value, dict) else None for value in values]
+    orders = [(value.get("bucket"), value.get("source_order"), value.get("id"))
+              if isinstance(value, dict) else (None, None, None) for value in values]
+    if any(not isinstance(identity, str) or not identity.startswith("ai.") for identity in identities):
+        raise ValueError("contribution_id_invalid")
+    if len(identities) != len(set(identities)) or len(orders) != len(set(orders)):
+        raise ValueError("contribution_duplicate")
+    for value in values:
+        if set(value) != CONTRIBUTION_FIELDS:
+            raise ValueError("contribution_schema_invalid")
+        target = value["target"]
+        if (target not in CONTRIBUTION_KINDS or value["kind"] not in CONTRIBUTION_KINDS[target]
+                or not isinstance(value["bucket"], int) or isinstance(value["bucket"], bool)
+                or not isinstance(value["source_order"], int) or isinstance(value["source_order"], bool)):
+            raise ValueError("contribution_schema_invalid")
+        _validate_content(value["content"])
+    return sorted(values, key=lambda value: (value["bucket"], value["source_order"], value["id"].encode("utf-8")))
+
+
+def _payload_bytes(payload: Any) -> bytes:
+    if isinstance(payload, (dict, list)):
+        return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+    if isinstance(payload, str):
+        return payload.encode()
+    raise ValueError("write_payload_invalid")
+
+
+def _relative_path(relative: str) -> Path:
+    if not isinstance(relative, str):
+        raise ValueError("write_path_invalid")
+    path = Path(relative)
+    if not relative or path.is_absolute() or ".." in path.parts or path.as_posix() != relative or "." in path.parts:
+        raise ValueError("write_path_invalid")
+    return path
+
+
+def _assert_no_follow(root: Path, path: Path) -> None:
+    """Reject every existing symlink component and resolved containment escape."""
+    current = root
+    for part in path.parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode):
+            raise ValueError("write_path_invalid")
+    try:
+        (root / path).resolve(strict=False).relative_to(root)
+    except ValueError as exc:
+        raise ValueError("write_path_invalid") from exc
+
+
+class WriteAudit:
+    """Closed one-writer guard with staged, rollback-safe publication."""
+
+    def __init__(self, run_dir: Path, mode: str, scenario: str):
+        if mode not in WRITERS or not run_dir.is_dir() or run_dir.is_symlink():
+            raise ValueError("write_context_invalid")
+        self.run_dir = run_dir.resolve()
+        self.mode = mode
+        self.scenario = scenario
+        self.operations: list[dict[str, str]] = []
+        self._prepared: list[dict[str, Any]] = []
+        self._paths: set[str] = set()
+
+    def prepare(self, phase: str, relative: str, payload: Any,
+                logical_owner: str | None = None,
+                expected_sha256: str | None = None) -> None:
+        path = _relative_path(relative)
+        if not isinstance(phase, str) or not phase:
+            raise ValueError("write_request_invalid")
+        selected = writer(self.mode, relative)
+        if logical_owner is not None and logical_owner != selected:
+            raise ValueError("writer_owner_invalid")
+        if relative in self._paths:
+            raise ValueError("duplicate_final_write")
+        _assert_no_follow(self.run_dir, path)
+        target = self.run_dir / path
+        exists = target.exists()
+        mutable = relative in MUTABLE_OUTPUTS or relative.startswith(CAPTURE_PREFIXES) or relative in TRANSIENT_OUTPUTS
+        if exists:
+            if target.is_dir() or not mutable:
+                raise ValueError("duplicate_final_write")
+            if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+                raise ValueError("expected_prior_hash_required")
+            if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
+                raise ValueError("expected_prior_hash_mismatch")
+        elif expected_sha256 is not None:
+            raise ValueError("expected_prior_hash_unexpected")
+        data = _payload_bytes(payload)
+        self._paths.add(relative)
+        self._prepared.append({
+            "phase": phase, "relative": relative, "path": path, "target": target,
+            "owner": selected, "data": data, "replace": exists,
+        })
+
+    def write(self, phase: str, relative: str, payload: Any,
+              logical_owner: str | None = None,
+              expected_sha256: str | None = None) -> None:
+        """Compatibility helper: prepare and publish one fully validated row."""
+        self.prepare(phase, relative, payload, logical_owner, expected_sha256)
+        self.publish()
+
+    def publish(self) -> None:
+        if not self._prepared:
+            return
+        stage = Path(tempfile.mkdtemp(prefix=".bma-stage-", dir=self.run_dir))
+        backups = stage / "backups"
+        created_dirs: list[Path] = []
+        published: list[dict[str, Any]] = []
+        try:
+            staged_files: list[Path] = []
+            for index, item in enumerate(self._prepared):
+                staged = stage / f"payload-{index}"
+                staged.write_bytes(item["data"])
+                staged_files.append(staged)
+            for item, staged in zip(self._prepared, staged_files):
+                _assert_no_follow(self.run_dir, item["path"])
+                parent = item["target"].parent
+                missing: list[Path] = []
+                cursor = parent
+                while cursor != self.run_dir and not cursor.exists():
+                    missing.append(cursor)
+                    cursor = cursor.parent
+                _assert_no_follow(self.run_dir, item["path"].parent)
+                for directory in reversed(missing):
+                    directory.mkdir()
+                    created_dirs.append(directory)
+                _assert_no_follow(self.run_dir, item["path"])
+                backup = None
+                if item["replace"]:
+                    backups.mkdir(exist_ok=True)
+                    backup = backups / f"original-{len(published)}"
+                    os.replace(item["target"], backup)
+                try:
+                    os.replace(staged, item["target"])
+                except Exception:
+                    if backup is not None and backup.exists():
+                        os.replace(backup, item["target"])
+                    raise
+                published.append({**item, "backup": backup})
+            self.operations.extend({
+                "scenario": self.scenario, "phase": item["phase"],
+                "logical_owner": item["owner"], "path": item["relative"],
+                "operation": "write", "sha256": hashlib.sha256(item["data"]).hexdigest(),
+            } for item in self._prepared)
+            self._prepared = []
+        except Exception:
+            for item in reversed(published):
+                try:
+                    if item["target"].exists() and not item["target"].is_symlink():
+                        item["target"].unlink()
+                    if item["backup"] is not None and item["backup"].exists():
+                        os.replace(item["backup"], item["target"])
+                except OSError:
+                    pass
+            for directory in reversed(created_dirs):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            raise
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _render_contribution(value: dict[str, Any]) -> str:
+    text = value["content"]["text"]
+    links = value["content"]["links"]
+    if links:
+        text += "\n" + " ".join(f'[{link["label"]}]({link["href"]})' for link in links)
+    return text
+
+
+def _assembly_payload(target: str, contributions: list[dict[str, Any]]) -> str:
+    ordered = order_contributions(contributions)
+    if target not in CONTRIBUTION_KINDS or any(value["target"] != target for value in ordered):
+        raise ValueError("contribution_target_invalid")
+    return "\n".join(_render_contribution(value) for value in ordered) + "\n"
+
+
+def assemble_contributions(audit: WriteAudit, phase: str, target: str,
+                           contributions: list[dict[str, Any]]) -> None:
+    audit.write(phase, target, _assembly_payload(target, contributions))
+
+
+def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
+    """Prevalidate a complete phase request, then publish it rollback-safely."""
+    allowed = {"schema_version", "mode", "scenario", "run_dir", "state",
+               "execute_requested", "consent", "clarify_result", "writes", "assemblies"}
+    if set(request) - allowed or request.get("schema_version") != 1:
+        raise ValueError("execution_request_invalid")
+    mode = request.get("mode")
+    scenario = request.get("scenario")
+    if mode not in WRITERS or not isinstance(scenario, str) or not scenario:
+        raise ValueError("execution_request_invalid")
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "scenario": scenario,
+        "mode": mode,
+        "state_decision": state_decision(request.get("state", {}), bool(request.get("execute_requested", False))),
+        "consent": [],
+        "clarify_result": None,
+        "operations": [],
+    }
+    if request.get("clarify_result") is not None:
+        result["clarify_result"] = validate_clarify_result(request["clarify_result"])
+    consent = request.get("consent", [])
+    if not isinstance(consent, list):
+        raise ValueError("consent_request_invalid")
+    for value in consent:
+        if not isinstance(value, dict) or set(value) != {"status", "requests", "retry_pending", "cost"}:
+            raise ValueError("consent_request_invalid")
+        result["consent"].append(consent_decision(**value))
+    writes = request.get("writes", [])
+    assemblies = request.get("assemblies", [])
+    if not isinstance(writes, list) or not isinstance(assemblies, list):
+        raise ValueError("execution_request_invalid")
+    if writes or assemblies:
+        run_dir = Path(request.get("run_dir", ""))
+        audit = WriteAudit(run_dir, mode, scenario)
+        for value in writes:
+            if not isinstance(value, dict) or set(value) not in (
+                {"phase", "path", "payload", "logical_owner"},
+                {"phase", "path", "payload", "logical_owner", "expected_sha256"},
+            ):
+                raise ValueError("write_request_invalid")
+            audit.prepare(value["phase"], value["path"], value["payload"],
+                          value["logical_owner"], value.get("expected_sha256"))
+        for value in assemblies:
+            if not isinstance(value, dict) or set(value) != {"phase", "target", "contributions"}:
+                raise ValueError("assembly_request_invalid")
+            audit.prepare(value["phase"], value["target"],
+                          _assembly_payload(value["target"], value["contributions"]))
+        audit.publish()
+        result["operations"] = audit.operations
+    return result
+
+
+def closure_preflight(base: Path) -> dict[str, Any]:
+    classifier = base / "scripts/bma-route-classifier.py"
+    module = types.ModuleType("bma_route_classifier")
+    exec(compile(classifier.read_text(encoding="utf-8"), str(classifier), "exec"), module.__dict__)
+    events: list[dict[str, str]] = []
+    result = module.validate_closure(base, events)
+    return {**result, "mutation_count": 0, "audit": events}
+
+
+def _json_input(path: str) -> dict[str, Any]:
+    text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    value = json.loads(text)
+    if not isinstance(value, dict):
+        raise ValueError("json_object_required")
+    return value
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    commands = parser.add_subparsers(dest="command", required=True)
+    region = commands.add_parser("resolve-region")
+    region.add_argument("--compliance", default="none")
+    region.add_argument("--regions", default="")
+    region.add_argument("--cross-cloud", default="latency-acceptable")
+    region.add_argument("--delegated-region")
+    preflight = commands.add_parser("preflight")
+    preflight.add_argument("--bma-base", type=Path, required=True)
+    execute = commands.add_parser("execute")
+    execute.add_argument("--request", required=True, help="JSON request path, or - for stdin")
+    trace = commands.add_parser("trace")
+    trace.add_argument("--request", required=True, help="Raw semantic-trace request path, or - for stdin")
+    args = parser.parse_args()
+    if args.command == "resolve-region":
+        output = resolve_region(args.compliance.split(","), [x for x in args.regions.split(",") if x], args.cross_cloud, args.delegated_region)
+    elif args.command == "preflight":
+        output = closure_preflight(args.bma_base)
+    elif args.command == "trace":
+        output = semantic_trace(_json_input(args.request))
+    else:
+        output = execute_contract(_json_input(args.request))
+    print(json.dumps(output, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

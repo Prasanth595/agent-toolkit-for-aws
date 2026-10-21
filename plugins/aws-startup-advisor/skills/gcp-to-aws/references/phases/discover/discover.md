@@ -15,6 +15,14 @@ Lightweight orchestrator that delegates to domain-specific discoverers. Each sub
 
 Multiple artifacts can be produced in a single run — they are not mutually exclusive.
 
+## Preflight: select resume read-only, then classify before mutation
+
+Before classification or Step 0 mutation, inspect `.migration/` read-only. If existing runs are present, list them with phase status and ask the Step 0 Resume/Fresh/Cancel question now. Hold the answer only in invocation memory: for Resume, set `$SELECTED_RESUME_DIR` to the exact selected existing run; for Fresh, leave it empty; for Cancel, stop. Do not create a directory, persist consent, reconstruct or rewrite state, retire stale artifacts, reconcile telemetry, checkpoint, or write any artifact during this selection.
+
+Invoke `scripts/bma-route-classifier.py classify` with the GCP-local `references/runtime/bma-input-patterns.json`, `references/runtime/bma-bootstrap-manifest.json`, pinned manifest SHA `439a4210d43966eb624bd02d1461eafabe3ff75de72b6beb9c3f013981ef5815`, explicit provider intent, project root, and `--resume-dir "$SELECTED_RESUME_DIR"` when Resume was selected. Do not pass or resolve a BMA path on this first pass. If `AI_CANDIDATE` is false, continue without any BMA operation. If true, resolve exactly `<GCP_BASE>/../bedrock-migration-assessment`, rerun the exact same command and resume argument with that `--bma-base`, and require the complete 65-entry closure audit, exact sibling, unchanged before/after trees, and `mutation_count: 0` before Step 0. This preflight is read-only and precedes migration-directory creation, consent persistence, state reconstruction, stale retirement, telemetry reconciliation, checkpoint, or artifact write. A source-free durable AI resume therefore cannot continue unless its selected run was classified and the exact BMA sibling closure passed.
+
+Keep the selected-base Discover order after successful preflight: GCP IaC/Vertex seed → BMA app scan → GCP billing/live → BMA OpenAI/OpenRouter/Anthropic → GCP preview. Source-containing input below the AI confidence threshold writes no new AI profile and does not activate downstream AI unless an `iac_vertex` profile was retained. Every BMA write is submitted as one complete request to the production runtime boundary. When BMA enriches a GCP Vertex seed or an existing profile/capture, include the SHA-256 of the exact prior bytes as `expected_sha256`; arbitrary owners, unknown paths, stale hashes, and partial publication are rejected before any durable write.
+
 ## Step 0: Initialize Migration State
 
 0. **Orientation (fresh runs only):** When this is a new migration (no existing `.migration/` runs, or the user chooses Fresh below), open your first response with this block — before any scanning output. Skip it entirely when resuming an existing run (the breadcrumb in the resume message covers position).
@@ -23,12 +31,8 @@ Multiple artifacts can be produced in a single run — they are not mutually exc
 
    Do not pad it, restate it later, or block on it — continue directly into discovery in the same turn.
 
-1. Check for existing `.migration/` directory at the project root.
-   - **If existing runs found:** List them with their phase status and ask:
-     - `[A] Resume: Continue with [latest run]`
-     - `[B] Fresh: Create new migration run`
-     - `[C] Cancel`
-   - **If resuming:** Set `$MIGRATION_DIR` to the selected run's directory. Read its `.phase-status.json` and skip to the appropriate phase per the State Machine in SKILL.md.
+1. Apply the read-only selection already made before preflight.
+   - **If resuming:** Set `$MIGRATION_DIR` to `$SELECTED_RESUME_DIR`. Read its `.phase-status.json` and skip to the appropriate phase per the State Machine in SKILL.md. Do not ask the Resume/Fresh/Cancel question again.
    - **If fresh or no existing runs:** Continue to step 2.
 2. Create `.migration/[MMDD-HHMM]/` directory (e.g., `.migration/0226-1430/`) using current timestamp (MMDD = month/day, HHMM = hour/minute). Set `$MIGRATION_DIR` to this new directory.
 3. Create `.migration/.gitignore` file (if not already present) with exact content:

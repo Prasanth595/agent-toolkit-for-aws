@@ -1,5 +1,7 @@
 # Report Decision Core (shared renderer spec)
 
+When the AI track is active, consume exactly one schema-valid BMA `ai.*` decision contribution set. Invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with the two final assemblies; only that production entrypoint may write `decision-report.html` and `DECISION.md`. Reject duplicate IDs/order keys, inactive targets, wrapper/heading/script/style/anchor injection, traceability mismatch, or existing final targets before either write. GCP remains the sole combined writer.
+
 The executive-summary sections below are the **decision core** — the single
 source of truth for verdict, cost, timeline, risk, and assumption rendering.
 Two consumers load this file; the content rules are identical in both:

@@ -12,22 +12,22 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 PRICING_CACHE_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "shared" / "pricing-cache.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "shared" / "pricing-cache.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "shared" / "pricing-cache.md",
 ]
 
 OPENAI_ON_BEDROCK_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "shared" / "openai-on-bedrock.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "shared" / "openai-on-bedrock.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "shared" / "openai-on-bedrock.md",
 ]
 
 DESIGN_AI_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "design" / "design-ai.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "design" / "design-ai.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "design" / "design-ai.md",
 ]
 
 GENERATE_ARTIFACTS_AI_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-artifacts-ai.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-artifacts-ai.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "generate" / "generate-artifacts-ai.md",
 ]
 
@@ -35,10 +35,10 @@ SCHEMA_DESIGN_AWS_AI = (
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "shared" / "schema-design-aws-ai.md"
 )
 
-GENERATE_AI_GCP = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-ai.md"
+GENERATE_AI_GCP = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-ai.md"
 
 ESTIMATE_AI_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "estimate" / "estimate-ai.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "estimate" / "estimate-ai.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "estimate" / "estimate-ai.md",
 ]
 

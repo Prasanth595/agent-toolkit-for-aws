@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "selected_base": "4a51ac3f086499dcd1e1154992109e77f0bebaa6",
+  "provenance": {
+    "authority": "baseline-evidence/scenarios/manifest.json",
+    "authority_sha256": "76b5ad8159e05ce9e8bd35690ba5797ccd954f9e1c4557e7a3518a5b044e1e0a",
+    "source_artifact_sha256": [
+      "61bbb3467cd622b5cbe2298624eac5b82a27e87adbc4954dae989b3622a9316d",
+      "471d21a1d2299f0fd702ceb68760c2b9c19af825706ae0e5e7dfba05925b1c3a",
+      "90c70cfeb1f3c6ec7fd014e6a7ceb46042559cdc2a0f5dcbf5967a7e2a9c9c88",
+      "cfc4e4482c3da19009a4e05d7358a2bf2f6748b09bb1cd86a8a87823c2f883ad",
+      "71bb82accaa54d4b5b4ef10561687d565f9cdd8394f22af36603a7207ce49175",
+      "e9556e1b6de6829fc49931dc005a76ad12f384124b7dc5376a017a663ac92054"
+    ],
+    "qualification": "Expected projections are separate from extracted-runtime inputs and are based on immutable selected-base artifact identities plus the approved direct-owner substitution. Numeric estimates use the same selected-base pricing rows against the raw token observations in the input fixture."
+  },
+  "projections": {
+    "direct-openai": {"route":[true,true,"BEDROCK_MIGRATION_ASSESSMENT",null],"associations":[["openai","openai_api",null,"gpt-4o"]],"mappings":[["gpt-4o","openai.gpt-5.6-terra","direct_api"]],"costs":[42.5,15.4,-27.1,"bedrock_cache"],"generation":["direct_api",["ai-migration/bedrock-client.py","ai-migration/rollback.md"],"bedrock-migration-assessment"],"state":["run","generate"],"consent":[["succeeded",true,false,0]],"writers":[["DECISION.md","bedrock-migration-assessment"],["MIGRATION_GUIDE.md","bedrock-migration-assessment"],["README.md","bedrock-migration-assessment"],["decision-report.html","bedrock-migration-assessment"],["migration-report.html","bedrock-migration-assessment"]]},
+    "direct-anthropic": {"route":[true,true,"BEDROCK_MIGRATION_ASSESSMENT",null],"associations":[["anthropic","anthropic_api",null,"claude-3-5-sonnet-20240620"]],"mappings":[["claude-3-5-sonnet-20240620","anthropic.claude-sonnet-4-5-v1:0","anthropic_sdk"]],"costs":[null,18.0,null,"bedrock_cache"],"generation":["anthropic_sdk",["ai-migration/anthropic-adapter.ts"],"bedrock-migration-assessment"],"state":["run","design"],"consent":[["declined",false,false,null],["all_failed",false,false,null],["all_failed",false,true,null],["succeeded",true,false,0]],"writers":[["DECISION.md","bedrock-migration-assessment"],["decision-report.html","bedrock-migration-assessment"]]},
+    "gemini-application": {"route":[true,true,"BEDROCK_MIGRATION_ASSESSMENT",null],"associations":[["google","gemini_api",null,"gemini-2.5-pro"]],"mappings":[["gemini-2.5-pro","amazon.nova-pro-v1:0","google_genai_sdk"]],"costs":[0,0.0,0.0,"known_zero"],"generation":["google_genai_sdk",["ai-migration/gemini-adapter.py"],"bedrock-migration-assessment"],"state":["run","clarify"],"consent":[],"writers":[]},
+    "openrouter-multi-upstream": {"route":[true,true,"BEDROCK_MIGRATION_ASSESSMENT",null],"associations":[["anthropic","anthropic_api","openrouter","claude-3-5-sonnet-20240620"],["anthropic","anthropic_api","openrouter","claude-3-haiku-20240307"],["openai","openai_api","openrouter","gpt-4o"]],"mappings":[["claude-3-5-sonnet-20240620","anthropic.claude-sonnet-4-5-v1:0","openrouter_byok"],["claude-3-haiku-20240307","anthropic.claude-haiku-4-5-v1:0","openrouter_byok"],["gpt-4o","openai.gpt-5.6-terra","openrouter_byok"]],"costs":[73.0,34.9,-38.1,"bedrock_cache"],"generation":["openrouter_byok",["ai-migration/openrouter-config.json","ai-migration/model-map.json"],"bedrock-migration-assessment"],"state":["run","estimate"],"consent":[["succeeded",true,false,73.0]],"writers":[]},
+    "delegated-gcp-ai-only": {"route":[true,true,"GCP_TO_AWS","gcp-to-aws"],"associations":[["openai","openai_api",null,"gpt-4o"]],"mappings":[["gpt-4o","openai.gpt-5.6-terra","direct_api"]],"costs":[42.5,15.4,-27.1,"bedrock_cache"],"generation":["direct_api",["ai-migration/bedrock-client.py"],"bedrock-migration-assessment"],"state":["offer_generate",null],"consent":[["succeeded",true,false,42.5]],"writers":[["DECISION.md","gcp-to-aws"],["decision-report.html","gcp-to-aws"]]},
+    "gcp-combined-vertex": {"route":[true,true,"GCP_TO_AWS","gcp-to-aws"],"associations":[["google","vertex_ai",null,"gemini-2.5-pro"],["openai","openai_api",null,"gpt-4o"]],"mappings":[["gemini-2.5-pro","amazon.nova-pro-v1:0","vertex_adapter"],["gpt-4o","openai.gpt-5.6-terra","direct_api"]],"costs":[105.0,19.4,-85.6,"bedrock_cache"],"generation":["combined",["ai-migration/vertex-adapter.py","ai-migration/bedrock-client.py"],"bedrock-migration-assessment"],"state":["resume_workshop","workshop"],"consent":[["succeeded",true,false,40.0]],"writers":[["MIGRATION_GUIDE.md","gcp-to-aws"],["README.md","gcp-to-aws"],["migration-report.html","gcp-to-aws"]]},
+    "source-containing-below-threshold": {"route":[true,false,"GCP_TO_AWS","gcp-to-aws"],"associations":[],"mappings":[],"costs":[null,null,null,"unresolved"],"generation":["none",[],null],"state":["run","clarify"],"consent":[],"writers":[]},
+    "pure-infrastructure": {"route":[false,false,"GCP_TO_AWS","gcp-to-aws"],"associations":[],"mappings":[],"costs":[null,null,null,"not_applicable"],"generation":["none",[],null],"state":["complete",null],"consent":[],"writers":[]}
+  }
+}

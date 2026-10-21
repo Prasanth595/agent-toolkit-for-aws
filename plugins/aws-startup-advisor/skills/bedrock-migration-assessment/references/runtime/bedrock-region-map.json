@@ -1,0 +1,1 @@
+{"schema_version":1,"default":"us-east-1","compliance":{"fedramp":"us-gov-west-1","gdpr":"eu-west-1","hipaa":"us-east-1"}}

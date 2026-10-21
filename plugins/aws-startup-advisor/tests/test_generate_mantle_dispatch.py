@@ -27,7 +27,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 GCP_GENERATE = (
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "generate"

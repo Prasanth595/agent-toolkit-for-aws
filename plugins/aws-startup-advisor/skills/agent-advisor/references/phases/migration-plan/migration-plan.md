@@ -93,6 +93,10 @@ With `$GCP_BASE` resolved per the section above, check whether
 
 Only continue past this point when the engine is present.
 
+## Step -0.5 — Route-sensitive BMA preflight
+
+Before the agent-advisor state write in Step 0, run GCP's read-only classifier first pass against the target repo when this migration-plan route is applicable. If it returns `AI_CANDIDATE: true`, resolve `$BMA_BASE` as the exact sibling of `$GCP_BASE` and require the complete second-pass closure audit before writing phase state, unavailable markers, injection context, or creating a migration run. Missing/tampered BMA stops this attempt with byte-identical state. Idea-only, declined, and `engine_absent` routes never inspect BMA. Continue to execute one GCP outer run; BMA receives that run's existing `$MIGRATION_DIR` and does not create another.
+
 **IMPORTANT — relative path resolution table:** gcp-to-aws
 instruction files use several relative path prefixes. Resolve each as follows (the only path
 that does NOT go under `$GCP_BASE`is`$MIGRATION_DIR`, which stays under the target repo per Step 1):

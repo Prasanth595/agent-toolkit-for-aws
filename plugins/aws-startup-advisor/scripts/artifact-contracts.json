@@ -131,6 +131,20 @@
         "_sections_why": "Workshop baseline capture copies the active estimation-infra.json into scenarios/scenario-NNN.estimation-infra.json. The snapshot is the same artifact, so it uses the same Markdown shape, root heading, and section refinements — not the JSON Schema alone."
       }
     },
+    "bedrock-migration-assessment": {
+      "ai-workload-profile.json": {
+        "shape": "skills/bedrock-migration-assessment/references/shared/schema-discover-ai.md",
+        "root_heading": "ai-workload-profile.json"
+      },
+      "preferences.json": {
+        "shape": "skills/bedrock-migration-assessment/references/shared/schema-preferences.md",
+        "root_heading": "Top-level shape"
+      },
+      "aws-design-ai.json": {
+        "shape": "skills/bedrock-migration-assessment/references/shared/schema-design-aws-ai.md",
+        "root_heading": "Shape"
+      }
+    },
     "heroku-to-aws": {
       "heroku-resource-inventory.json": {
         "shape": "skills/heroku-to-aws/references/shared/schema-discover-heroku.md",
