@@ -18,6 +18,16 @@
 - Do not use em dashes in AWS resource names or descriptions. Use
   hyphens instead.
 
+## Before you conclude
+
+- Before deciding the AWS account can't hold what the request asks for,
+  look. List the places it could live, such as S3 buckets, databases, and
+  log groups, and read what is there.
+- Don't conclude that records are missing from metadata, such as a
+  creation date or a stored-bytes count, or from one query that failed or
+  came back empty. Read the records another way, across the full time
+  range, before reporting them absent.
+
 ## Secret Safety
 
 - MUST load the `aws-secrets-manager` skill first for any secret,
