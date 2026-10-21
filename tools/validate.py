@@ -119,7 +119,8 @@ def validate_plugin(plugin_dir: Path) -> None:
     print(f"Validating plugin: {name}")
 
     # Claude Code manifest
-    validate_json(plugin_dir / ".claude-plugin" / "plugin.json", ["name"])
+    claude_path = plugin_dir / ".claude-plugin" / "plugin.json"
+    claude = validate_json(claude_path, ["name"])
 
     # Codex manifest
     validate_json(
@@ -153,6 +154,14 @@ def validate_plugin(plugin_dir: Path) -> None:
                     f"Name '{devin_name}' does not match directory '{name}' "
                     f"in {devin_rel}"
                 )
+            # Devin reads .devin-plugin/plugin.json in preference to the Claude
+            # manifest, so a version bump that misses it ships stale metadata.
+            if isinstance(claude, dict):
+                claude_rel = claude_path.relative_to(REPO_ROOT)
+                for key in ("name", "version", "description"):
+                    if devin.get(key) != claude.get(key):
+                        detail = "" if key == "description" else f": {devin.get(key)!r} != {claude.get(key)!r}"
+                        error(f"'{key}' in {devin_rel} does not match {claude_rel}{detail}")
             # Devin rejects the whole plugin when a skills path escapes the
             # plugin root, so check declared paths stay inside and exist.
             plugin_root = plugin_dir.resolve()
