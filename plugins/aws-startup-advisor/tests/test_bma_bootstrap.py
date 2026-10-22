@@ -200,7 +200,13 @@ def test_reviewer_repro_plus_openai_import_is_candidate(tmp_path: Path) -> None:
     ("package.json", '{"dependencies": {"openai": "^4.0.0"}}\n'),
     ("main.go", 'import "cloud.google.com/go/aiplatform/apiv1"\n'),
     ("App.java", "import com.google.cloud.aiplatform.v1.PredictionServiceClient;\n"),
-], ids=["endpoint", "env-var", "model-prefix", "dependency-requirements", "dependency-package-json", "go-import", "java-import"])
+    ("vertex.py", "from google.cloud import aiplatform\naiplatform.init(project=PROJECT)\n"),
+    ("vertex_alias.py", "from google.cloud import storage, aiplatform as aip\n"),
+    ("ocr.py", "from google.cloud import vision\n"),
+    ("multi.py", "from google.cloud import (\n    storage,\n    aiplatform,\n)\n"),
+], ids=["endpoint", "env-var", "model-prefix", "dependency-requirements", "dependency-package-json", "go-import", "java-import",
+        "python-from-package-import", "python-from-package-import-alias", "python-from-package-import-vision",
+        "python-from-package-import-parenthesised"])
 def test_each_ai_signal_family_is_candidate(tmp_path: Path, name: str, content: str) -> None:
     project = tmp_path / "project"; project.mkdir(); (project / name).write_text(content)
     first, _ = paired(project)
@@ -213,7 +219,8 @@ def test_each_ai_signal_family_is_candidate(tmp_path: Path, name: str, content: 
     ("util.js", 'const anthropic_like = 1; // myopenai\n'),
     ("requirements.txt", "requests==2.32.0\nnumpy\n"),
     ("tags.ts", 'const gpt = "gpt"; const o3 = "o3";\n'),
-], ids=["reviewer-script", "prose-mentions", "identifier-substring", "plain-manifest", "bare-words"])
+    ("blob.py", "from google.cloud import storage\nfrom google import cloud\n"),
+], ids=["reviewer-script", "prose-mentions", "identifier-substring", "plain-manifest", "bare-words", "non-ai-google-cloud-import"])
 def test_non_ai_source_content_is_not_a_signal(tmp_path: Path, name: str, content: str) -> None:
     project = tmp_path / "project"; project.mkdir(); (project / name).write_text(content)
     completed, value, _, _ = invoke(project)

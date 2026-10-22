@@ -199,6 +199,14 @@ def signal_patterns(signals: dict[str, list[str]]) -> dict[str, re.Pattern[bytes
                 alternatives.append(rb"(?:from\s+|require\(\s*|import\(\s*)[\"']" + escaped + end)
                 if "/" in token:
                     alternatives.append(rb"[\"']" + escaped + end)
+                elif "." in token:
+                    # Canonical Python spelling of a dotted package: `from google.cloud import aiplatform`
+                    # (also `... import aiplatform as aip` and `... import storage, aiplatform`).
+                    # The parenthesised form may span lines: `from google.cloud import (\n storage,\n aiplatform,\n)`.
+                    package, leaf = token.rsplit(".", 1)
+                    head = rb"(?:^|[\s;])from\s+" + re.escape(package.encode()) + rb"\s+import"
+                    alternatives.append(head + rb"\s+(?:[^\n#]*?[\s,(])?" + re.escape(leaf.encode()) + end)
+                    alternatives.append(head + rb"\s*\((?:[^)]*?[\s,])?" + re.escape(leaf.encode()) + end)
             elif family == "model_prefixes":
                 alternatives.append(boundary + escaped)
             else:

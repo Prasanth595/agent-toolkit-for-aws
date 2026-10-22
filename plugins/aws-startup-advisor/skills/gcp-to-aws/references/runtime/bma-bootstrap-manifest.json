@@ -1,11 +1,11 @@
 {
   "classifier": {
     "path": "scripts/bma-route-classifier.py",
-    "sha256": "f9d3385e8d7883186a34f60d35a5c37824710bd7b31e63c519ed04a250ec4f61"
+    "sha256": "0062cd17c04ef5d4489fca12580d25541d4580783681503f855a2d2db9d9b8a3"
   },
   "closure": {
     "path": "references/runtime/closure.json",
-    "sha256": "2b7bc5142b92066213c1f55f6ac263f6b90bfa43c8b35af7eb4f69da1b303af7"
+    "sha256": "e011534f2cf84e5ae0e1314202d101215f819774f56f31dd9335ef543678260b"
   },
   "compatibility": {
     "classifier_schema": 1,
@@ -19,5 +19,5 @@
   },
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "c60854d7988de9f871c4e418be323e613f4fb3c5f9a1432016e894d530623fce"
+  "self_hash": "e4978e772c4da510e9896ccacad8ebc9528402c9a0357b9cce04415bf2b7b0e3"
 }
