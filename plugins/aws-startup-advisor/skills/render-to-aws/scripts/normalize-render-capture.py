@@ -20,6 +20,7 @@ from jsonschema import Draft7Validator, Draft202012Validator, FormatChecker
 
 from render_common.atomic import PathBoundaryError, require_contained
 from render_common.canonical import byte_sort_key, canonical_bytes, generated_id, nfc, sha256_digest
+from render_common.plans import normalize_plan, plan_surface
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_SCHEMA = SKILL_ROOT / "references/shared/schema-live-capture-manifest.json"
@@ -271,9 +272,21 @@ def _identity_fields(item: dict[str, Any], kind: str) -> tuple[str | None, str, 
     return render_id, nfc(name), project_id, environment_id, region
 
 
-def _config(item: dict[str, Any]) -> dict[str, Any]:
+PLAN_KINDS = {"render.web_service", "render.private_service", "render.background_worker", "render.cron_job", "render.key_value", "render.workflow"}
+
+
+def _config(item: dict[str, Any], kind: str | None = None) -> dict[str, Any]:
     excluded = {"id", "name", "domain", "owner", "ownerId", "workspaceId", "projectId", "environmentId", "region", "createdAt", "updatedAt", "type"}
-    return _safe_tree({key: value for key, value in item.items() if key not in excluded})
+    config = {key: value for key, value in item.items() if key not in excluded}
+    if kind in PLAN_KINDS:
+        # Live captures spell the plan under serviceDetails.plan (services) or plan (Key Value,
+        # workflows). The raw value stays where it was; plan_normalized mirrors the Blueprint
+        # parser so both sources resolve through the same alias table.
+        details = item.get("serviceDetails")
+        raw_plan = details.get("plan") if isinstance(details, dict) and "plan" in details else item.get("plan")
+        if raw_plan is not None:
+            config["plan_normalized"] = normalize_plan(plan_surface(kind), raw_plan)
+    return _safe_tree(config)
 
 
 def _edge(edge_type: str, from_id: str, to_id: str, attributes: dict[str, Any]) -> dict[str, Any]:
@@ -452,7 +465,7 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
             if duplicate_key in seen_capture_ids:
                 raise NormalizeError("duplicate_resource_identity")
             seen_capture_ids.add(duplicate_key)
-            candidates.append({"source": source, "source_ref": f"{transport}:{category}", "blueprint_id": None, "kind": kind, "render_id": render_id, "name": name, "workspace_id": workspace_id, "project_id": project_id, "environment_id": environment_id, "region": region, "config": _config(normalized_item), "confidence": "inferred"})
+            candidates.append({"source": source, "source_ref": f"{transport}:{category}", "blueprint_id": None, "kind": kind, "render_id": render_id, "name": name, "workspace_id": workspace_id, "project_id": project_id, "environment_id": environment_id, "region": region, "config": _config(normalized_item, kind), "confidence": "inferred"})
             if kind == "render.task_run" and "attempts" in normalized_item:
                 attempts = normalized_item["attempts"]
                 if not isinstance(attempts, list):

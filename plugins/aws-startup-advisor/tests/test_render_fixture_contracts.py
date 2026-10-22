@@ -151,6 +151,59 @@ def test_pricing_cache_has_dated_freshness_dimensions_and_current_plans() -> Non
     assert Decimal("1") * Decimal("0.20") + Decimal("1") * Decimal("0.05") + Decimal("1") * Decimal("0.25") == Decimal("0.50")
 
 
+def test_plan_alias_table_covers_schema_enums_and_matches_knowledge_rows() -> None:
+    scripts_dir = SKILL_ROOT / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    from render_common.plans import normalize_plan  # noqa: PLC0415
+
+    table = load(SKILL_ROOT / "references/shared/render-plan-aliases.json")
+    schema = load(SKILL_ROOT / "references/render/render-yaml.schema.json")
+    definitions = schema["definitions"]
+    cache = load(SKILL_ROOT / "knowledge/estimate/render-pricing-cache.json")
+    fargate = load(SKILL_ROOT / "knowledge/design/service-plan-fargate-sizing.json")
+    beanstalk = load(SKILL_ROOT / "knowledge/design/service-plan-eb-sizing.json")
+    elasticache = load(SKILL_ROOT / "knowledge/design/keyvalue-elasticache-sizing.json")
+
+    # Every published Blueprint spelling either resolves to a canonical id or is explicitly unpriced.
+    for surface, enum_names in (("service_compute", ("serverPlan", "cronPlan")), ("key_value", ("keyValuePlan",))):
+        entry = table["surfaces"][surface]
+        for enum_name in enum_names:
+            for spelling in definitions[enum_name]["enum"]:
+                resolved = normalize_plan(surface, spelling)
+                if resolved is None:
+                    assert spelling in entry["unpriced"], (surface, spelling)
+                else:
+                    assert resolved in entry["canonical"], (surface, spelling, resolved)
+                    assert spelling not in entry["unpriced"]
+
+    # Design/Estimate rows key by the canonical ids; the legacy alias maps are the shared table's.
+    compute_aliases = table["surfaces"]["service_compute"]["aliases"]
+    for knowledge in (cache["service_compute"], fargate, beanstalk):
+        assert all(compute_aliases[alias] == target for alias, target in knowledge["legacy_aliases"].items())
+    for knowledge in (fargate, beanstalk):
+        assert set(table["surfaces"]["service_compute"]["canonical"]) == set(knowledge["source_plans"])
+    assert set(cache["service_compute"]["plans"]) <= set(table["surfaces"]["service_compute"]["canonical"])
+    key_value_aliases = table["surfaces"]["key_value"]["aliases"]
+    for knowledge in (cache["key_value"], elasticache):
+        assert knowledge["legacy_aliases"] == key_value_aliases
+    assert set(table["surfaces"]["key_value"]["canonical"]) == set(cache["key_value"]["plans"]) == set(elasticache["source_memory_gb"])
+    assert cache["workflow"]["legacy_aliases"] == table["surfaces"]["workflow"]["aliases"]
+    assert set(table["surfaces"]["workflow"]["canonical"]) == {"flex", *cache["workflow"]["fixed_plans"]}
+    for knowledge in (cache, fargate, beanstalk, elasticache):
+        assert knowledge["alias_table"] == "references/shared/render-plan-aliases.json"
+        assert (SKILL_ROOT / knowledge["alias_table"]).is_file()
+
+    # Never borrow a nearby plan: an unpriced spelling resolves to nothing and has no price row.
+    assert normalize_plan("service_compute", "2c-16g") is None
+    assert "2c-16g" not in cache["service_compute"]["plans"]
+    assert "2c-16gb" not in cache["service_compute"]["plans"]
+    assert normalize_plan("service_compute", "1c-2g") == "1c-2gb"
+    assert "1c-2gb" in cache["service_compute"]["plans"]
+    assert normalize_plan("service_compute", "pro plus") == "4c-8gb"
+    assert "4c-8gb" in cache["service_compute"]["plans"]
+
+
 def test_rightsizing_thresholds_are_numeric_and_fail_closed() -> None:
     thresholds = load(SKILL_ROOT / "knowledge/estimate/rightsizing-thresholds.json")
     assert thresholds["minimum_lookback_days"] == 7

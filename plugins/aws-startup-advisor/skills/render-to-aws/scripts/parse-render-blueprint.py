@@ -24,6 +24,7 @@ from render_common.canonical import (
     sha256_digest,
 )
 from render_common.classifier import UnsafeIdentityError, safe_identity, safe_literal, sanitize_config
+from render_common.plans import normalize_plan, plan_surface
 
 SCHEMA_VERSION = "1.0"
 DEFAULT_DISK_SIZE_GB = 10
@@ -308,13 +309,18 @@ def normalize_blueprint(document: dict[str, Any], source_path: str, source_diges
             kind = _service_kind(service)
             if kind == "render.unknown":
                 raise BlueprintError("unsupported_service_type")
+            service_config = {key: value for key, value in service.items() if key not in {"name", "disk", "domains", "domain"}}
+            if "plan" in service:
+                # The raw spelling is preserved; plan_normalized is the shared alias-table result
+                # (None when the plan is unknown or unpriced) so Design/Estimate never guess.
+                service_config["plan_normalized"] = normalize_plan(plan_surface(kind), service["plan"])
             service_resource = add_resource(
                 kind,
                 service["name"],
                 project,
                 environment,
                 pointer_parts,
-                {key: value for key, value in service.items() if key not in {"name", "disk", "domains", "domain"}},
+                service_config,
             )
             if isinstance(service.get("disk"), dict):
                 disk = service["disk"]

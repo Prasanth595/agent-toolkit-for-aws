@@ -130,6 +130,41 @@ def test_explicit_disk_size_is_preserved(tmp_path: Path) -> None:
     assert edge["attributes"]["sizeGB_provenance"] == "declared"
 
 
+def test_published_plan_spellings_are_preserved_and_normalized(tmp_path: Path) -> None:
+    source, migration = write_blueprint(tmp_path, """services:
+  - type: web
+    name: api
+    runtime: docker
+    plan: 1c-2g
+  - type: cron
+    name: nightly
+    runtime: python
+    schedule: "0 0 * * *"
+    startCommand: python job.py
+    plan: pro plus
+  - type: worker
+    name: huge
+    runtime: python
+    startCommand: python worker.py
+    plan: 2c-16g
+  - type: keyvalue
+    name: cache
+    plan: pro ultra
+    ipAllowList: []
+""")
+    artifact = parser.parse_blueprint(source, source.parent, migration)
+    by_name = {item["name"]: item["config"] for item in artifact["resources"]}
+    assert by_name["api"]["plan"] == "1c-2g"
+    assert by_name["api"]["plan_normalized"] == "1c-2gb"
+    assert by_name["nightly"]["plan"] == "pro plus"
+    assert by_name["nightly"]["plan_normalized"] == "4c-8gb"
+    # Unpriced plans keep the raw spelling and resolve to null rather than a neighbouring plan.
+    assert by_name["huge"]["plan"] == "2c-16g"
+    assert by_name["huge"]["plan_normalized"] is None
+    assert by_name["cache"]["plan"] == "pro ultra"
+    assert by_name["cache"]["plan_normalized"] == "40g"
+
+
 def test_zero_disk_size_still_fails_schema_validation(tmp_path: Path) -> None:
     source, migration = write_blueprint(tmp_path, """services:
   - type: web

@@ -10,6 +10,8 @@
     "https://render.com/docs/workflows-limits",
     "https://pricingsaas.com/companies/render"
   ],
+  "alias_table": "references/shared/render-plan-aliases.json",
+  "rule": "Resolve the captured plan through plan_normalized (or the shared alias table) before the exact row lookup; a plan the table leaves null, or a canonical id with no row here, is unavailable and never borrows a nearby plan.",
   "service_compute": {
     "legacy_aliases": {"starter": "0.5c-512mb", "standard": "1c-2gb", "pro": "2c-4gb", "pro_plus": "4c-8gb", "pro_max": "4c-16gb", "pro_ultra": "8c-32gb"},
     "plans": {

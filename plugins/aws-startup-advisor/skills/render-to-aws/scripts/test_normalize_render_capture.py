@@ -356,6 +356,31 @@ def test_blueprint_only_disk_with_explicit_size_keeps_declared_provenance(tmp_pa
     assert edge["attributes"]["sizeGB_provenance"] == "declared"
 
 
+def test_live_plans_resolve_through_the_shared_alias_table(tmp_path: Path) -> None:
+    services = live("rest", "services_list", [
+        {"id": "srv-plan-web", "name": "web", "ownerId": "tea-safe", "type": "web_service", "serviceDetails": {"runtime": "python", "plan": "pro plus"}},
+        {"id": "srv-plan-cron", "name": "cron", "ownerId": "tea-safe", "type": "cron_job", "serviceDetails": {"runtime": "python", "plan": "1c-2g"}},
+        {"id": "srv-plan-huge", "name": "huge", "ownerId": "tea-safe", "type": "background_worker", "serviceDetails": {"runtime": "python", "plan": "8c-64g"}},
+        {"id": "srv-plan-static", "name": "site", "ownerId": "tea-safe", "type": "static_site", "serviceDetails": {"runtime": "static"}},
+    ])
+    key_values = live("cli", "keyvalues_list", {"data": [{"id": "red-plan", "name": "cache", "ownerId": "tea-safe", "plan": "pro ultra"}]})
+    manifest = live_manifest(tmp_path, [
+        write_capture(tmp_path, "services.json", "rest", "services_list", services),
+        write_capture(tmp_path, "keyvalues.json", "cli", "keyvalues_list", key_values),
+    ])
+    inventory, *_ = module.normalize(tmp_path, manifest, ATTEMPT)
+    configs = {resource["name"]: resource["config"] for resource in inventory["resources"]}
+    assert configs["web"]["serviceDetails"]["plan"] == "pro plus"
+    assert configs["web"]["plan_normalized"] == "4c-8gb"
+    assert configs["cron"]["plan_normalized"] == "1c-2gb"
+    # Unpriced spelling: raw plan retained, normalized form null, no neighbouring plan borrowed.
+    assert configs["huge"]["serviceDetails"]["plan"] == "8c-64g"
+    assert configs["huge"]["plan_normalized"] is None
+    assert "plan_normalized" not in configs["site"]
+    assert configs["cache"]["plan"] == "pro ultra"
+    assert configs["cache"]["plan_normalized"] == "40g"
+
+
 def test_live_only_discover_has_no_blueprint_provenance(tmp_path: Path) -> None:
     capture = live("rest", "services_list", [{
         "id": "srv-live-only", "name": "live-only", "ownerId": "tea-safe",
