@@ -21,7 +21,7 @@ MAX_TOTAL_BYTES = 100 * 1024 * 1024
 MAX_DEPTH = 20
 ALLOWED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".java", ".kt", ".kts", ".cs", ".csproj", ".rs", ".rb", ".php", ".sh", ".yaml", ".yml", ".json", ".toml", ".properties"}
 ALLOWED_NAMES = {"Dockerfile", "Procfile", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "pyproject.toml", "go.mod", "go.sum", "pom.xml", "build.gradle", "build.gradle.kts", "Cargo.toml", "Cargo.lock"}
-EXCLUDED_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "node_modules", "vendor", "dist", "build", "target", "out", "coverage", ".next", ".nuxt", ".cache", "__pycache__", ".terraform", ".serverless", ".aws-sam", "cdk.out"}
+EXCLUDED_DIRS = {".git", ".hg", ".svn", ".venv", "venv", "node_modules", "vendor", "dist", "build", "target", "out", "coverage", ".next", ".nuxt", ".cache", "__pycache__", ".terraform", ".serverless", ".aws-sam", "cdk.out", ".migration"}
 EXCLUDED_NAMES = {".env", ".env.local", ".env.production", "credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
 SENSITIVE_NAME = re.compile(r"(?i)(?:^|[._-])(secret|credential|private[_-]?key|token|password|passwd)(?:[._-]|$)|\.(?:pem|key|p12|pfx)$")
 ENV_NAME = re.compile(r"\b[A-Z][A-Z0-9_]{2,127}\b")
@@ -56,14 +56,37 @@ MODEL_PREFIX = re.compile(r"^(?:anthropic|openai|google|models)/")
 NORMALIZED_MODEL = re.compile(r"^[a-z0-9][a-z0-9._:/-]*$")
 
 PROVIDERS: dict[str, dict[str, tuple[str, ...]]] = {
-    "openai": {"dependency": ("openai",), "import": ("import openai", "from openai", "require('openai')", 'from "openai"'), "sdk_construction": ("OpenAI(", "new OpenAI("), "method_call": ("responses.create", "chat.completions.create"), "endpoint_hostname": ("api.openai.com",), "environment_name": ("OPENAI_API_KEY",)},
-    "azure_openai": {"dependency": ("azure-ai-openai",), "import": ("AzureOpenAI",), "sdk_construction": ("AzureOpenAI(",), "method_call": ("get_chat_completions",), "endpoint_hostname": ("openai.azure.com",), "environment_name": ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY")},
+    "openai": {"dependency": ("openai",), "import": ("import openai", "from openai", "require('openai')", 'from "openai"'), "sdk_construction": ("OpenAI(", "AsyncOpenAI(", "new OpenAI("), "method_call": ("responses.create", "chat.completions.create"), "endpoint_hostname": ("api.openai.com",), "environment_name": ("OPENAI_API_KEY",)},
+    "azure_openai": {"dependency": ("azure-ai-openai",), "import": ("AzureOpenAI", "AsyncAzureOpenAI"), "sdk_construction": ("AzureOpenAI(", "AsyncAzureOpenAI(", "new AzureOpenAI("), "method_call": ("get_chat_completions", "chat.completions.create"), "endpoint_hostname": ("openai.azure.com",), "environment_name": ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY")},
     "anthropic": {"dependency": ("anthropic",), "import": ("import anthropic", "from anthropic"), "sdk_construction": ("Anthropic(", "new Anthropic("), "method_call": ("messages.create",), "endpoint_hostname": ("api.anthropic.com",), "environment_name": ("ANTHROPIC_API_KEY",)},
     "google_gemini": {"dependency": ("google-generativeai", "@google/generative-ai"), "import": ("google.generativeai", "GoogleGenerativeAI"), "sdk_construction": ("GenerativeModel(",), "method_call": ("generate_content", "generateContent"), "endpoint_hostname": ("generativelanguage.googleapis.com",), "environment_name": ("GEMINI_API_KEY", "GOOGLE_API_KEY")},
     "google_vertex_ai": {"dependency": ("google-cloud-aiplatform",), "import": ("import vertexai", "from vertexai"), "sdk_construction": ("vertexai.init(",), "method_call": ("generate_content",), "endpoint_hostname": ("aiplatform.googleapis.com",), "environment_name": ("GOOGLE_CLOUD_PROJECT",)},
     "amazon_bedrock": {"dependency": ("@aws-sdk/client-bedrock-runtime",), "import": ("bedrock-runtime", "BedrockRuntimeClient"), "sdk_construction": ("client(\"bedrock-runtime\"", "BedrockRuntimeClient("), "method_call": ("invoke_model", "converse("), "endpoint_hostname": ("bedrock-runtime.",), "environment_name": ("AWS_REGION",)},
     "openrouter": {"dependency": ("openrouter",), "import": ("openrouter",), "sdk_construction": (), "method_call": ("chat.completions.create",), "endpoint_hostname": ("openrouter.ai",), "environment_name": ("OPENROUTER_API_KEY",)},
 }
+
+def _token(literal: str) -> re.Pattern[str]:
+    """Case-insensitive literal that may not continue an identifier, so `OpenAI(` never matches inside `AzureOpenAI(`."""
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(literal), re.I)
+
+
+# import / sdk_construction / method_call needles are matched as bounded tokens; the direct
+# `from openai` import additionally requires that the line imports no Azure client.
+BOUNDED_METHODS = {"import", "sdk_construction", "method_call"}
+NEEDLE_PATTERNS: dict[tuple[str, str, str], re.Pattern[str]] = {
+    (provider, method, needle): _token(needle)
+    for provider, methods in PROVIDERS.items()
+    for method, needles in methods.items()
+    if method in BOUNDED_METHODS
+    for needle in needles
+}
+NEEDLE_PATTERNS[("openai", "import", "from openai")] = re.compile(r"(?<![A-Za-z0-9_])from openai(?:\.[A-Za-z0-9_.]+)? import (?!.*Azure)", re.I)
+# A method call shared by several clients binds to the client(s) constructed in the same
+# file; when none of them is constructed there it stays with the first (direct) owner.
+CLIENT_BOUND_CALLS: dict[str, tuple[str, ...]] = {"chat.completions.create": ("openai", "azure_openai")}
+# Model identifiers of a family served by several clients bind to the client(s) constructed
+# or called in the same file; otherwise they fall back to the provider-wide family owner.
+MODEL_CLIENTS: dict[str, tuple[str, ...]] = {"openai": ("openai", "azure_openai")}
 METHOD_WEIGHTS = {"dependency": 35, "import": 35, "sdk_construction": 40, "method_call": 45, "model_identifier": 25, "endpoint_hostname": 35, "environment_name": 10, "framework": 30, "configuration": 20}
 FRAMEWORKS = {"langgraph": "agent_orchestration", "crewai": "agent_orchestration", "autogen": "agent_orchestration", "strands": "agent_orchestration", "llamaindex": "retrieval", "llama_index": "retrieval"}
 INFRASTRUCTURE = {
@@ -129,7 +152,7 @@ def _skipped(path: str, reason: str, size: int | None = None) -> dict[str, Any]:
     return record
 
 
-def _walk(root: Path) -> tuple[list[Path], list[dict[str, Any]]]:
+def _walk(root: Path, excluded_paths: frozenset[Path] = frozenset()) -> tuple[list[Path], list[dict[str, Any]]]:
     files: list[Path] = []
     skipped: list[dict[str, Any]] = []
 
@@ -146,7 +169,7 @@ def _walk(root: Path) -> tuple[list[Path], list[dict[str, Any]]]:
                 skipped.append(_skipped(relative, "symlink"))
                 continue
             if entry.is_dir(follow_symlinks=False):
-                if entry.name in EXCLUDED_DIRS:
+                if entry.name in EXCLUDED_DIRS or Path(entry.path) in excluded_paths:
                     skipped.append(_skipped(relative, "excluded_directory"))
                 else:
                     visit(Path(entry.path), depth + 1)
@@ -355,11 +378,33 @@ def _build_ai_discovery(qualifying_components: dict[str, list[tuple[str, list[di
     return discovery
 
 
-def scan(root: Path) -> dict[str, Any]:
+def _client_bound(match: dict[str, Any], constructed: set[str]) -> bool:
+    """Keep a shared method call only for the client constructed in this file (default owner when none is)."""
+    clients = CLIENT_BOUND_CALLS.get(match["symbol"]) if match["method"] == "method_call" else None
+    if clients is None or match["provider"] not in clients:
+        return True
+    bound = [client for client in clients if client in constructed]
+    return match["provider"] in bound if bound else match["provider"] == clients[0]
+
+
+def _model_targets(provider: str, active: set[str]) -> tuple[str, ...]:
+    """Attribute a model family to the client(s) constructed or called in this file, else provider-wide."""
+    clients = MODEL_CLIENTS.get(provider)
+    if clients is None:
+        return (provider,)
+    return tuple(client for client in clients if client in active) or (provider,)
+
+
+def scan(root: Path, migration_dir: Path | None = None) -> dict[str, Any]:
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise ScanError("workspace_root_invalid")
     resolved_root = root.resolve(strict=True)
-    files, skipped = _walk(resolved_root)
+    excluded_paths: set[Path] = set()
+    if migration_dir is not None:
+        resolved_migration = migration_dir.resolve(strict=True)
+        if resolved_migration != resolved_root and resolved_migration.is_relative_to(resolved_root):
+            excluded_paths.add(resolved_migration)
+    files, skipped = _walk(resolved_root, frozenset(excluded_paths))
     total = 0
     file_records: list[dict[str, Any]] = []
     signals: defaultdict[str, set[str]] = defaultdict(set)
@@ -400,18 +445,30 @@ def scan(root: Path) -> dict[str, Any]:
         if any(token in lowered for token in ("tool_call", "bind_tools", "function_call")):
             capabilities[component].add("agent_tools")
         environment_names = set(ENV_NAME.findall(text))
+        file_matches: list[dict[str, Any]] = []
         for provider, methods in PROVIDERS.items():
             for method, needles in methods.items():
                 for needle in needles:
-                    present = needle in environment_names if method == "environment_name" else needle.lower() in lowered
+                    if method == "environment_name":
+                        present = needle in environment_names
+                    elif method in BOUNDED_METHODS:
+                        present = NEEDLE_PATTERNS[(provider, method, needle)].search(text) is not None
+                    else:
+                        present = needle.lower() in lowered
                     if present:
-                        matches.append({"component": component, "provider": provider, "path": relative, "method": method, "symbol": needle})
-                        if method in {"method_call", "sdk_construction"}:
-                            capabilities[component].add("text_generation")
+                        file_matches.append({"component": component, "provider": provider, "path": relative, "method": method, "symbol": needle})
+        constructed = {match["provider"] for match in file_matches if match["method"] == "sdk_construction"}
+        file_matches = [match for match in file_matches if _client_bound(match, constructed)]
+        active_clients = {match["provider"] for match in file_matches if match["method"] in {"method_call", "sdk_construction"}}
+        if active_clients:
+            capabilities[component].add("text_generation")
+        matches.extend(file_matches)
         for provider, pattern in MODEL_PATTERNS.items():
+            targets = _model_targets(provider, active_clients)
             for identifier in sorted(set(pattern.findall(text)), key=byte_sort_key):
                 line = text.count("\n", 0, text.find(identifier)) + 1
-                matches.append({"component": component, "provider": provider, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line})
+                for target in targets:
+                    matches.append({"component": component, "provider": target, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line})
         if any(token in lowered for token in ("while true", "while(true)", "approval", "checkpoint", "fan_out", "fan-in", "compensat")):
             capabilities[component].add("agent_orchestration")
         if any(token in lowered for token in ("documentloader", "document_ingest", "ingest_documents")):
@@ -444,7 +501,7 @@ def main() -> int:
         if not args.migration_dir.is_absolute() or not args.migration_dir.is_dir() or args.migration_dir.is_symlink():
             raise ScanError("migration_dir_invalid")
         require_contained(args.output, args.migration_dir, "output")
-        result = scan(args.workspace_root)
+        result = scan(args.workspace_root, args.migration_dir)
         write_json_atomic(args.output, args.migration_dir, result)
     except (ScanError, PathBoundaryError, OSError, ValueError) as exc:
         code = exc.code if isinstance(exc, ScanError) else str(exc)

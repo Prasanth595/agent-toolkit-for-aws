@@ -71,6 +71,84 @@ def test_openrouter_vendor_prefixed_model_yields_observed_upstream(tmp_path: Pat
     assert not any(s["provider"] == "openrouter" for s in profile["ai_sources"])
 
 
+AI_SOURCE = 'from openai import OpenAI\nclient = OpenAI()\nclient.responses.create(model="gpt-4o", input="x")\n'
+# Shape of a retained scanner output: symbols survive as JSON string values.
+RETAINED_AI_OUTPUT = json.dumps({"evidence": [{"symbol_or_env_name": symbol} for symbol in ("from openai", "OpenAI(", "responses.create")], "models": [{"observed_identifier": "gpt-4o"}]})
+
+
+def _path_hash(relative: str) -> str:
+    return module.sha256_digest(relative.encode("utf-8"))
+
+
+def test_retained_migration_output_is_not_rescanned_as_source(tmp_path: Path) -> None:
+    run_dir = tmp_path / ".migration" / "1021-1200"
+    run_dir.mkdir(parents=True)
+    (run_dir / "application.json").write_text(RETAINED_AI_OUTPUT)
+    (tmp_path / "README.md").write_text("no application source\n")
+    result = module.scan(tmp_path)
+    assert result["ai_profile"] is None
+    assert result["ai_discovery"] is None
+    assert result["files"] == []
+    assert {"path_hash": _path_hash(".migration"), "reason": "excluded_directory"} in result["skipped"]
+
+    custom_dir = tmp_path / "runs" / "x"
+    custom_dir.mkdir(parents=True)
+    (custom_dir / "application.json").write_text(RETAINED_AI_OUTPUT)
+    assert module.scan(tmp_path)["ai_profile"] is not None
+    result = module.scan(tmp_path, migration_dir=custom_dir)
+    assert result["ai_profile"] is None
+    assert result["files"] == []
+    assert {"path_hash": _path_hash("runs/x"), "reason": "excluded_directory"} in result["skipped"]
+
+    (tmp_path / "app.py").write_text(AI_SOURCE)
+    assert module.scan(tmp_path, migration_dir=custom_dir)["ai_profile"] is not None
+
+
+def _sources(profile: dict) -> dict[tuple[str, str], list[str]]:
+    return {(s["provider"], s["source_service"]): s["models"] for s in profile["ai_sources"]}
+
+
+def test_azure_only_file_attributes_models_to_azure_openai(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom openai import AzureOpenAI\n"
+        'client = AzureOpenAI(azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_key=os.environ["AZURE_OPENAI_API_KEY"])\n'
+        'client.chat.completions.create(model="gpt-4o")\n'
+    )
+    profile = module.scan(tmp_path)["ai_profile"]
+    Draft7Validator(json.loads(AI_SCHEMA.read_text())).validate(profile)
+    assert _sources(profile) == {("openai", "azure_openai"): ["gpt-4o"]}
+    azure = profile["ai_sources"][0]
+    assert azure["model_evidence"] == "observed"
+    assert azure["model_observations"][0]["evidence"][0]["confidence"] == "confirmed"
+
+
+def test_mixed_direct_and_azure_file_keeps_both_sources_with_models(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom openai import OpenAI, AzureOpenAI\n"
+        'direct = OpenAI(api_key=os.environ["OPENAI_API_KEY"])\n'
+        'azure = AzureOpenAI(azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_key=os.environ["AZURE_OPENAI_API_KEY"])\n'
+        'direct.responses.create(model="gpt-4o-mini", input="x")\n'
+        'azure.chat.completions.create(model="gpt-4o")\n'
+    )
+    profile = module.scan(tmp_path)["ai_profile"]
+    Draft7Validator(json.loads(AI_SCHEMA.read_text())).validate(profile)
+    sources = _sources(profile)
+    assert set(sources) == {("openai", "openai_api"), ("openai", "azure_openai")}
+    assert "gpt-4o-mini" in sources[("openai", "openai_api")]
+    assert "gpt-4o" in sources[("openai", "azure_openai")]
+
+
+def test_direct_only_file_does_not_emit_azure_source(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        'from openai import OpenAI\nclient = OpenAI()\nclient.chat.completions.create(model="gpt-4o")\n'
+    )
+    (tmp_path / "worker.py").write_text(
+        'from openai import OpenAI\nclient = OpenAI()\nclient.chat.completions.create(model="gpt-4o")\n'
+    )
+    profile = module.scan(tmp_path)["ai_profile"]
+    assert _sources(profile) == {("openai", "openai_api"): ["gpt-4o"]}
+
+
 def test_symlink_secret_generated_binary_and_unsupported_files_are_metadata_only(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("OPENAI_API_KEY=secret")
     (tmp_path / "blob.py").write_bytes(b"abc\x00def")
