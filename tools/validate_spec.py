@@ -331,6 +331,10 @@ def reject_symlinks() -> None:
     if not plugins_dir.is_dir():
         return
     for path in sorted(plugins_dir.rglob("*")):
+        # Skill-local uv projects create ignored virtual environments beneath
+        # plugins/. They are runtime caches, not packaged plugin content.
+        if ".venv" in path.relative_to(plugins_dir).parts:
+            continue
         if path.is_symlink():
             error(f"{path.relative_to(REPO_ROOT)}: symlinks are not allowed under plugins/")
 
