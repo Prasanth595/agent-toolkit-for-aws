@@ -137,10 +137,122 @@ def test_bigquery_weak_and_ordinary_are_not_ai_candidates(tmp_path: Path, terraf
 
 
 @pytest.mark.parametrize("name", SOURCE_FILES + MANIFEST_FILES)
-def test_every_source_and_manifest_has_paired_preflight(tmp_path: Path, name: str) -> None:
+def test_every_source_and_manifest_without_ai_signals_is_not_a_candidate(tmp_path: Path, name: str) -> None:
+    # Review 5620455181 (vagmur-aws, comment 4353203462): source presence alone must not route to BMA.
     project = tmp_path / "project"; project.mkdir(); (project / name).write_text("x\n")
+    completed, value, _, hashes = invoke(project, sandbox=True)
+    assert completed.returncode == 0, completed.stderr
+    assert value["SOURCE_CONTAINING"] is True
+    assert value["AI_SIGNAL_CANDIDATE"] is False and value["ai_signal_files"] == []
+    assert value["AI_CANDIDATE"] is False and value["PURE_INFRASTRUCTURE"] is False
+    assert not any("/skills/bedrock-migration-assessment/" in row["path"] for row in value["audit"])
+    assert hashes["before"] == hashes["after"]
+
+
+@pytest.mark.parametrize("name", SOURCE_FILES + MANIFEST_FILES)
+def test_every_source_and_manifest_with_ai_signal_has_paired_preflight(tmp_path: Path, name: str) -> None:
+    project = tmp_path / "project"; project.mkdir()
+    (project / name).write_text("openai\n" if name in MANIFEST_FILES else "import openai\n")
     first, _ = paired(project)
     assert first["SOURCE_CONTAINING"] is True
+    assert first["AI_SIGNAL_CANDIDATE"] is True and first["ai_signal_files"] == [name]
+
+
+def _reviewer_layout(project: Path) -> None:
+    (project / "infra").mkdir(parents=True); (project / "scripts").mkdir()
+    (project / "infra/main.tf").write_text('resource "google_compute_instance" "x" {}\n')
+    (project / "scripts/cleanup.py").write_text('print("rotate logs")\n')
+
+
+def test_reviewer_repro_infra_plus_plain_script_is_pure_infrastructure(tmp_path: Path) -> None:
+    # Exact repro from PR #483 comment 4353203462.
+    project = tmp_path / "project"; _reviewer_layout(project)
+    completed, value, _, hashes = invoke(project, sandbox=True)
+    assert completed.returncode == 0, completed.stderr
+    assert value["AI_CANDIDATE"] is False and value["PURE_INFRASTRUCTURE"] is True
+    assert value["SOURCE_CONTAINING"] is True and value["AI_SIGNAL_CANDIDATE"] is False
+    assert not any("/skills/bedrock-migration-assessment/" in row["path"] for row in value["audit"])
+    assert hashes["before"] == hashes["after"]
+    denied, denied_value, _, _ = invoke(project, bma=BMA)
+    assert denied.returncode == 2 and denied_value["reason"] == "bma_preflight_not_authorized_for_non_candidate"
+    # With only gcp-to-aws installed (sibling absent) the run still classifies and never needs BMA.
+    gcp = tmp_path / "skills/gcp-to-aws"; shutil.copytree(GCP, gcp)
+    assert not (tmp_path / "skills/bedrock-migration-assessment").exists()
+    alone, alone_value, _, _ = invoke(project, gcp=gcp, sandbox=True)
+    assert alone.returncode == 0, alone.stderr
+    assert alone_value["AI_CANDIDATE"] is False and alone_value["PURE_INFRASTRUCTURE"] is True
+    assert not any("/bedrock-migration-assessment/" in row["path"] for row in alone_value["audit"])
+
+
+def test_reviewer_repro_plus_openai_import_is_candidate(tmp_path: Path) -> None:
+    project = tmp_path / "project"; _reviewer_layout(project)
+    (project / "scripts/ask.py").write_text("import openai\nclient = openai.OpenAI()\n")
+    first, _ = paired(project)
+    assert first["PURE_INFRASTRUCTURE"] is False
+    assert first["ai_signal_files"] == ["scripts/ask.py"]
+
+
+@pytest.mark.parametrize("name,content", [
+    ("client.ts", 'const url = "https://api.openai.com/v1/chat/completions";\n'),
+    ("settings.py", 'key = os.environ["ANTHROPIC_API_KEY"]\n'),
+    ("model.js", 'const model = "claude-3-5-sonnet";\n'),
+    ("requirements.txt", "anthropic==0.40.0\n"),
+    ("package.json", '{"dependencies": {"openai": "^4.0.0"}}\n'),
+    ("main.go", 'import "cloud.google.com/go/aiplatform/apiv1"\n'),
+    ("App.java", "import com.google.cloud.aiplatform.v1.PredictionServiceClient;\n"),
+], ids=["endpoint", "env-var", "model-prefix", "dependency-requirements", "dependency-package-json", "go-import", "java-import"])
+def test_each_ai_signal_family_is_candidate(tmp_path: Path, name: str, content: str) -> None:
+    project = tmp_path / "project"; project.mkdir(); (project / name).write_text(content)
+    first, _ = paired(project)
+    assert first["ai_signal_files"] == [name]
+
+
+@pytest.mark.parametrize("name,content", [
+    ("cleanup.py", 'print("rotate logs")\n'),
+    ("notes.py", '# we considered openai and anthropic but use neither\n'),
+    ("util.js", 'const anthropic_like = 1; // myopenai\n'),
+    ("requirements.txt", "requests==2.32.0\nnumpy\n"),
+    ("tags.ts", 'const gpt = "gpt"; const o3 = "o3";\n'),
+], ids=["reviewer-script", "prose-mentions", "identifier-substring", "plain-manifest", "bare-words"])
+def test_non_ai_source_content_is_not_a_signal(tmp_path: Path, name: str, content: str) -> None:
+    project = tmp_path / "project"; project.mkdir(); (project / name).write_text(content)
+    completed, value, _, _ = invoke(project)
+    assert completed.returncode == 0 and value["AI_SIGNAL_CANDIDATE"] is False and value["AI_CANDIDATE"] is False
+
+
+def test_secret_excluded_files_are_never_read_for_signals(tmp_path: Path) -> None:
+    project = tmp_path / "project"; project.mkdir()
+    (project / ".env").write_text("OPENAI_API_KEY=sk-test\n"); (project / "credentials.json").write_text('{"api.openai.com": 1}\n')
+    completed, value, _, _ = invoke(project)
+    assert completed.returncode == 0 and value["AI_CANDIDATE"] is False and value["AI_SIGNAL_CANDIDATE"] is False
+    assert not any(row["op"] == "read" and row["path"].startswith(str(project.resolve())) for row in value["audit"])
+
+
+def _rewrite_copied_patterns(gcp: Path, mutate) -> str:
+    patterns = gcp / "references/runtime/bma-input-patterns.json"; manifest = gcp / "references/runtime/bma-bootstrap-manifest.json"
+    config = json.loads(patterns.read_text()); mutate(config); patterns.write_text(json.dumps(config, indent=2) + "\n")
+    value = json.loads(manifest.read_text()); value["patterns"]["sha256"] = sha(patterns); value.pop("self_hash")
+    value["self_hash"] = hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    manifest.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    return sha(manifest)
+
+
+@pytest.mark.parametrize("mutation", ["missing_family", "extra_family", "duplicate_token", "empty_family", "not_object", "empty_token"])
+def test_patterns_ai_signals_schema_negatives(tmp_path: Path, mutation: str) -> None:
+    def mutate(config: dict) -> None:
+        signals = config["ai_signals"]
+        if mutation == "missing_family": signals.pop("imports")
+        elif mutation == "extra_family": signals["extra"] = ["x"]
+        elif mutation == "duplicate_token": signals["imports"].append(signals["imports"][0])
+        elif mutation == "empty_family": signals["endpoints"] = []
+        elif mutation == "not_object": config["ai_signals"] = ["openai"]
+        elif mutation == "empty_token": signals["env_vars"].append("")
+    gcp = tmp_path / "gcp-to-aws"; shutil.copytree(GCP, gcp)
+    expected = _rewrite_copied_patterns(gcp, mutate)
+    project = tmp_path / "project"; project.mkdir(); (project / "app.py").write_text("import openai\n")
+    completed, value, _, _ = invoke(project, gcp=gcp, expected_manifest_sha=expected, sandbox=True)
+    assert completed.returncode == 2 and value["reason"] == "pattern_schema_invalid"
+    assert not any(row["op"] == "walk" for row in value["audit"])
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -219,7 +331,7 @@ def test_noncandidate_denies_bma_capability_and_makes_zero_bma_operations(tmp_pa
 def test_copied_layout_preserves_module_and_second_pass_contract(tmp_path: Path) -> None:
     skills = tmp_path / "skills"; gcp = skills / "gcp-to-aws"; bma = skills / "bedrock-migration-assessment"
     shutil.copytree(GCP, gcp); shutil.copytree(BMA, bma)
-    project = tmp_path / "project"; (project / "nested/modules/m").mkdir(parents=True); (project / "app.py").write_text("x\n")
+    project = tmp_path / "project"; (project / "nested/modules/m").mkdir(parents=True); (project / "app.py").write_text("import openai\n")
     first, value, _, _ = invoke(project, gcp=gcp)
     assert first.returncode == 0 and value["inventory"]["module_directories"] == ["nested/modules/m/"]
     second, value, argv, hashes = invoke(project, bma=bma, gcp=gcp)
@@ -244,7 +356,7 @@ def test_candidate_rejects_closure_valid_non_sibling_before_closure_access(
     shutil.copytree(BMA, alternate)
     project = tmp_path / "project"
     project.mkdir(exist_ok=True)
-    (project / "app.py").write_text("x\n")
+    (project / "app.py").write_text("import openai\n")
 
     completed, value, argv, hashes = invoke(project, bma=alternate, gcp=gcp, sandbox=True)
 

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Read-only route classification and authoritative BMA closure preflight."""
+"""Read-only route classification and authoritative BMA closure preflight.
+
+AI_CANDIDATE requires AI evidence: an AI signal in source or manifest files
+(provider SDK import/dependency, AI endpoint host, provider env var name, or
+model identifier from ``ai_signals`` in the patterns file), explicit provider
+intent, Vertex-strong IaC, or a durable AI route. Source presence alone
+(``SOURCE_CONTAINING``) is informational and never makes a run a candidate.
+"""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +25,14 @@ BMA_OWNER = "bedrock-migration-assessment"
 PATTERN_KEYS = {
     "schema_version", "selected_base", "terraform", "module_directories",
     "source", "manifest", "billing", "exclude_roots", "secret_excludes",
-    "vertex_strong_tokens",
+    "vertex_strong_tokens", "ai_signals",
+}
+AI_SIGNAL_FAMILIES = {"imports", "dependencies", "endpoints", "env_vars", "model_prefixes"}
+# Families scanned per inventory category. Dependencies are manifest-only so a bare
+# package name such as ``openai`` in prose cannot flag a source file.
+AI_SIGNAL_SCOPE = {
+    "source": ("imports", "endpoints", "env_vars", "model_prefixes"),
+    "manifest": ("dependencies", "endpoints", "env_vars", "model_prefixes"),
 }
 CLOSURE_KEYS = {
     "schema_version", "selected_base", "destination_root", "entrypoints",
@@ -157,10 +171,40 @@ def bootstrap(script: Path, patterns: Path, manifest: Path, expected: str,
     config = load_json(pattern_bytes)
     if set(config) != PATTERN_KEYS or config["schema_version"] != SCHEMA or config["selected_base"] != BASE:
         raise ValueError("pattern_schema_invalid")
-    for key in PATTERN_KEYS - {"schema_version", "selected_base"}:
-        if not isinstance(config[key], list) or len(config[key]) != len(set(config[key])) or not all(isinstance(item, str) and item for item in config[key]):
+    for key in PATTERN_KEYS - {"schema_version", "selected_base", "ai_signals"}:
+        if not token_list(config[key]):
             raise ValueError("pattern_schema_invalid")
+    signals = config["ai_signals"]
+    if not isinstance(signals, dict) or set(signals) != AI_SIGNAL_FAMILIES or not all(token_list(signals[family]) for family in AI_SIGNAL_FAMILIES):
+        raise ValueError("pattern_schema_invalid")
     return config, value["closure"]["sha256"]
+
+
+def token_list(value: Any) -> bool:
+    return (isinstance(value, list) and bool(value) and len(value) == len(set(value))
+            and all(isinstance(item, str) and item for item in value))
+
+
+def signal_patterns(signals: dict[str, list[str]]) -> dict[str, re.Pattern[bytes]]:
+    """Compile one bytes regex per family; tokens must start at a word-ish boundary."""
+    boundary = rb"(?<![A-Za-z0-9_.\-@])"
+    end = rb"(?![A-Za-z0-9_])"
+    compiled = {}
+    for family, tokens in signals.items():
+        alternatives = []
+        for token in tokens:
+            escaped = re.escape(token.encode())
+            if family == "imports":
+                alternatives.append(rb"(?:^|[\s;])(?:import|from)\s+" + escaped + end)
+                alternatives.append(rb"(?:from\s+|require\(\s*|import\(\s*)[\"']" + escaped + end)
+                if "/" in token:
+                    alternatives.append(rb"[\"']" + escaped + end)
+            elif family == "model_prefixes":
+                alternatives.append(boundary + escaped)
+            else:
+                alternatives.append(boundary + escaped + end)
+        compiled[family] = re.compile(b"|".join(alternatives), re.MULTILINE)
+    return compiled
 
 
 def provider_intent(value: str) -> bool:
@@ -178,6 +222,8 @@ def provider_intent(value: str) -> bool:
 def inventory(root: Path, config: dict[str, Any], events: list[dict[str, str]]):
     found = {key: [] for key in ("terraform", "module_directories", "source", "manifest", "billing")}
     vertex = False
+    signal_files: list[str] = []
+    patterns = signal_patterns(config["ai_signals"])
     audit(events, "walk", root)
     for candidate in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
         relative = candidate.relative_to(root)
@@ -197,7 +243,12 @@ def inventory(root: Path, config: dict[str, Any], events: list[dict[str, str]]):
                     audit(events, "read", candidate)
                     raw = candidate.read_bytes()
                     vertex = vertex or any(token.encode() in raw for token in config["vertex_strong_tokens"])
-    return found, vertex
+                elif category in AI_SIGNAL_SCOPE:
+                    audit(events, "read", candidate)
+                    raw = candidate.read_bytes()
+                    if any(patterns[family].search(raw) for family in AI_SIGNAL_SCOPE[category]):
+                        signal_files.append(relative.as_posix())
+    return found, vertex, bool(signal_files), sorted(set(signal_files))
 
 
 def durable(resume: Path | None, root: Path, events: list[dict[str, str]]):
@@ -348,13 +399,15 @@ def classify(args, events: list[dict[str, str]]) -> dict[str, Any]:
     config, closure_sha256 = bootstrap(Path(__file__).resolve(), args.patterns, args.bootstrap_manifest,
                                        args.expected_bootstrap_manifest_sha256, events)
     provider = provider_intent(args.provider_intent)
-    found, vertex = inventory(root, config, events)
+    found, vertex, ai_signal, signal_files = inventory(root, config, events)
     is_durable, reasons = durable(args.resume_dir, root, events)
     source = bool(found["source"] or found["manifest"])
-    candidate = source or provider or vertex or is_durable
+    # SOURCE_CONTAINING is informational only; AI evidence drives candidacy.
+    candidate = ai_signal or provider or vertex or is_durable
     infrastructure = bool(found["terraform"] or found["billing"])
     result = {
-        "ok": True, "SOURCE_CONTAINING": source,
+        "ok": True, "SOURCE_CONTAINING": source, "AI_SIGNAL_CANDIDATE": ai_signal,
+        "ai_signal_files": signal_files,
         "PROVIDER_USAGE_INTENT": provider, "VERTEX_STRONG_CANDIDATE": vertex,
         "DURABLE_AI_ROUTE": is_durable, "AI_CANDIDATE": candidate,
         "PURE_INFRASTRUCTURE": infrastructure and not candidate,

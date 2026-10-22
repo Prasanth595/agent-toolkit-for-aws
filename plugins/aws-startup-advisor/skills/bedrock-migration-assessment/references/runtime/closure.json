@@ -32,7 +32,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "1cd337c36a531b89223211e576ded5f66245ebbadb5af7ff77f429f2a133c3ba",
+      "sha256": "6c3c9894173d3f58ee13057ea34fae1a601cdd17ab52f056bd7ebe1e58f82b28",
       "type": "data"
     },
     {
@@ -42,7 +42,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "0442a6b7c6f0e5f40d6cf722bb6d69cb8203557aa85ed3e66c494109bedcab6d",
+      "sha256": "f9d3385e8d7883186a34f60d35a5c37824710bd7b31e63c519ed04a250ec4f61",
       "type": "script"
     },
     {
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "457c32fc8ca1b0e6c74975500a6f921e2464aba1eb4cba0dbd279a0e261fa5da"
+  "self_hash": "49a9077ceedf4d4bfc7735286b50794facd620ae41ebdb172b705aadb8a399c6"
 }
