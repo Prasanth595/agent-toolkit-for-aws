@@ -8,7 +8,7 @@ _contributes:
 
 # Discover from live capture
 
-Read only the active attempt-bound files under `$MIGRATION_DIR/live-capture/`. Verify manifest, consent digest, workspace ownership, ownership-index digest, category schema, parent digest, file digest, bounds, and status before contributing. Preserve transport-specific `null`, array, `{data}`, wrapper, stream, cursor, HTTP-status, metric, and capability outcomes.
+This `rw` fragment is file-only: CLI/REST capture and normalization already ran in the main window before dispatch (see `discover.md` "Pre-dispatch main-window actions", Steps 1 and 3); the rules below describe the captures it reads, not commands it runs. Read only the active attempt-bound files under `$MIGRATION_DIR/live-capture/`. Verify manifest, consent digest, workspace ownership, ownership-index digest, category schema, parent digest, file digest, bounds, and status before contributing. Preserve transport-specific `null`, array, `{data}`, wrapper, stream, cursor, HTTP-status, metric, and capability outcomes.
 
 CLI capture is restricted to the exact Render 2.30.0 table. Unsupported categories, flags, templates, versions, and every mutation reject before the category process starts. Every child-category request must resolve through the active attempt-bound ownership index before `Popen`, and any returned project, service, Workflow, version, or task parent must match the requested indexed parent. The child uses `shell=False`, closed stdin, timeout termination followed by a two-second kill bound, and only `PATH`, `HOME`, locale, and reviewed credential-free certificate/proxy variables. `RENDER_API_KEY` and all token/credential variables are absent.
 

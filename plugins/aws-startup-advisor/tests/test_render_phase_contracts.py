@@ -107,6 +107,47 @@ def test_feedback_uses_exact_trigger_map_and_no_backbone_keys() -> None:
     assert "without loading Feedback" in skill
 
 
+def body_after_frontmatter(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    assert text.startswith("---\n"), path
+    return text[text.index("\n---\n", 4) + len("\n---\n"):]
+
+
+def test_discover_executable_helpers_run_only_in_main_window() -> None:
+    # PR #489 review finding 1 (P1): `_exec: {_agent: rw}` selects a worker
+    # with Read/Grep/Glob/Write/Edit only, so every Python helper must run in
+    # the main window before dispatch and the dispatched units stay file-only.
+    executes_helper = re.compile(r"Invoke `|uv run|--frozen python|\.py` through")
+    discover = phase("discover")
+    assert discover["_exec"] == {"_agent": "rw"}
+    assert discover["_interactive"] is False
+    gate = [row.get("_assert", "") for row in discover["_preconditions"]]
+    assert any("normalize-result.json" in row and "main window" in row for row in gate)
+
+    discover_body = body_after_frontmatter(phase_file("discover"))
+    assert "## Pre-dispatch main-window actions" in discover_body
+    assert "WORKER_DONE" in discover_body
+    pre_dispatch = discover_body[discover_body.index("## Pre-dispatch main-window actions"):]
+    # Negative control: the helpers are still documented, in the main-window section.
+    assert executes_helper.search(pre_dispatch)
+    for helper in ("parse-render-blueprint.py", "scan-render-application.py", "parse-render-billing.py", "normalize-render-capture.py"):
+        assert f"`{helper}`" in pre_dispatch, helper
+    for flag in ("--output-inventory", "--output-clusters", "--output-ai-profile", "--output-ai-discovery"):
+        assert flag in pre_dispatch, flag
+
+    dispatched_units = [fragment["_file"] for fragment in discover["_fragments"]] + [discover["_assemble"]["_file"]]
+    assert len(dispatched_units) == 5
+    for unit in dispatched_units:
+        body = body_after_frontmatter(SKILL_ROOT / "references" / unit)
+        assert not executes_helper.search(body), unit
+        assert re.search(r"file-only|reads only|read only", body), unit
+
+    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    assert "never invokes `uv`, Python, or any shell command" in skill
+    abi = (SKILL_ROOT / "references/shared/script-abis.md").read_text(encoding="utf-8")
+    assert abi.count("Caller: main window") == 7
+
+
 def test_every_phase_reference_resolves_and_unit_identity_matches() -> None:
     for name in BACKBONE + SIDEBARS:
         data = phase(name)
