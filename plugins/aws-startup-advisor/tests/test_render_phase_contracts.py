@@ -224,7 +224,7 @@ def test_all_seven_script_abis_and_locked_runtime_are_declared() -> None:
     assert 'requires-python = "==3.12.*"' in project
     assert '"PyYAML==6.0.2"' in project
     assert '"jsonschema==4.23.0"' in project
-    assert '"pytest==8.3.5"' in project
+    assert '"pytest==9.0.3"' in project
     lock = (SKILL_ROOT / "scripts/uv.lock").read_text(encoding="utf-8")
     assert re.search(r'name = "pyyaml"\nversion = "6\.0\.2"', lock)
     assert re.search(r'name = "jsonschema"\nversion = "4\.23\.0"', lock)

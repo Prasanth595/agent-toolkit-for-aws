@@ -257,7 +257,9 @@ def main() -> int:
             code = "internal_validation_error"
         print(f"BILLING_FAIL | code={code}", file=sys.stderr)
         return 1
-    print(f"BILLING_OK | output={args.output} | digest={result['source_digest']}")
+    # Only the output path is echoed. The source digest and all parsed values stay
+    # in the written artifact so nothing derived from the billing file reaches stdout.
+    print(f"BILLING_OK | output={args.output}")
     return 0
 
 

@@ -31,7 +31,7 @@ All JSON is UTF-8, canonicalized with sorted object keys, compact separators, NF
 ## `parse-render-billing.py`
 
 - Arguments: `--source ABS_PATH --workspace-root ABS_PATH --migration-dir ABS_PATH --output ABS_PATH`. JSON inputs use exact input schema version `1.0.0`; normalized output uses `render-billing` schema version `1.0` independently.
-- Success: `BILLING_OK`, absolute output path, and lowercase SHA-256 digest. Output schema is `render-billing` v1.0.
+- Success: `BILLING_OK` and the absolute output path. The source digest is recorded only inside the written artifact (`source_digest`), never on stdout. Output schema is `render-billing` v1.0.
 - Retry: input correction only.
 
 ## `normalize-render-capture.py`
