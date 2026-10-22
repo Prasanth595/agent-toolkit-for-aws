@@ -441,7 +441,7 @@ def test_image_promotion_requires_environment_and_preserves_exact_digest(tmp_pat
     )
     assert dry_run.returncode == 0, dry_run.stderr
     assert f"environment=production image={repository}@{digest}" in dry_run.stdout
-    assert "immutable_tag=deploy-production" in dry_run.stdout
+    assert "immutable_tag=deploy-production-aaaaaaaaaaaa\n" in dry_run.stdout
     assert "without rebuilding" in dry_run.stdout
 
     fake_bin = tmp_path / "bin"
@@ -477,9 +477,131 @@ esac
     calls = call_log.read_text(encoding="utf-8")
     assert "describe-repositories" in calls and "batch-get-image" in calls and "put-image" in calls
     assert f"imageDigest={digest}" in calls
-    assert "--image-tag deploy-production" in calls
+    assert "--image-tag deploy-production-aaaaaaaaaaaa " in calls
     assert all(line.startswith("ecr ") for line in calls.splitlines())
     assert " build " not in f" {calls} "
+
+
+IMMUTABLE_FAKE_AWS = '''#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$AWS_CALL_LOG"
+value_after() {
+  local flag=$1
+  shift
+  while [[ $# -gt 0 ]]; do
+    if [[ $1 == "$flag" ]]; then
+      printf '%s' "$2"
+      return 0
+    fi
+    shift
+  done
+  return 1
+}
+case "${2:-}" in
+  describe-repositories) printf 'IMMUTABLE\\n' ;;
+  batch-get-image)
+    requested=$(value_after --image-ids "$@")
+    requested=${requested#imageDigest=}
+    printf '%s\\t%s\\n' "$requested" "{\\"schemaVersion\\":2,\\"digest\\":\\"$requested\\"}" ;;
+  put-image)
+    tag=$(value_after --image-tag "$@")
+    manifest=$(value_after --image-manifest "$@")
+    touch "$AWS_TAG_STORE"
+    if grep -q "^$tag " "$AWS_TAG_STORE"; then
+      echo "An error occurred (ImageTagAlreadyExistsException) when calling the PutImage operation: The image tag '$tag' already exists in the repository" >&2
+      exit 254
+    fi
+    printf '%s %s\\n' "$tag" "$manifest" >> "$AWS_TAG_STORE"
+    printf '{}\\n' ;;
+  *) exit 9 ;;
+esac
+'''
+
+
+def test_two_digests_promote_to_one_repository_and_environment(tmp_path: Path) -> None:
+    script = EXPECTED / "generated/scripts/promote-image.sh"
+    repository = "000000000000.dkr.ecr.us-east-1.amazonaws.com/render-migration"
+    first_digest = "sha256:" + "a" * 64
+    second_digest = "sha256:" + "b" * 64
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_aws = fake_bin / "aws"
+    fake_aws.write_text(IMMUTABLE_FAKE_AWS, encoding="utf-8")
+    fake_aws.chmod(0o755)
+    call_log = tmp_path / "aws-calls"
+    tag_store = tmp_path / "ecr-tags"
+    environment = dict(os.environ)
+    environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
+    environment["AWS_CALL_LOG"] = str(call_log)
+    environment["AWS_TAG_STORE"] = str(tag_store)
+
+    def promote(digest: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # nosec B603 - fake aws confines the explicit execution path
+            [str(script), repository, digest, "production", "--execute"],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+
+    first = promote(first_digest)
+    assert first.returncode == 0, first.stderr
+    second = promote(second_digest)
+    assert second.returncode == 0, second.stderr
+    assert f"PROMOTION_COMPLETE environment=production image={repository}@{first_digest} immutable_tag=deploy-production-aaaaaaaaaaaa" in first.stdout
+    assert f"PROMOTION_COMPLETE environment=production image={repository}@{second_digest} immutable_tag=deploy-production-bbbbbbbbbbbb" in second.stdout
+
+    recorded = dict(line.split(" ", 1) for line in tag_store.read_text(encoding="utf-8").splitlines())
+    assert set(recorded) == {"deploy-production-aaaaaaaaaaaa", "deploy-production-bbbbbbbbbbbb"}
+    assert first_digest in recorded["deploy-production-aaaaaaaaaaaa"]
+    assert second_digest in recorded["deploy-production-bbbbbbbbbbbb"]
+    calls = call_log.read_text(encoding="utf-8")
+    assert f"imageDigest={first_digest}" in calls and f"imageDigest={second_digest}" in calls
+    assert all(line.startswith("ecr ") for line in calls.splitlines())
+
+    repeated = promote(first_digest)
+    assert repeated.returncode != 0
+    assert "ImageTagAlreadyExistsException" in repeated.stderr
+    assert "deploy-production-aaaaaaaaaaaa" in repeated.stderr
+
+
+def test_fixture_promotion_script_matches_harness_emitter() -> None:
+    harness = _load_script_module(
+        Path(__file__).with_name("render_pipeline_harness.py"),
+        "render_pipeline_harness_promotion_parity",
+    )
+    fixture = (EXPECTED / "generated/scripts/promote-image.sh").read_bytes()
+    assert fixture == harness._promotion_script().encode("utf-8")
+    assert b'promotion_tag="deploy-${target_environment}-${digest_short}"' in fixture
+    assert b'image_reference="${repository_url}@${digest}"' in fixture
+
+
+def test_generated_valkey_engine_matches_design_selection() -> None:
+    harness = _load_script_module(
+        Path(__file__).with_name("render_pipeline_harness.py"),
+        "render_pipeline_harness_cache_parity",
+    )
+    design = load(EXPECTED / "aws-design.json")
+    data_tf = (EXPECTED / "generated/terraform/data.tf").read_text(encoding="utf-8")
+    key_value = [row for row in design["mappings"] if row["render_kind"] == "render.key_value"]
+    assert key_value and all("Valkey" in row["aws_service"] for row in key_value)
+    harness.assert_cache_engine_parity(data_tf, design)
+    assert re.search(r'^\s*engine\s*=\s*"valkey"', data_tf, flags=re.MULTILINE)
+    assert re.search(r'^\s*engine_version\s*=\s*"8\.0"', data_tf, flags=re.MULTILINE)
+    assert re.search(r'^\s*node_type\s*=\s*"cache\.m6g\.large"', data_tf, flags=re.MULTILINE)
+    assert key_value[0]["aws_config"]["node_type"] == "cache.m6g.large"
+    assert not re.search(r'^\s*engine\s*=\s*"redis"', data_tf, flags=re.MULTILINE)
+
+    substituted = data_tf.replace('engine                     = "valkey"', 'engine                     = "redis"')
+    assert substituted != data_tf
+    with pytest.raises(AssertionError, match='engine = "redis"'):
+        harness.assert_cache_engine_parity(substituted, design)
+    unversioned = re.sub(r'^\s*engine_version\s*=\s*"8\.0"\n', "", data_tf, flags=re.MULTILINE)
+    with pytest.raises(AssertionError, match="engine_version"):
+        harness.assert_cache_engine_parity(unversioned, design)
+    wrong_node = data_tf.replace('"cache.m6g.large"', '"cache.t4g.micro"')
+    with pytest.raises(AssertionError, match="node_type"):
+        harness.assert_cache_engine_parity(wrong_node, design)
 
 
 def test_generated_certificate_and_static_origin_graph_fail_closed() -> None:

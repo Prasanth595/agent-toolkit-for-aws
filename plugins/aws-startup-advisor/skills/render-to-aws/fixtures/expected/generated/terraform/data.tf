@@ -33,7 +33,8 @@ resource "aws_elasticache_subnet_group" "main" {
 resource "aws_elasticache_replication_group" "valkey" {
   replication_group_id       = "${local.name_prefix}-valkey"
   description                = "Render Key Value replacement"
-  engine                     = "redis"
+  engine                     = "valkey"
+  engine_version             = "8.0"
   node_type                  = "cache.m6g.large"
   num_cache_clusters         = 2
   port                       = 6379

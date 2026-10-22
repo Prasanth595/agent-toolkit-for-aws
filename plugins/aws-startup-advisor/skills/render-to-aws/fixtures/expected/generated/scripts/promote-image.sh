@@ -30,7 +30,9 @@ if [[ -n $mode && $mode != "--execute" ]]; then
 fi
 
 image_reference="${repository_url}@${digest}"
-promotion_tag="deploy-${target_environment}"
+digest_short=${digest#sha256:}
+digest_short=${digest_short:0:12}
+promotion_tag="deploy-${target_environment}-${digest_short}"
 if [[ $mode != "--execute" ]]; then
   printf 'PROMOTION_DRY_RUN environment=%s image=%s immutable_tag=%s\n' \
     "$target_environment" "$image_reference" "$promotion_tag"

@@ -96,6 +96,10 @@ RIGHT_SIZED_FACTORS = {
     "render.postgres": 0.8,
     "render.key_value": 0.8,
 }
+# Smallest node target in knowledge/design/keyvalue-elasticache-sizing.json; the
+# Design mapping carries it so Generate emits exactly the selected node type.
+VALKEY_NODE_TYPE = "cache.t4g.micro"
+VALKEY_ENGINE_VERSION = "8.0"
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -119,15 +123,18 @@ def design_from_inventory(
             raise AssertionError(f"no selector for {kind}")
         selected = TARGETS[kind]
         alternative = "Alternative requiring evidence absent from the completed preferences"
+        aws_config: dict[str, Any] = {
+            "selection_source": "canonical_inventory_and_completed_preferences",
+            "source_kind": kind,
+        }
+        if kind == "render.key_value":
+            aws_config["node_type"] = VALKEY_NODE_TYPE
         mappings.append(
             {
                 "source_resource_id": resource["id"],
                 "render_kind": kind,
                 "aws_service": selected,
-                "aws_config": {
-                    "selection_source": "canonical_inventory_and_completed_preferences",
-                    "source_kind": kind,
-                },
+                "aws_config": aws_config,
                 "confidence": "deterministic" if kind in {"render.static_site", "render.build_source", "render.build_artifact"} else "inferred",
                 "disposition": "consumed_topology" if kind in TOPOLOGY_KINDS else "mapped",
                 "rationale": f"The ordered {kind} selector resolves to {selected} from the completed migration preferences.",
@@ -480,6 +487,61 @@ resource "aws_scheduler_schedule" "__NAME__" {
   }
 }
 '''.replace("__NAME__", name).replace("__NAME_HYPHEN__", name.replace("_", "-")).replace("__SOURCE_ID__", source_id)
+
+
+def _valkey_block(mapping: dict[str, Any], index: int) -> str:
+    label = "valkey" if index == 1 else f"valkey_{index:03d}"
+    if "Valkey" not in mapping["aws_service"]:
+        raise AssertionError(f"render.key_value mapping {mapping['source_resource_id']} does not select Valkey")
+    node_type = mapping["aws_config"].get("node_type")
+    if not isinstance(node_type, str) or not node_type:
+        raise AssertionError(f"node-based Valkey mapping {mapping['source_resource_id']} carries no aws_config.node_type")
+    return f'''resource "aws_elasticache_replication_group" "{label}" {{
+  replication_group_id       = "render-migration-{label.replace("_", "-")}"
+  description                = "Render Key Value replacement"
+  engine                     = "valkey"
+  engine_version             = "{VALKEY_ENGINE_VERSION}"
+  node_type                  = "{node_type}"
+  subnet_group_name          = aws_elasticache_subnet_group.main.name
+  security_group_ids         = [aws_security_group.data.id]
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+}}
+'''
+
+
+def assert_cache_engine_parity(data_tf_text: str, design: dict[str, Any]) -> None:
+    """Design's Valkey selection must reach the provider configuration unchanged."""
+    engines = re.findall(r'^\s*engine\s*=\s*"([^"]*)"', data_tf_text, flags=re.MULTILINE)
+    if "redis" in engines:
+        raise AssertionError('data.tf sets engine = "redis" although Design selected Valkey')
+    cache_blocks = re.findall(
+        r'^resource "aws_elasticache_replication_group" "[^"]+" \{\n(.*?)^\}',
+        data_tf_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    valkey_mappings = [
+        row for row in design["mappings"]
+        if row["render_kind"] == "render.key_value" and "Valkey" in row["aws_service"]
+    ]
+    if not valkey_mappings:
+        raise AssertionError("expected at least one render.key_value mapping selecting Valkey")
+    if len(cache_blocks) != len(valkey_mappings):
+        raise AssertionError(
+            f"data.tf declares {len(cache_blocks)} aws_elasticache_replication_group blocks for {len(valkey_mappings)} Valkey mappings"
+        )
+    for row, block in zip(valkey_mappings, cache_blocks):
+        source_id = row["source_resource_id"]
+        if not re.search(r'^\s*engine\s*=\s*"valkey"$', block, flags=re.MULTILINE):
+            raise AssertionError(f'data.tf does not set engine = "valkey" for {source_id}')
+        if not re.search(r'^\s*engine_version\s*=\s*"[0-9][0-9.]*"$', block, flags=re.MULTILINE):
+            raise AssertionError(f"data.tf does not pin a Valkey engine_version for {source_id}")
+        if "node-based" in row["aws_service"]:
+            node_type = row["aws_config"].get("node_type")
+            if not isinstance(node_type, str) or not node_type:
+                raise AssertionError(f"node-based Valkey mapping {source_id} carries no aws_config.node_type")
+            if not re.search(rf'^\s*node_type\s*=\s*"{re.escape(node_type)}"$', block, flags=re.MULTILINE):
+                raise AssertionError(f'data.tf does not set node_type = "{node_type}" selected for {source_id}')
 
 
 def _terraform_files(mappings: list[dict[str, Any]], accounted: int, generated: int, unsupported: int) -> dict[str, str]:
@@ -917,15 +979,9 @@ resource "aws_elasticache_subnet_group" "main" {
   name       = "render-migration"
   subnet_ids = [aws_subnet.private.id]
 }
-resource "aws_elasticache_replication_group" "valkey" {
-  replication_group_id       = "render-migration-valkey"
-  description                = "Render Key Value replacement"
-  subnet_group_name          = aws_elasticache_subnet_group.main.name
-  security_group_ids         = [aws_security_group.data.id]
-  at_rest_encryption_enabled = true
-  transit_encryption_enabled = true
-}
 '''
+    for index, mapping in enumerate(_mappings_for_kind(mappings, "render.key_value"), 1):
+        data += _valkey_block(mapping, index)
     storage = '''resource "aws_security_group" "efs" {
   name        = "render-migration-efs"
   description = "NFS from the disk-owning private task only"
@@ -1275,7 +1331,9 @@ if [[ -n $mode && $mode != "--execute" ]]; then
 fi
 
 image_reference="${repository_url}@${digest}"
-promotion_tag="deploy-${target_environment}"
+digest_short=${digest#sha256:}
+digest_short=${digest_short:0:12}
+promotion_tag="deploy-${target_environment}-${digest_short}"
 if [[ $mode != "--execute" ]]; then
   printf 'PROMOTION_DRY_RUN environment=%s image=%s immutable_tag=%s\n' \
     "$target_environment" "$image_reference" "$promotion_tag"
@@ -1479,6 +1537,7 @@ def assert_pack_bound_to_design(generated: Path, design: dict[str, Any], ledger:
     assert 'depends_on = [aws_efs_mount_target.application]' in compute
     assert 'manage_master_user_password = true' in data
     assert not re.search(r"(?:master_)?password\s*=\s*var\.", data)
+    assert_cache_engine_parity(data, design)
     promotion = (generated / "scripts/promote-image.sh").read_text(encoding="utf-8")
     assert all(
         path.stat().st_mode & 0o777 == 0o755
@@ -1487,6 +1546,8 @@ def assert_pack_bound_to_design(generated: Path, design: dict[str, Any], ledger:
     assert "ECR_REPOSITORY_URL SHA256_DIGEST TARGET_ENVIRONMENT [--execute]" in promotion
     assert "imageDigest=$digest" in promotion
     assert 'image_reference="${repository_url}@${digest}"' in promotion
-    assert 'promotion_tag="deploy-${target_environment}"' in promotion
+    assert "digest_short=${digest#sha256:}" in promotion
+    assert "digest_short=${digest_short:0:12}" in promotion
+    assert 'promotion_tag="deploy-${target_environment}-${digest_short}"' in promotion
     assert "aws ecr put-image" in promotion
     assert "target ECR repository must enforce immutable tags" in promotion
