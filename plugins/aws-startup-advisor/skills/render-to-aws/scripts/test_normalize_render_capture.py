@@ -142,6 +142,7 @@ def test_mixed_estate_normalizes_drift_lifecycle_build_sources_workflows_and_ai(
     assert disk_edge["attributes"] == {
         "mountPath": "/var/data",
         "sizeGB": 5,
+        "sizeGB_provenance": "declared",
         "capacity_unit": "GB",
         "region": "virginia",
         "region_provenance": disk["provenance"]["region"],
@@ -301,6 +302,58 @@ def test_blueprint_only_discover_accepts_absent_or_stale_semantic_evidence(tmp_p
         assert clusters["clusters"] or clusters["unclustered_resource_ids"]
         assert ai_profile is None
         assert ai_discovery is None
+
+
+def blueprint_only_manifest(root: Path, blueprint_yaml: str) -> Path:
+    workspace = root / "workspace"
+    workspace.mkdir(parents=True)
+    source = workspace / "render.yaml"
+    source.write_text(blueprint_yaml)
+    blueprint_parser = load_script("parse-render-blueprint.py", "blueprint_for_normalize_local")
+    blueprint = blueprint_parser.parse_blueprint(source, workspace, root)
+    capture = write_capture(root, "blueprint.json", "blueprint", "blueprint", blueprint)
+    capture["workspace_id"] = None
+    capture["ownership_index_digest"] = None
+    manifest = {"schema_version": "1.0", "status": "active", "identity_scope": "local", "attempt_id": ATTEMPT, "workspace_id": None, "local_identity": "sha256:" + "e" * 64, "consent_digest": None, "ownership_index_digest": None, "captures": [capture]}
+    path = root / "manifest.json"
+    path.write_bytes(module.canonical_bytes(manifest))
+    return path
+
+
+def test_blueprint_only_disk_without_size_normalizes_with_schema_default(tmp_path: Path) -> None:
+    manifest = blueprint_only_manifest(tmp_path, """services:
+  - type: web
+    name: api
+    runtime: docker
+    disk:
+      name: data
+      mountPath: /var/data
+""")
+    inventory, _clusters, _ai_profile, _ai_discovery = module.normalize(tmp_path, manifest, ATTEMPT)
+    disk = next(item for item in inventory["resources"] if item["kind"] == "render.persistent_disk")
+    assert disk["config"]["sizeGB"] == 10
+    assert disk["config"]["sizeGB_provenance"] == "schema_default"
+    edge = next(edge for edge in inventory["edges"] if edge["type"] == "service_to_disk")
+    assert edge["to_id"] == disk["id"]
+    assert edge["attributes"]["sizeGB"] == 10
+    assert edge["attributes"]["sizeGB_provenance"] == "schema_default"
+    assert edge["attributes"]["source"] == "declared"
+
+
+def test_blueprint_only_disk_with_explicit_size_keeps_declared_provenance(tmp_path: Path) -> None:
+    manifest = blueprint_only_manifest(tmp_path, """services:
+  - type: web
+    name: api
+    runtime: docker
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 5
+""")
+    inventory, *_ = module.normalize(tmp_path, manifest, ATTEMPT)
+    edge = next(edge for edge in inventory["edges"] if edge["type"] == "service_to_disk")
+    assert edge["attributes"]["sizeGB"] == 5
+    assert edge["attributes"]["sizeGB_provenance"] == "declared"
 
 
 def test_live_only_discover_has_no_blueprint_provenance(tmp_path: Path) -> None:

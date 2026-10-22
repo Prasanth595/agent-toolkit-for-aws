@@ -77,6 +77,111 @@ def test_ledger_duplicate_and_missing_warning_fail(tmp_path: Path) -> None:
     assert "WORKFLOW_WARNING_MISSING" in output
 
 
+AI_DEFERRED_PARAGRAPH = (
+    '<p class="warning"><strong>deferred_shared_ai_engine:</strong> infrastructure can proceed, but AI model, '
+    "adapter, estimate, and generation remain deferred and resume from the provider-neutral profile.</p>"
+)
+
+
+def _no_ai_design(migration: Path) -> None:
+    design_path = migration / "aws-design.json"
+    design = json.loads(design_path.read_text(encoding="utf-8"))
+    design["ai_track"] = None
+    design_path.write_text(json.dumps(design), encoding="utf-8")
+
+
+def _drop_ai_ledger_warning(migration: Path) -> None:
+    ledger_path = migration / "generation-warnings.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["warnings"] = [row for row in ledger["warnings"] if row["code"] != "deferred_shared_ai_engine"]
+    ledger_path.write_text(json.dumps(ledger), encoding="utf-8")
+
+
+def test_no_ai_report_passes_when_ai_track_is_null(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _no_ai_design(migration)
+    _drop_ai_ledger_warning(migration)
+    html = report.read_text(encoding="utf-8")
+    assert AI_DEFERRED_PARAGRAPH in html
+    report.write_text(html.replace(AI_DEFERRED_PARAGRAPH, ""), encoding="utf-8")
+    code, output = run(report, migration)
+    assert code == 0, output
+    assert output == "REPORT_OK\n"
+
+
+def test_no_ai_report_rejects_stale_ai_deferral_text(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _no_ai_design(migration)
+    # Ledger still carries the AI warning and the report still names the deferral.
+    code, output = run(report, migration)
+    assert code == 1
+    assert "AI_DEFERRED_WARNING_UNEXPECTED" in output
+    assert "AI_DEFERRED_WARNING_MISSING" not in output
+    # Clean ledger but stale report prose is still rejected.
+    _drop_ai_ledger_warning(migration)
+    code, output = run(report, migration)
+    assert code == 1
+    assert "AI_DEFERRED_WARNING_UNEXPECTED" in output
+
+
+def test_deferred_ai_track_still_requires_warning_and_prose(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _drop_ai_ledger_warning(migration)
+    code, output = run(report, migration)
+    assert code == 1
+    assert "AI_DEFERRED_WARNING_MISSING" in output
+
+
+def _set_current_costs(migration: Path, source: str, render_monthly) -> None:
+    estimate_path = migration / "estimation-infra.json"
+    estimate = json.loads(estimate_path.read_text(encoding="utf-8"))
+    estimate["current_costs"] = {"source": source, "render_monthly": render_monthly, "baseline_note": "no invoice, export, or user-stated amount", "breakdown": {}}
+    estimate_path.write_text(json.dumps(estimate), encoding="utf-8")
+
+
+def _set_current_render_cell(report: Path, text: str) -> None:
+    html = report.read_text(encoding="utf-8")
+    cell = '<td data-cost-key="current_render">$123.45</td>'
+    assert cell in html
+    report.write_text(html.replace(cell, f'<td data-cost-key="current_render">{text}</td>'), encoding="utf-8")
+
+
+def test_unavailable_render_baseline_passes_with_literal_text(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _set_current_costs(migration, "unavailable", None)
+    _set_current_render_cell(report, "Unavailable")
+    code, output = run(report, migration)
+    assert code == 0, output
+    assert output == "REPORT_OK\n"
+
+
+def test_unavailable_render_baseline_rejects_numeric_cell(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _set_current_costs(migration, "unavailable", None)
+    _set_current_render_cell(report, "$0.00")
+    code, output = run(report, migration)
+    assert code == 1
+    assert "COST_CURRENT_RENDER_UNAVAILABLE_TEXT_MISMATCH" in output
+
+
+def test_null_baseline_with_other_source_is_still_missing(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _set_current_costs(migration, "user_stated", None)
+    _set_current_render_cell(report, "unavailable")
+    code, output = run(report, migration)
+    assert code == 1
+    assert "COST_CURRENT_RENDER_MISSING" in output
+    assert "UNAVAILABLE_TEXT_MISMATCH" not in output
+
+
+def test_present_baseline_keeps_exact_check(tmp_path: Path) -> None:
+    migration, report = prepared(tmp_path)
+    _set_current_render_cell(report, "unavailable")
+    code, output = run(report, migration)
+    assert code == 1
+    assert "COST_CURRENT_RENDER_MISMATCH" in output
+
+
 def test_relative_report_path_is_rejected(tmp_path: Path) -> None:
     migration, _ = prepared(tmp_path)
     code, output = run(Path("migration-report.html"), migration)

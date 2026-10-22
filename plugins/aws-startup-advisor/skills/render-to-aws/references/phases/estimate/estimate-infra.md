@@ -11,6 +11,8 @@ _contributes:
 
 Apply the source hierarchy without blending sources. Invoice/export and user-stated values retain their own as-of date and currency. Cache pricing is eligible only when `as_of + max_age_days` includes the estimate date, currency is USD, and every billed resource has an exact normalized plan or legacy-alias match. An unmatched or stale row is `unavailable`, not zero and not a partial source total.
 
+When no source in the hierarchy yields a baseline, write `current_costs` as exactly `source: "unavailable"` with `render_monthly: null`; every other `source` carries a numeric `render_monthly`. The report renders that baseline cell as the literal text `unavailable`, and the report validator accepts only this pairing while still requiring exact amounts whenever `render_monthly` is a number.
+
 Price Key Value from normalized memory plan IDs, including `3g` and `50g`; aliases resolve before lookup. Price service plans using CPU and RAM as independent captured dimensions. Price Workflow Flex as `(active_cpu_hours × 0.20) + (active_gb_hours × 0.05) + (retained_state_gb × 0.25)`, respecting the one-second 0.1 CPU/0.1 GB per-run minimum. Fixed Workflow plans use task duration multiplied by the exact hourly row. Missing task duration makes Workflow source cost unavailable.
 
 ## Rightsizing evidence gate

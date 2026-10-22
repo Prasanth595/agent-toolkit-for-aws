@@ -214,6 +214,16 @@ def _money(text: str) -> Decimal | None:
         return None
 
 
+def _ai_deferred(design: dict) -> bool:
+    ai_track = design.get("ai_track")
+    return isinstance(ai_track, dict) and ai_track.get("status") == "deferred_shared_ai_engine"
+
+
+def _baseline_unavailable(estimate: dict) -> bool:
+    current = estimate.get("current_costs")
+    return isinstance(current, dict) and current.get("source") == "unavailable" and current.get("render_monthly") is None
+
+
 def _validate_ledger(ledger: dict, design: dict) -> list[str]:
     errors: list[str] = []
     mappings = design.get("mappings")
@@ -256,8 +266,10 @@ def _validate_ledger(ledger: dict, design: dict) -> list[str]:
         errors.append("WARNINGS_INVALID")
     else:
         codes = {row.get("code") for row in warnings if isinstance(row, dict)}
-        if design.get("ai_track", {}).get("status") == "deferred_shared_ai_engine" and "deferred_shared_ai_engine" not in codes:
+        if _ai_deferred(design) and "deferred_shared_ai_engine" not in codes:
             errors.append("AI_DEFERRED_WARNING_MISSING")
+        if design.get("ai_track") is None and "deferred_shared_ai_engine" in codes:
+            errors.append("AI_DEFERRED_WARNING_UNEXPECTED")
         if ledger.get("unsupported") and "conditional_workflow_generation_unsupported" not in codes:
             errors.append("WORKFLOW_WARNING_MISSING")
     return errors
@@ -337,6 +349,12 @@ def validate(report: Path, migration_dir: Path) -> list[str]:
     for key, path in COST_PATHS.items():
         expected = _dig(estimate, path)
         values = parser.costs.get(key, [])
+        if key == "current_render" and _baseline_unavailable(estimate):
+            if len(values) != 1:
+                errors.append(f"COST_{key.upper()}_MISSING")
+            elif values[0].strip().casefold() != "unavailable":
+                errors.append(f"COST_{key.upper()}_UNAVAILABLE_TEXT_MISMATCH")
+            continue
         if expected is None or len(values) != 1:
             errors.append(f"COST_{key.upper()}_MISSING")
             continue
@@ -352,8 +370,10 @@ def validate(report: Path, migration_dir: Path) -> list[str]:
     if parser.accounted_values != [str(accounted)]:
         errors.append("REPORT_ACCOUNTED_COUNT_MISMATCH")
     deferred_text = " ".join(parser.sections.get("deferred-surfaces", []))
-    if "deferred_shared_ai_engine" not in deferred_text:
+    if _ai_deferred(design) and "deferred_shared_ai_engine" not in deferred_text:
         errors.append("AI_DEFERRED_STATE_MISSING")
+    if design.get("ai_track") is None and "deferred_shared_ai_engine" in deferred_text:
+        errors.append("AI_DEFERRED_WARNING_UNEXPECTED")
     if ledger.get("unsupported") and "conditional_workflow_generation_unsupported" not in deferred_text:
         errors.append("WORKFLOW_LIMIT_MISSING")
     return sorted(set(errors))

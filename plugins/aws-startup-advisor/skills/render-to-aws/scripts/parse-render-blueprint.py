@@ -26,6 +26,7 @@ from render_common.canonical import (
 from render_common.classifier import UnsafeIdentityError, safe_identity, safe_literal, sanitize_config
 
 SCHEMA_VERSION = "1.0"
+DEFAULT_DISK_SIZE_GB = 10
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 BLUEPRINT_SCHEMA = SKILL_ROOT / "references/render/render-yaml.schema.json"
 BLUEPRINT_SCHEMA_METADATA = SKILL_ROOT / "references/render/render-yaml.schema-metadata.json"
@@ -317,15 +318,18 @@ def normalize_blueprint(document: dict[str, Any], source_path: str, source_diges
             )
             if isinstance(service.get("disk"), dict):
                 disk = service["disk"]
+                # The pinned Blueprint schema documents sizeGB as defaulting to 10 when omitted.
+                size_gb = disk.get("sizeGB", DEFAULT_DISK_SIZE_GB)
+                size_provenance = "declared" if "sizeGB" in disk else "schema_default"
                 disk_resource = add_resource(
                     "render.persistent_disk",
                     disk["name"],
                     project,
                     environment,
                     [*pointer_parts, "disk"],
-                    disk,
+                    {**disk, "sizeGB": size_gb, "sizeGB_provenance": size_provenance},
                 )
-                edges.append(_edge("service_to_disk", service_resource["id"], disk_resource["id"], {"mountPath": disk["mountPath"], "sizeGB": disk.get("sizeGB")}))
+                edges.append(_edge("service_to_disk", service_resource["id"], disk_resource["id"], {"mountPath": disk["mountPath"], "sizeGB": size_gb, "sizeGB_provenance": size_provenance}))
             domains = list(service.get("domains", []))
             if service.get("domain") is not None:
                 domains.append(service["domain"])

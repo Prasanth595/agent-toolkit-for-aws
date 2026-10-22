@@ -741,7 +741,15 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
             declared_attributes = blueprint_attachment["attributes"] if blueprint_attachment else {}
             mount_path = selected_raw.get("mountPath", declared_attributes.get("mountPath"))
             size_gb = selected_raw.get("sizeGB", declared_attributes.get("sizeGB"))
+            # Live captures always report the provisioned size; a Blueprint may rely on the
+            # schema default, which the parser records as sizeGB_provenance "schema_default".
+            if "sizeGB" in selected_raw:
+                size_provenance = selected_raw.get("sizeGB_provenance", "declared")
+            else:
+                size_provenance = declared_attributes.get("sizeGB_provenance", "declared")
             if not isinstance(mount_path, str) or not mount_path.startswith("/") or not isinstance(size_gb, int) or isinstance(size_gb, bool) or size_gb <= 0:
+                raise NormalizeError("disk_attachment_invalid")
+            if size_provenance not in {"declared", "schema_default"}:
                 raise NormalizeError("disk_attachment_invalid")
             if resource["region"] is not None and owner["region"] is not None and resource["region"] != owner["region"]:
                 raise NormalizeError("disk_region_conflict")
@@ -750,6 +758,7 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
             attributes = {
                 "mountPath": mount_path,
                 "sizeGB": size_gb,
+                "sizeGB_provenance": size_provenance,
                 "capacity_unit": "GB",
                 "region": owner["region"],
                 "region_provenance": resource["provenance"]["region"],

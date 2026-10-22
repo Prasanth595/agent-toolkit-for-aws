@@ -88,6 +88,62 @@ def test_full_blueprint_normalizes_all_placements_and_resource_types(tmp_path: P
     assert artifact["semantic_validation"] == {"requires_renewed_consent": True, "status": "not_provided"}
 
 
+def write_blueprint(tmp_path: Path, content: str) -> tuple[Path, Path]:
+    workspace = tmp_path / "workspace"
+    migration = tmp_path / "migration"
+    workspace.mkdir()
+    migration.mkdir()
+    source = workspace / "render.yaml"
+    source.write_text(content)
+    return source, migration
+
+
+def disk_and_edge(artifact: dict) -> tuple[dict, dict]:
+    disk = next(item for item in artifact["resources"] if item["kind"] == "render.persistent_disk")
+    edge = next(edge for edge in artifact["edges"] if edge["type"] == "service_to_disk")
+    return disk, edge
+
+
+def test_omitted_disk_size_applies_schema_default_with_provenance(tmp_path: Path) -> None:
+    source, migration = write_blueprint(tmp_path, """services:
+  - type: web
+    name: api
+    runtime: docker
+    disk:
+      name: data
+      mountPath: /var/data
+""")
+    artifact = parser.parse_blueprint(source, source.parent, migration)
+    disk, edge = disk_and_edge(artifact)
+    assert disk["config"]["sizeGB"] == 10
+    assert disk["config"]["sizeGB_provenance"] == "schema_default"
+    assert edge["attributes"] == {"mountPath": "/var/data", "sizeGB": 10, "sizeGB_provenance": "schema_default"}
+
+
+def test_explicit_disk_size_is_preserved(tmp_path: Path) -> None:
+    source, migration = copy_fixture(tmp_path, "valid-full.yaml")
+    artifact = parser.parse_blueprint(source, source.parent, migration)
+    disk, edge = disk_and_edge(artifact)
+    assert disk["config"]["sizeGB"] == 5
+    assert disk["config"]["sizeGB_provenance"] == "declared"
+    assert edge["attributes"]["sizeGB"] == 5
+    assert edge["attributes"]["sizeGB_provenance"] == "declared"
+
+
+def test_zero_disk_size_still_fails_schema_validation(tmp_path: Path) -> None:
+    source, migration = write_blueprint(tmp_path, """services:
+  - type: web
+    name: api
+    runtime: docker
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 0
+""")
+    with pytest.raises(parser.BlueprintError, match="schema_invalid"):
+        parser.parse_blueprint(source, source.parent, migration)
+
+
 def test_output_is_byte_deterministic(tmp_path: Path) -> None:
     source, migration = copy_fixture(tmp_path, "valid-full.yaml")
     first = migration / "first.json"

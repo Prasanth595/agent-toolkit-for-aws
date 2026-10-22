@@ -130,10 +130,12 @@ def _billing_export(document: dict[str, Any]) -> dict[str, Any]:
 
     seen_ids: set[str] = set()
     intervals: dict[tuple[str, str, str], list[tuple[date, date]]] = {}
-    normalized: list[tuple[str, Decimal, date, date, str]] = []
+    # Lines are grouped by (service_id, plan_id) and normalized once per group over the
+    # group's covered reporting interval, so a charge split into adjacent prorated lines
+    # yields the same monthly figure as the same charge on a single line.
+    groups: dict[tuple[str, str], list[tuple[str, Decimal, date, date]]] = {}
     credit_periods: set[tuple[date, date, str]] = set()
     noncredit_periods: set[tuple[date, date, str]] = set()
-    allowed = set(REQUIRED_COLUMNS + OPTIONAL_COLUMNS)
     for line in lines:
         _closed(line, set(REQUIRED_COLUMNS), set(OPTIONAL_COLUMNS), "line_properties_invalid")
         line_id = line["line_id"]
@@ -164,31 +166,39 @@ def _billing_export(document: dict[str, Any]) -> dict[str, Any]:
         intervals[overlap_key].append((start, end))
         period_key = (start, end, currency)
         (credit_periods if basis == "credit" else noncredit_periods).add(period_key)
-        monthly = amount / Decimal((end - start).days) * Decimal("30.4375")
-        normalized.append((currency, monthly, start, end, basis))
+        groups.setdefault((overlap_key[0], overlap_key[1]), []).append((currency, amount, start, end))
     if credit_periods - noncredit_periods:
         raise BillingError("credit_period_mismatch")
 
-    currencies = {row[0] for row in normalized}
+    currencies = {row[0] for rows in groups.values() for row in rows}
     if target is None and len(currencies) != 1:
         raise BillingError("mixed_currency_without_conversion")
     output_currency = target or next(iter(currencies))
-    total = Decimal(0)
     conversion_records: list[dict[str, str]] = []
-    for currency, amount, _start, _end, _basis in normalized:
+
+    def convert(currency: str, amount: Decimal) -> Decimal:
         if currency == output_currency:
-            rate = Decimal(1)
-        else:
-            evidence = rates.get((currency, output_currency))
-            if evidence is None:
-                raise BillingError("conversion_missing")
-            rate, as_of = evidence
-            record = {"from": currency, "to": output_currency, "rate": format(rate, "f"), "as_of": as_of}
-            if record not in conversion_records:
-                conversion_records.append(record)
-        total += amount * rate
-    starts = [row[2] for row in normalized]
-    ends = [row[3] for row in normalized]
+            return amount
+        evidence = rates.get((currency, output_currency))
+        if evidence is None:
+            raise BillingError("conversion_missing")
+        rate, as_of = evidence
+        record = {"from": currency, "to": output_currency, "rate": format(rate, "f"), "as_of": as_of}
+        if record not in conversion_records:
+            conversion_records.append(record)
+        return amount * rate
+
+    total = Decimal(0)
+    for rows in groups.values():
+        periods = sorted({(start, end) for _currency, _amount, start, end in rows})
+        for (_previous_start, previous_end), (next_start, _next_end) in zip(periods, periods[1:]):
+            if next_start != previous_end:
+                raise BillingError("discontiguous_period")
+        coverage_days = Decimal((periods[-1][1] - periods[0][0]).days)
+        group_amount = sum((convert(currency, amount) for currency, amount, _start, _end in rows), Decimal(0))
+        total += group_amount / coverage_days * Decimal("30.4375")
+    starts = [row[2] for rows in groups.values() for row in rows]
+    ends = [row[3] for rows in groups.values() for row in rows]
     return {"schema_version": "1.0", "source": "billing_export", "currency": output_currency, "monthly_total": _format(total), "period_start": min(starts).isoformat(), "period_end": max(ends).isoformat(), "line_item_count": len(lines), "conversion": sorted(conversion_records, key=lambda row: (row["from"], row["to"], row["as_of"])) or None}
 
 
