@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "selected_base": "4a51ac3f086499dcd1e1154992109e77f0bebaa6",
+  "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
   "qualification": "Inputs contain only discovered source/usage observations, durable state, and explicit user decisions. Model mappings, target prices, generation routes/files, normalized consent outcomes, and report targets are derived by the production runtime and are not fixture inputs.",
   "cases": {
     "direct-openai": {"schema_version":2,"mode":"direct","source_containing":true,"has_ai_profile":true,"iac_vertex":false,"source_evidence":[{"provider":"openai","source_service":"openai_api","gateway":null,"models":["gpt-4o"],"call_sites":[{"file":"app.py","line":12}],"observed_monthly_cost":42.5,"monthly_input_tokens":1000000,"monthly_output_tokens":1000000}],"state":{"phases":{"discover":"completed","clarify":"completed","design":"completed","estimate":"completed","generate":"pending"},"run_mode":"decide_and_execute"},"user_decisions":{"execute_requested":false,"generate":true,"include_rollback":true,"report_scope":"full"},"capture_observations":[{"decision":"approved","attempts":[true],"retry_pending":false,"observed_cost":0}]},

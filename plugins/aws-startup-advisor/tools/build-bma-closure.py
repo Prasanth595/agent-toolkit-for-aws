@@ -11,7 +11,7 @@ from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parent.parent
 BMA = PLUGIN / "skills/bedrock-migration-assessment"
-BASE = "4a51ac3f086499dcd1e1154992109e77f0bebaa6"
+BASE = "9ab50636d12510dc351ff02fd7966efa4dba4341"
 
 COPIES = {
     "SKILL.md": "skills/gcp-to-aws/SKILL.md",

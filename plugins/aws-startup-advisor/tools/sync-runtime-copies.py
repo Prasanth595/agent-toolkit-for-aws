@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "tools/runtime-copy-manifest.json"
-BASE = "4a51ac3f086499dcd1e1154992109e77f0bebaa6"
+BASE = "9ab50636d12510dc351ff02fd7966efa4dba4341"
 
 
 def sha(path: Path) -> str:

@@ -32,7 +32,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "de228aea7f9ec4f5dfc93375151b2bb0fa456b7fed72dd6591db8a18b977f465",
+      "sha256": "1cd337c36a531b89223211e576ded5f66245ebbadb5af7ff77f429f2a133c3ba",
       "type": "data"
     },
     {
@@ -42,7 +42,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "2f42aa3f7fdf3638c67200be9f1e24bf30330e32a8e35c6ef7be2983e0afe862",
+      "sha256": "0442a6b7c6f0e5f40d6cf722bb6d69cb8203557aa85ed3e66c494109bedcab6d",
       "type": "script"
     },
     {
@@ -878,6 +878,6 @@
     "scripts/contracts/generation-ai.schema.json"
   ],
   "schema_version": 1,
-  "selected_base": "4a51ac3f086499dcd1e1154992109e77f0bebaa6",
-  "self_hash": "8aac9986a1648d359492198ccd2b84876335f3e3377a70f987adad139e31ffe1"
+  "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
+  "self_hash": "457c32fc8ca1b0e6c74975500a6f921e2464aba1eb4cba0dbd279a0e261fa5da"
 }

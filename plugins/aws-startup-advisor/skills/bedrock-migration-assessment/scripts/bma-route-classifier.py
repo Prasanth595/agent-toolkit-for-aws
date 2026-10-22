@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-BASE = "4a51ac3f086499dcd1e1154992109e77f0bebaa6"
+BASE = "9ab50636d12510dc351ff02fd7966efa4dba4341"
 SCHEMA = 1
 DESTINATION_ROOT = "skills/bedrock-migration-assessment"
 BMA_OWNER = "bedrock-migration-assessment"
