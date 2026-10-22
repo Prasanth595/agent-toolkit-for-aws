@@ -161,7 +161,7 @@
         "references/shared/schema-discover-ai.md",
         "references/vendored/ai/sdk-capability-map.json"
       ],
-      "sha256": "5ac4aef67cbf422e757bdc33d7ac0beb47cac79ecabceca00122dcc0893ac9a8",
+      "sha256": "c9c71829704b8b2414d6772a0cba91239448fa62f3bf852387b8bd6f98443c6a",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-app-code.md",
       "type": "instruction"
     },
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "49a9077ceedf4d4bfc7735286b50794facd620ae41ebdb172b705aadb8a399c6"
+  "self_hash": "a696cbdd9d04b905a165a9312a1d1c0f467bbad0e7589ef7fbcda556af3d2665"
 }

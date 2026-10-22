@@ -123,7 +123,7 @@ If **no source code files were found** (Step 0 exit gate), do **not** set `webso
 
 ## Step 2.7: Infrastructure architecture profiling is not applicable
 
-Direct BMA does not infer or write compute-architecture (`graviton_profile`) inventory. That remains owned by a source-cloud infrastructure skill when one participates. Continue to Step 3 without changing the neutral AI profile.
+BMA does not infer or write compute-architecture (`graviton_profile`) inventory in any mode. That remains owned by a source-cloud infrastructure skill when one participates: in delegated GCP mode the GCP controller already ran its own `discover-app-graviton.md` before loading this file; do not emit, modify, or drop its `graviton_profile`. Continue to Step 3 without changing the neutral AI profile.
 
 ---
 
