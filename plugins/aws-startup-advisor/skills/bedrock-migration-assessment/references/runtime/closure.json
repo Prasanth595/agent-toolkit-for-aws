@@ -96,7 +96,7 @@
       "runtime_references": [
         "references/shared/openai-on-bedrock.md"
       ],
-      "sha256": "53cb2c5cd0b46b7e1e4dc2c033e5c26081af42b907a80acb533a5d3c4a177ca0",
+      "sha256": "737949d92b3f8d845f84bb915919de2f253194dd756ced3f31fced6b55ba4eda",
       "source_path": "skills/gcp-to-aws/references/phases/clarify/clarify-ai-only.md",
       "type": "instruction"
     },
@@ -135,7 +135,7 @@
         "references/vendored/ai/design-ref-agentic-to-agentcore.md",
         "references/vendored/ai/design-ref-harness.md"
       ],
-      "sha256": "5119af654ee0d921dc98321ca8306618d43e958225c8e2039da4dc834c97eede",
+      "sha256": "e4b320e0f333cf58454d5736bfa97d7a21c9344ed96b95dda574d9a9fcc0807a",
       "source_path": "skills/gcp-to-aws/references/phases/design/design-ai.md",
       "type": "instruction"
     },
@@ -198,7 +198,7 @@
         "references/shared/pricing-cache.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "1d9d9ccb7811ec8724c59ca586113d00cae9126428ba941b1b32e0f94a1427f1",
+      "sha256": "9b9c88e5a61da18d2ad6933aa0bf843f395a60db8b745f91b04720627671651f",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-preview.md",
       "type": "instruction"
     },
@@ -212,7 +212,7 @@
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "38e3fccdd420d366f064779c3b2c1100aaaebbf5e81bf3bff583ef1787dd6902",
+      "sha256": "e5aaf253891062b691af42ff9b0e3ba2334f9bb457bc2508ece1bf0d717176a4",
       "source_path": "skills/gcp-to-aws/references/phases/estimate/estimate-ai.md",
       "type": "instruction"
     },
@@ -225,7 +225,7 @@
       "runtime_references": [
         "scripts/validate-startup-program-artifacts.py"
       ],
-      "sha256": "2e6e9065cdaaf3e7475f66c4944ccd50c7443853ba9b30d3d7d7f023e06e1212",
+      "sha256": "139b11dd34b8246bf7057251dc8ac53eaada360b62997fa82357714bbae9242a",
       "source_path": "skills/gcp-to-aws/references/phases/generate/generate-ai.md",
       "type": "instruction"
     },
@@ -235,10 +235,8 @@
       "logical_id": "bma.runtime.17",
       "origin": "selected-base-source",
       "parity": "adapted",
-      "runtime_references": [
-        "references/shared/openai-on-bedrock.md"
-      ],
-      "sha256": "6adf136b7742035a54a79cd262153562be7037cacb55c32b745c0e5c9b31d805",
+      "runtime_references": [],
+      "sha256": "5ad5511fc7815d28275c601ad867873ef152690624d64bba96ec47e76a35d42a",
       "source_path": "skills/gcp-to-aws/references/phases/generate/generate-artifacts-ai.md",
       "type": "instruction"
     },
@@ -273,7 +271,7 @@
       "runtime_references": [
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "9c99227f9bd81d0414d5a198b4e98cb7a7b2225103a561e09544872d6c185e38",
+      "sha256": "4fba17410807f05a4c0d058edd8648fd373eb39a46cb0235eea1a5de1b7eeca7",
       "source_path": "skills/gcp-to-aws/references/shared/openai-on-bedrock.md",
       "type": "instruction"
     },
@@ -426,7 +424,7 @@
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "befc8a3fc6debdcee1801c04e838394f95c8c737232c0a645042b59a298484ad",
+      "sha256": "f176039d0c83ca1d341d5bc31463b8500ca32e71b4b80e2c84b6dfddbbee3bbf",
       "source_path": "skills/shared/ai/ai-migration-guardrails.md",
       "type": "instruction"
     },
@@ -439,7 +437,7 @@
       "runtime_references": [
         "references/vendored/ai/ai-model-lifecycle.md"
       ],
-      "sha256": "819cf181116b383547b75374409143f9a6772f96af8c1d6ef17800376deff582",
+      "sha256": "2e13231c6c61004493a540f0bfc9e058cf0deb1a03fc64d17d09dec060060bfc",
       "source_path": "skills/shared/ai/ai-model-lifecycle.md",
       "type": "instruction"
     },
@@ -455,7 +453,7 @@
         "references/vendored/ai/ai-openai-to-bedrock.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "3fb09343e3790c1d2b7cb5417fd23ab4ee18722a6bb4dd0d38dab59bab3af055",
+      "sha256": "938613fe83768efb84c6b2b383f8e238655aa2cf72e7cd9adc6478ddd010c4b7",
       "source_path": "skills/shared/ai/ai-openai-to-bedrock.md",
       "type": "instruction"
     },
@@ -500,7 +498,7 @@
       "runtime_references": [
         "references/vendored/ai/bedrock-quotas.md"
       ],
-      "sha256": "bc148fe7c6c07b7ac52d3086e3459449cb4901576c4ffd3262bc4758476e7df9",
+      "sha256": "0c39aa970fe893a627e1cd9792b8b4ee814b3d15860590dab2b46fb8d63743c5",
       "source_path": "skills/shared/ai/bedrock-quotas.md",
       "type": "instruction"
     },
@@ -881,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "4a51ac3f086499dcd1e1154992109e77f0bebaa6",
-  "self_hash": "1fba0b58b6222446c9ffd37c618373268c398ad1a71228e7bc4d577130958c6c"
+  "self_hash": "8aac9986a1648d359492198ccd2b84876335f3e3377a70f987adad139e31ffe1"
 }

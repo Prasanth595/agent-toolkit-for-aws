@@ -14,6 +14,7 @@ SHIMS = [
 ]
 
 
+PR369_MARKERS = ("gpt-6-astra", "mantle_openai_chat", "10×", "required_client_api", "call_bedrock", "BedrockOpenAI")
 def load_runtime():
     path = ROOT / "skills/bedrock-migration-assessment/scripts/bma-runtime.py"
     module = types.ModuleType("bma_runtime_delegation")
@@ -28,6 +29,8 @@ def test_exact_ten_restricted_shims_have_one_canonical_load() -> None:
         assert text.count("$BMA_BASE/references/") == 1, relative
         assert "Compatibility shim" in text and "Removal: issue #389" in text
         assert not any(token in text for token in forbidden), (relative, text)
+        # Second-active-copy guard: PR #369 behavior lives only in the BMA-owned files.
+        assert not any(token in text for token in PR369_MARKERS), (relative, text)
 
 
 def test_one_writer_per_neutral_artifact() -> None:

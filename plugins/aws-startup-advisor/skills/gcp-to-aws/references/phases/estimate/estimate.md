@@ -331,9 +331,9 @@ in this order — the OpenRouter subroute wins over `migration_path`, because
    - `"litellm"`, `"keep_openrouter"`, or absent → `[C] Generate the gateway config, Bedrock setup script, and A/B test harness`
      (absent defaults to litellm). Do not promise a provider adapter on these three.
 2. **Otherwise** read `ai_architecture.code_migration.migration_path`. Design
-   records `"mantle_openai_responses"` (not `"mantle"`) and `"converse"`; accept
-   both Mantle spellings:
-   - `"mantle"` or `"mantle_openai_responses"` → the Mantle label above.
+   records `"mantle_openai_responses"` or `"mantle_openai_chat"` (not `"mantle"`)
+   and `"converse"`; accept every Mantle spelling:
+   - `"mantle"`, `"mantle_openai_chat"`, or `"mantle_openai_responses"` → the Mantle label above.
    - `"converse"`, `"direct"`, or `"gpt-oss"` → the adapter label above.
      `"converse"` is a Converse client swap, not a Mantle script and not gateway config.
    - `"llm_router"`, `"api_gateway"`, `"voice_platform"`, or `"framework"` → the
