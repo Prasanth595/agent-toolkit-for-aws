@@ -67,7 +67,7 @@ PROVIDERS: dict[str, dict[str, tuple[str, ...]]] = {
 METHOD_WEIGHTS = {"dependency": 35, "import": 35, "sdk_construction": 40, "method_call": 45, "model_identifier": 25, "endpoint_hostname": 35, "environment_name": 10, "framework": 30, "configuration": 20}
 FRAMEWORKS = {"langgraph": "agent_orchestration", "crewai": "agent_orchestration", "autogen": "agent_orchestration", "strands": "agent_orchestration", "llamaindex": "retrieval", "llama_index": "retrieval"}
 INFRASTRUCTURE = {
-    "postgres_client": ("psycopg", "pgx", "sequelize", "postgresql"),
+    "postgres_client": ("psycopg", "asyncpg", "pgx", "sequelize", "postgresql"),
     "key_value_client": ("redis", "valkey", "ioredis"),
     "queue_client": ("celery", "bullmq", "sqs", "rabbitmq", "kafka"),
     "object_storage_client": ("boto3", "@aws-sdk/client-s3", "minio"),
