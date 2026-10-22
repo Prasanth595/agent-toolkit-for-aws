@@ -75,7 +75,8 @@ Install all 13 skills together rather than a subset: `agent-advisor` delegates t
 
 From the repository root, run `mise -C plugins/aws-startup-advisor run ci`.
 The plugin's [`mise.toml`](mise.toml) inherits the root tool configuration and runs model-reference lint plus the contract tests in `tests/`.
-To add a check, define a task in this file and add it to `tasks.ci.depends`; the workflow keeps calling the same `ci` task.
+It also declares Terraform under `[tools]`: the Render replay test runs `terraform fmt`, `init -backend=false`, and `validate` against each generated migration pack and fails closed if the binary is missing, so the workflow installs it through mise rather than relying on the runner image.
+To add a check, define a task in this file and add it to `tasks.ci.depends`; the workflow keeps calling the same `ci` task. To add a tool a check needs, pin it under `[tools]` in this file; the workflow's `mise-action` step installs whatever this file declares.
 
 The Startup advisor workflow runs on pull requests that change this plugin, the root `mise.toml`, or `.github/workflows/startup-advisor.yml`. It also supports manual runs.
 
