@@ -375,3 +375,282 @@ def test_duplicate_live_identity_rejects_instead_of_suffixing(tmp_path: Path) ->
     path.write_bytes(module.canonical_bytes(manifest))
     with pytest.raises(module.NormalizeError, match="duplicate_resource_identity"):
         module.normalize(tmp_path, path, ATTEMPT)
+
+
+INVENTORY_SCHEMA = SCRIPT_DIR.parent / "references/shared/schema-render-resource-inventory.json"
+
+
+def live_manifest(root: Path, captures: list[dict[str, Any]]) -> Path:
+    manifest = {"schema_version": "1.0", "status": "active", "identity_scope": "live", "attempt_id": ATTEMPT, "workspace_id": "tea-safe", "local_identity": None, "consent_digest": DIGEST, "ownership_index_digest": INDEX_DIGEST, "captures": captures}
+    path = root / "manifest.json"
+    path.write_bytes(module.canonical_bytes(manifest))
+    return path
+
+
+def metric_capture(resource_id: str, day: int, series: list[dict[str, Any]], captured_at: str = CAPTURED_AT) -> dict[str, Any]:
+    capture = live("rest", "metric_cpu", series, resource_id)
+    capture["captured_at"] = captured_at
+    capture["raw_shapes"] = ["metric_series"]
+    capture["request"] = {"resource_id": resource_id, "start": f"2026-10-{14 + day:02d}T00:00:00Z", "end": f"2026-10-{15 + day:02d}T00:00:00Z", "resolution_seconds": 3600, "event_type": None, "limit": None}
+    return capture
+
+
+def web_service(resource_id: str, name: str, project_id: str | None = None, environment_id: str | None = None) -> dict[str, Any]:
+    return {"id": resource_id, "name": name, "ownerId": "tea-safe", "type": "web_service", "projectId": project_id, "environmentId": environment_id, "serviceDetails": {"runtime": "python"}}
+
+
+def environment(render_id: str, name: str, project_id: str, service_ids: list[str] | None = None) -> dict[str, Any]:
+    return {"id": render_id, "name": name, "projectId": project_id, "serviceIds": service_ids or [], "databasesIds": [], "redisIds": [], "envGroupIds": []}
+
+
+def test_populated_metric_series_and_log_labels_normalize(tmp_path: Path) -> None:
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    series = [{"labels": [{"field": "instance", "value": "srv-a-1"}], "unit": "percent", "values": [{"timestamp": "2026-10-14T00:00:00Z", "value": 1.5}]}]
+    logs = [{"id": "log-1", "timestamp": "2026-10-14T00:00:01Z", "labels": [{"name": "level", "value": "info"}, {"name": "instance", "value": "srv-a-1"}]}]
+    log_capture = live("cli", "log_metadata", logs, "srv-a")
+    log_capture["raw_shape"] = "json_stream"
+    log_capture["request"] = {"resource_id": "srv-a", "start": "2026-10-14T00:00:00Z", "end": "2026-10-14T01:00:00Z", "limit": 100}
+    captures = [
+        write_capture(tmp_path, "services.json", "rest", "services_list", live("rest", "services_list", [web_service("srv-a", "api")])),
+        write_capture(tmp_path, "metric-cpu.json", "rest", "metric_cpu", metric_capture("srv-a", 0, series)),
+        write_capture(tmp_path, "logs.json", "cli", "log_metadata", log_capture),
+    ]
+    inventory, _, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    api = next(resource for resource in inventory["resources"] if resource["kind"] == "render.web_service")
+    evidence = api["config"]["lifecycle_evidence"]
+    assert evidence["metrics"]["metric_cpu"][0]["series"][0]["values"][0]["value"] == 1.5
+    assert evidence["metrics"]["metric_cpu"][0]["series"][0]["labels"] == [{"field": "instance", "value": "srv-a-1"}]
+    assert evidence["metrics"]["metric_cpu"][0]["outcome"] == "ok"
+    assert evidence["metrics"]["metric_cpu"][0]["source_ref"] == "rest:metric_cpu"
+    assert evidence["log_metadata"] == logs
+    assert inventory["discovery_sources"] == ["render_cli", "render_rest"]
+    assert not list(Draft202012Validator(json.loads(INVENTORY_SCHEMA.read_text()), format_checker=FormatChecker()).iter_errors(inventory))
+
+
+def test_seven_daily_metric_windows_are_all_retained_in_order(tmp_path: Path) -> None:
+    captures = [write_capture(tmp_path, "services.json", "rest", "services_list", live("rest", "services_list", [web_service("srv-a", "api")]))]
+    # Written newest-first so retention order cannot come from manifest order.
+    for day in reversed(range(7)):
+        series = [{"labels": [], "unit": "percent", "values": [{"timestamp": f"2026-10-{14 + day:02d}T00:00:00Z", "value": float(day)}]}]
+        status = "ok" if day != 3 else "successful_empty"
+        capture = metric_capture("srv-a", day, series if day != 3 else [], captured_at=f"2026-10-{15 + day:02d}T00:05:00Z")
+        capture["status"] = status
+        captures.append(write_capture(tmp_path, f"metric-{day}.json", "rest", "metric_cpu", capture))
+    inventory, _, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    api = next(resource for resource in inventory["resources"] if resource["kind"] == "render.web_service")
+    windows = api["config"]["lifecycle_evidence"]["metrics"]["metric_cpu"]
+    assert len(windows) == 7
+    starts = [item["window"]["start"] for item in windows]
+    assert starts == sorted(starts)
+    assert [item["outcome"] for item in windows] == ["ok", "ok", "ok", "successful_empty", "ok", "ok", "ok"]
+    assert all(item["source_ref"] == "rest:metric_cpu" and item["captured_at"].endswith("T00:05:00Z") for item in windows)
+    assert windows[6]["series"][0]["values"][0]["value"] == 6.0
+
+    duplicate = metric_capture("srv-a", 2, [], captured_at="2026-10-21T00:00:00Z")
+    captures.append(write_capture(tmp_path, "metric-duplicate.json", "rest", "metric_cpu", duplicate))
+    with pytest.raises(module.NormalizeError, match="duplicate_metric_window"):
+        module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+
+
+@pytest.mark.parametrize(
+    ("category", "payload", "error"),
+    [
+        ("metric_cpu", [{"labels": [{"field": "instance", "value": "-----BEGIN RSA PRIVATE KEY-----"}], "unit": "percent", "values": []}], "secret_bearing_input"),
+        ("metric_cpu", [{"labels": [{"field": "instance", "value": "rnd_abcdefghijklmnop1234"}], "unit": "percent", "values": []}], "secret_bearing_input"),
+        ("metric_cpu", [{"labels": [], "unit": "percent", "values": [], "token": "x"}], "metric_series_invalid"),
+        ("metric_cpu", [{"labels": [], "unit": "percent", "values": [{"timestamp": "2026-10-14T00:00:00Z", "value": "1.5"}]}], "metric_series_invalid"),
+        ("log_metadata", [{"id": "log-1", "timestamp": "2026-10-14T00:00:00Z", "labels": [{"name": "message", "value": "x"}]}], "log_metadata_invalid"),
+        ("log_metadata", [{"id": "log-1", "timestamp": "2026-10-14T00:00:00Z", "labels": [{"name": "level", "value": "AKIAIOSFODNN7EXAMPLE"}]}], "secret_bearing_input"),
+    ],
+)
+def test_metric_projection_keeps_secret_rejection_elsewhere(tmp_path: Path, category: str, payload: Any, error: str) -> None:
+    captures = [write_capture(tmp_path, "services.json", "rest", "services_list", live("rest", "services_list", [web_service("srv-a", "api")]))]
+    if category == "metric_cpu":
+        captures.append(write_capture(tmp_path, "metric.json", "rest", "metric_cpu", metric_capture("srv-a", 0, payload)))
+    else:
+        capture = live("cli", "log_metadata", payload, "srv-a")
+        capture["raw_shape"] = "json_stream"
+        captures.append(write_capture(tmp_path, "logs.json", "cli", "log_metadata", capture))
+    with pytest.raises(module.NormalizeError, match=error):
+        module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+
+
+def test_value_key_outside_metric_and_log_shapes_is_still_secret_bearing(tmp_path: Path) -> None:
+    item = web_service("srv-a", "api")
+    item["value"] = "plain"
+    captures = [write_capture(tmp_path, "services.json", "rest", "services_list", live("rest", "services_list", [item]))]
+    with pytest.raises(module.NormalizeError, match="secret_bearing_input"):
+        module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    with pytest.raises(module.NormalizeError, match="secret_bearing_input"):
+        module._safe_tree([{"labels": [{"field": "instance", "value": "srv-a"}]}])
+
+
+def test_cli_nullable_data_envelope_yields_no_resource_row(tmp_path: Path) -> None:
+    postgres = live("cli", "postgres_get", {"data": None}, "dpg-safe")
+    postgres["raw_shape"] = "data_null"
+    absent = live("rest", "service_get", [], "srv-gone", status="absent")
+    absent["raw_shapes"] = ["http_404"]
+    captures = [
+        write_capture(tmp_path, "services.json", "cli", "services_list", live("cli", "services_list", [{"service": web_service("srv-a", "api")}])),
+        write_capture(tmp_path, "postgres.json", "cli", "postgres_get", postgres),
+        write_capture(tmp_path, "service-absent.json", "rest", "service_get", absent),
+    ]
+    inventory, _, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    assert [resource["kind"] for resource in inventory["resources"]] == ["render.web_service"]
+    assert inventory["discovery_sources"] == ["render_cli", "render_rest"]
+    assert module._iter_cli_data("keyvalue_get", {"data": None}) == []
+    assert module._iter_cli_data("projects_list", None) == []
+
+    # services_list is `nullable_wrapper_array` in render-cli-contracts.json, so the non-nullable controls are
+    # environments_list (`array`) and postgres_list (`data_array`).
+    assert module._iter_cli_data("services_list", None) == []
+    for category, payload in (("postgres_get", {"data": "oops"}), ("postgres_get", {"data": 5}), ("environments_list", None), ("postgres_list", {"data": None}), ("postgres_list", None)):
+        with pytest.raises(module.NormalizeError, match="capture_data_invalid"):
+            module._iter_cli_data(category, payload)
+    bad = live("cli", "postgres_get", {"data": "oops"}, "dpg-safe")
+    bad["raw_shape"] = "data_null"
+    captures[1] = write_capture(tmp_path, "postgres.json", "cli", "postgres_get", bad)
+    with pytest.raises(module.NormalizeError, match="capture_data_invalid"):
+        module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+
+
+def two_project_captures(root: Path) -> list[dict[str, Any]]:
+    projects = [{"id": "prj-a", "name": "alpha", "ownerId": "tea-safe"}, {"id": "prj-b", "name": "beta", "ownerId": "tea-safe"}]
+    environments = [environment("evm-a", "production", "prj-a", ["srv-a"]), environment("evm-b", "production", "prj-b", ["srv-b"])]
+    services = [web_service("srv-a", "alpha-api"), web_service("srv-b", "beta-api")]
+    return [
+        write_capture(root, "projects.json", "rest", "projects_list", live("rest", "projects_list", projects)),
+        write_capture(root, "environments.json", "rest", "environments_list", live("rest", "environments_list", environments)),
+        write_capture(root, "services.json", "rest", "services_list", live("rest", "services_list", services)),
+    ]
+
+
+def assert_distinct_production_environments(inventory: dict[str, Any]) -> None:
+    environments = {resource["render_id"]: resource for resource in inventory["resources"] if resource["kind"] == "render.environment" and resource["name"] == "production"}
+    assert set(environments) == {"evm-a", "evm-b"}
+    assert environments["evm-a"]["project_id"] == "prj-a" and environments["evm-b"]["project_id"] == "prj-b"
+    by_render_id = {resource["render_id"]: resource for resource in inventory["resources"] if resource["render_id"]}
+    for service_id, environment_id in (("srv-a", "evm-a"), ("srv-b", "evm-b")):
+        service = by_render_id[service_id]
+        assert service["environment_id"] == environment_id
+        edge = next(edge for edge in inventory["edges"] if edge["type"] == "member_of_environment" and edge["from_id"] == service["id"])
+        assert edge["to_id"] == environments[environment_id]["id"]
+
+
+def test_same_named_environments_in_two_projects_are_distinct_live_only(tmp_path: Path) -> None:
+    inventory, clusters, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, two_project_captures(tmp_path)), ATTEMPT)
+    assert_distinct_production_environments(inventory)
+    by_render_id = {resource["render_id"]: resource["id"] for resource in inventory["resources"] if resource["render_id"]}
+    cluster_of = {member: cluster["seed"] for cluster in clusters["clusters"] for member in cluster["member_ids"]}
+    assert cluster_of[by_render_id["srv-a"]] == "evm-a" and cluster_of[by_render_id["srv-b"]] == "evm-b"
+    assert not any(cluster["seed"] == "production" for cluster in clusters["clusters"])
+
+
+def test_same_named_environments_in_two_projects_are_distinct_mixed_input(tmp_path: Path) -> None:
+    manifest = build_estate(tmp_path)
+    document = json.loads(manifest.read_text())
+    # The Blueprint declares project `storefront` / environment `production`; live side maps it to prj-safe and adds an unrelated project with its own `production`.
+    for entry in document["captures"]:
+        if entry["category"] == "projects_list":
+            projects = [{"id": "prj-safe", "name": "storefront", "ownerId": "tea-safe"}, {"id": "prj-other", "name": "other", "ownerId": "tea-safe"}]
+            document["captures"][document["captures"].index(entry)] = write_capture(tmp_path, "projects.json", "rest", "projects_list", live("rest", "projects_list", projects))
+        elif entry["category"] == "environments_list":
+            environments = [environment("evm-safe-prod", "production", "prj-safe", ["srv-safe-api"]), environment("evm-other-prod", "production", "prj-other")]
+            document["captures"][document["captures"].index(entry)] = write_capture(tmp_path, "environments.json", "rest", "environments_list", live("rest", "environments_list", environments))
+    manifest.write_bytes(module.canonical_bytes(document))
+    inventory, clusters, _, _ = module.normalize(tmp_path, manifest, ATTEMPT)
+    productions = [resource for resource in inventory["resources"] if resource["kind"] == "render.environment" and resource["name"] == "production"]
+    assert sorted(resource["render_id"] for resource in productions) == ["evm-other-prod", "evm-safe-prod"]
+    blueprint_bound = next(resource for resource in productions if resource["render_id"] == "evm-safe-prod")
+    assert any(ref.startswith("blueprint:") for ref in blueprint_bound["provenance"].values())
+    other = next(resource for resource in productions if resource["render_id"] == "evm-other-prod")
+    assert other["project_id"] == "prj-other" and not any(ref.startswith("blueprint:") for ref in other["provenance"].values())
+    assert not any(resource["render_id"] is None for resource in productions)
+    api = next(resource for resource in inventory["resources"] if resource["kind"] == "render.web_service" and resource["name"] == "root-api")
+    assert api["environment_id"] == "evm-safe-prod" and api["project_id"] == "prj-safe"
+    assert not any(cluster["seed"] == "production" for cluster in clusters["clusters"])
+
+
+def test_duplicate_environment_name_within_one_project_still_rejected(tmp_path: Path) -> None:
+    captures = two_project_captures(tmp_path)
+    environments = [environment("evm-a", "production", "prj-a", ["srv-a"]), environment("evm-a2", "production", "prj-a", ["srv-b"])]
+    captures[1] = write_capture(tmp_path, "environments.json", "rest", "environments_list", live("rest", "environments_list", environments))
+    with pytest.raises(module.NormalizeError, match="ambiguous_membership_identity"):
+        module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+
+
+def normalizer_argv(root: Path, manifest: Path, *, ai_flags: bool = True) -> list[str]:
+    argv = [
+        "normalize-render-capture.py", "--migration-dir", str(root), "--attempt-id", ATTEMPT, "--manifest", str(manifest),
+        "--output-inventory", str(root / "render-resource-inventory.json"), "--output-clusters", str(root / "render-resource-clusters.json"),
+    ]
+    if ai_flags:
+        argv += ["--output-ai-profile", str(root / "ai-workload-profile.json"), "--output-ai-discovery", str(root / "render-ai-discovery.json")]
+    return argv
+
+
+OUTPUT_NAMES = ("render-resource-inventory.json", "render-resource-clusters.json", "ai-workload-profile.json", "render-ai-discovery.json")
+
+
+def replace_application_with_non_ai_scan(root: Path, manifest: Path) -> None:
+    scanner = load_script("scan-render-application.py", "scanner_non_ai")
+    source = root / "plain-app"
+    source.mkdir()
+    (source / "main.py").write_text("print('x')\n")
+    application = scanner.scan(source)
+    assert application["ai_profile"] is None and application["ai_discovery"] is None
+    document = json.loads(manifest.read_text())
+    document["captures"] = [entry for entry in document["captures"] if entry["transport"] != "application"]
+    document["captures"].append(write_capture(root, "application.json", "application", "application", application))
+    manifest.write_bytes(module.canonical_bytes(document))
+
+
+def test_non_ai_rerun_removes_stale_ai_artifacts_atomically(tmp_path: Path) -> None:
+    import subprocess
+    import sys
+
+    manifest = build_estate(tmp_path)
+    first = subprocess.run([sys.executable, str(SCRIPT), *normalizer_argv(tmp_path, manifest)[1:]], capture_output=True, text=True, cwd=SCRIPT_DIR)
+    assert first.returncode == 0 and first.stdout.startswith("NORMALIZE_OK"), first.stderr
+    assert all((tmp_path / name).exists() for name in OUTPUT_NAMES)
+    first_inventory = (tmp_path / OUTPUT_NAMES[0]).read_bytes()
+
+    replace_application_with_non_ai_scan(tmp_path, manifest)
+    second = subprocess.run([sys.executable, str(SCRIPT), *normalizer_argv(tmp_path, manifest)[1:]], capture_output=True, text=True, cwd=SCRIPT_DIR)
+    assert second.returncode == 0 and second.stdout.startswith("NORMALIZE_OK"), second.stderr
+    assert not (tmp_path / "ai-workload-profile.json").exists()
+    assert not (tmp_path / "render-ai-discovery.json").exists()
+    # The inventory carries no application-derived fields, so a non-AI rerun rewrites it byte-identically.
+    assert (tmp_path / OUTPUT_NAMES[0]).read_bytes() == first_inventory
+    assert (tmp_path / OUTPUT_NAMES[1]).exists()
+    assert not [path for path in tmp_path.iterdir() if ".generation." in path.name or ".rollback." in path.name]
+
+    missing_flag = subprocess.run([sys.executable, str(SCRIPT), *normalizer_argv(tmp_path, manifest, ai_flags=False)[1:]], capture_output=True, text=True, cwd=SCRIPT_DIR)
+    assert missing_flag.returncode == 2 and "--output-ai-profile" in missing_flag.stderr
+    one_flag = subprocess.run([sys.executable, str(SCRIPT), *normalizer_argv(tmp_path, manifest, ai_flags=False)[1:], "--output-ai-profile", str(tmp_path / "ai-workload-profile.json")], capture_output=True, text=True, cwd=SCRIPT_DIR)
+    assert one_flag.returncode == 2 and "--output-ai-discovery" in one_flag.stderr
+
+
+def test_failed_rerun_rolls_back_ai_removal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    manifest = build_estate(tmp_path)
+    monkeypatch.setattr(module.sys, "argv", normalizer_argv(tmp_path, manifest))
+    assert module.main() == 0
+    before = {name: (tmp_path / name).read_bytes() for name in OUTPUT_NAMES}
+    assert before["ai-workload-profile.json"]
+
+    replace_application_with_non_ai_scan(tmp_path, manifest)
+    real_replace = module.os.replace
+    replacements = 0
+
+    def fail_second(source: object, destination: object) -> None:
+        nonlocal replacements
+        replacements += 1
+        if replacements == 2:
+            raise OSError("injected commit failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(module.os, "replace", fail_second)
+    assert module.main() == 1
+    assert "NORMALIZE_FAIL | code=injected commit failure".split(" | ")[0] in capsys.readouterr().err
+    assert {name: (tmp_path / name).read_bytes() for name in OUTPUT_NAMES} == before

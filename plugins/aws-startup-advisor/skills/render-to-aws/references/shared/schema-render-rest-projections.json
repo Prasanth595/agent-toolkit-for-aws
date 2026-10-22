@@ -16,7 +16,7 @@
     "ownership_index_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "status": {"enum": ["ok", "successful_empty", "unavailable_plan", "invalid_query", "absent", "unsupported_for_type"]},
     "page_count": {"type": "integer", "minimum": 1, "maximum": 20},
-    "raw_shapes": {"type": "array", "items": {"enum": ["array", "object", "null", "cursor_array", "metric_series", "http_400"]}},
+    "raw_shapes": {"type": "array", "items": {"enum": ["array", "object", "null", "cursor_array", "metric_series", "http_400", "http_404"]}},
     "request": {
       "type": "object",
       "required": ["resource_id", "start", "end", "resolution_seconds", "event_type", "limit"],

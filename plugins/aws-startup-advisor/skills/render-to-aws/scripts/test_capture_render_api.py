@@ -328,6 +328,14 @@ def test_direct_absence_and_authorization_statuses_are_distinct(tmp_path: Path, 
     assert absent["status"] == "absent"
     assert absent["raw_shapes"] == ["http_404"]
     assert absent["data"] == []
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    validator = Draft202012Validator(json.loads((SCRIPT_DIR.parent / "references/shared/schema-render-rest-projections.json").read_text()), format_checker=FormatChecker())
+    assert not list(validator.iter_errors(absent))
+    # Unreviewed shapes and statuses stay rejected by the closed schema.
+    for field, replacement in (("raw_shapes", ["http_500"]), ("status", "gone")):
+        rejected = dict(absent, **{field: replacement})
+        assert [error.json_path for error in validator.iter_errors(rejected)] == [f"$.{field}[0]" if field == "raw_shapes" else "$.status"]
     for code, expected in ((401, "authentication"), (403, "forbidden_unknown")):
         with pytest.raises(module.CaptureError, match=expected):
             module.capture(

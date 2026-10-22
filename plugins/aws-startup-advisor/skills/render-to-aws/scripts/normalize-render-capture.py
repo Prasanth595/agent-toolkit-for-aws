@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import math
 import os
 import re
 import sys
@@ -25,8 +27,16 @@ INVENTORY_SCHEMA = SKILL_ROOT / "references/shared/schema-render-resource-invent
 CLUSTER_SCHEMA = SKILL_ROOT / "references/shared/schema-render-resource-clusters.json"
 AI_PROFILE_SCHEMA = SKILL_ROOT / "references/contracts/ai-workload-profile.schema.json"
 AI_DISCOVERY_SCHEMA = SKILL_ROOT / "references/shared/schema-render-ai-discovery.json"
+CLI_CONTRACTS = SKILL_ROOT / "references/shared/render-cli-contracts.json"
 MAX_INPUT_BYTES = 12 * 1024 * 1024
 SENSITIVE_KEY = re.compile(r"(?i)(password|passwd|token|secret|credential|api[_-]?key|private[_-]?key|databaseUser|email|sshAddress|dashboardUrl|^(?:message|body|details|content|value|connectionInfo|connectionString)$)")
+RENDER_SECRET_LITERAL = re.compile(r"rnd_[A-Za-z0-9]{16,}")
+METRIC_SERIES_KEYS = {"labels", "unit", "values"}
+METRIC_LABEL_KEYS = {"field", "value"}
+METRIC_POINT_KEYS = {"timestamp", "value"}
+LOG_ENTRY_KEYS = {"id", "timestamp", "labels"}
+LOG_LABEL_KEYS = {"name", "value"}
+LOG_LABEL_NAMES = {"resource", "instance", "level", "type"}
 SOURCE_RANK = {"render_blueprint": 1, "application": 1, "render_cli": 2, "render_rest": 3}
 BLUEPRINT_INTENT_FIELDS = {
     "repo", "branch", "rootDir", "buildCommand", "startCommand", "preDeployCommand",
@@ -121,6 +131,66 @@ def _safe_tree(value: Any) -> Any:
     return value
 
 
+def _closed_string(value: Any, code: str) -> str:
+    """String leaf inside a closed projection: shape error -> `code`; secret content still deny-first."""
+    if not isinstance(value, str):
+        raise NormalizeError(code)
+    if RENDER_SECRET_LITERAL.search(value):
+        raise NormalizeError("secret_bearing_input")
+    return _safe_tree(value)
+
+
+def _metric_series_projection(data: Any) -> list[dict[str, Any]]:
+    """Exact REST metric shape (`capture-render-api.py::_metric_series`); `value` keys are numeric points or label text here."""
+    if not isinstance(data, list):
+        raise NormalizeError("metric_series_invalid")
+    projected: list[dict[str, Any]] = []
+    for series in data:
+        if not isinstance(series, dict) or set(series) != METRIC_SERIES_KEYS or not isinstance(series["labels"], list) or not isinstance(series["values"], list):
+            raise NormalizeError("metric_series_invalid")
+        labels: list[dict[str, str]] = []
+        for label in series["labels"]:
+            if not isinstance(label, dict) or set(label) != METRIC_LABEL_KEYS:
+                raise NormalizeError("metric_series_invalid")
+            labels.append({"field": _closed_string(label["field"], "metric_series_invalid"), "value": _closed_string(label["value"], "metric_series_invalid")})
+        points: list[dict[str, Any]] = []
+        for point in series["values"]:
+            if not isinstance(point, dict) or set(point) != METRIC_POINT_KEYS:
+                raise NormalizeError("metric_series_invalid")
+            number = point["value"]
+            if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+                raise NormalizeError("metric_series_invalid")
+            points.append({"timestamp": _closed_string(point["timestamp"], "metric_series_invalid"), "value": number})
+        projected.append({"labels": labels, "unit": _closed_string(series["unit"], "metric_series_invalid"), "values": points})
+    return projected
+
+
+def _log_metadata_projection(data: Any) -> list[dict[str, Any]]:
+    """Exact CLI log-metadata shape (`capture-render-cli.py::_project_log_metadata`); label names are a closed set."""
+    if not isinstance(data, list):
+        raise NormalizeError("log_metadata_invalid")
+    projected: list[dict[str, Any]] = []
+    for entry in data:
+        if not isinstance(entry, dict) or set(entry) != LOG_ENTRY_KEYS or not isinstance(entry["labels"], list):
+            raise NormalizeError("log_metadata_invalid")
+        labels: list[dict[str, str]] = []
+        for label in entry["labels"]:
+            if not isinstance(label, dict) or set(label) != LOG_LABEL_KEYS or label["name"] not in LOG_LABEL_NAMES:
+                raise NormalizeError("log_metadata_invalid")
+            labels.append({"name": label["name"], "value": _closed_string(label["value"], "log_metadata_invalid")})
+        projected.append({"id": _closed_string(entry["id"], "log_metadata_invalid"), "timestamp": _closed_string(entry["timestamp"], "log_metadata_invalid"), "labels": labels})
+    return projected
+
+
+def _metric_window(request: Any) -> dict[str, Any]:
+    if not isinstance(request, dict) or not isinstance(request.get("start"), str) or not isinstance(request.get("end"), str):
+        raise NormalizeError("metric_window_invalid")
+    resolution = request.get("resolution_seconds")
+    if resolution is not None and (isinstance(resolution, bool) or not isinstance(resolution, int)):
+        raise NormalizeError("metric_window_invalid")
+    return {"start": request["start"], "end": request["end"], "resolution_seconds": resolution}
+
+
 def _capture_path(root: Path, manifest_path: Path, relative: str) -> Path:
     if Path(relative).is_absolute() or ".." in Path(relative).parts:
         raise NormalizeError("capture_path_invalid")
@@ -132,11 +202,22 @@ def _capture_path(root: Path, manifest_path: Path, relative: str) -> Path:
     return candidate
 
 
+@functools.cache
+def _cli_nullable_categories() -> frozenset[str]:
+    """Categories whose reviewed CLI contract shape admits `null` (bare or inside the `{"data": ...}` envelope)."""
+    categories = _schema(CLI_CONTRACTS).get("categories")
+    if not isinstance(categories, dict):
+        raise NormalizeError("schema_invalid")
+    return frozenset(name for name, row in categories.items() if isinstance(row, dict) and "nullable" in str(row.get("shape", "")))
+
+
 def _iter_cli_data(category: str, data: Any) -> list[dict[str, Any]]:
-    if data is None:
-        return []
     if isinstance(data, dict) and set(data) == {"data"}:
         data = data["data"]
+    if data is None:
+        if category in _cli_nullable_categories():
+            return []
+        raise NormalizeError("capture_data_invalid")
     if isinstance(data, dict):
         return [data]
     if not isinstance(data, list):
@@ -341,7 +422,13 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
                 "jobs_list": "run_history", "log_metadata": "log_metadata",
             }.get(category, "metrics")
             if key == "metrics":
-                lifecycle[parent_id].setdefault("metrics", {})[category] = {"outcome": value.get("status"), "window": request, "series": _safe_tree(data)}
+                # Every 24h window is retained with its outcome and provenance; Estimate needs the full seven-day span.
+                lifecycle[parent_id].setdefault("metrics", {}).setdefault(category, []).append({
+                    "outcome": value.get("status"), "window": _metric_window(request), "captured_at": value.get("captured_at"),
+                    "source_ref": f"{transport}:{category}", "series": _metric_series_projection(data),
+                })
+            elif key == "log_metadata":
+                lifecycle[parent_id][key] = _log_metadata_projection(data)
             else:
                 lifecycle[parent_id][key] = _safe_tree(data)
             continue
@@ -384,45 +471,95 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
                     raise NormalizeError("artifact_identity_missing")
                 candidates.append({"source": source, "source_ref": f"{transport}:{category}:artifact", "blueprint_id": None, "kind": "render.build_artifact", "render_id": artifact_id, "name": artifact_id, "workspace_id": workspace_id, "project_id": project_id, "environment_id": environment_id, "region": None, "config": _safe_tree(artifact), "confidence": "deterministic", "build_source_id": render_id})
 
+    for lifecycle_data in lifecycle.values():
+        for category, windows in lifecycle_data.get("metrics", {}).items():
+            windows.sort(key=lambda item: (byte_sort_key(item["window"]["start"]), byte_sort_key(item["window"]["end"]), byte_sort_key(str(item["captured_at"]))))
+            seen_windows: set[tuple[str, str]] = set()
+            for item in windows:
+                window_key = (item["window"]["start"], item["window"]["end"])
+                if window_key in seen_windows:
+                    raise NormalizeError("duplicate_metric_window")
+                seen_windows.add(window_key)
+
     live_by_name: defaultdict[tuple[str, str], list[str]] = defaultdict(list)
+    live_environments_by_name: defaultdict[str, list[tuple[str | None, str]]] = defaultdict(list)
     for candidate in candidates:
-        if candidate["render_id"] is not None:
+        if candidate["render_id"] is None:
+            continue
+        if candidate["kind"] == "render.environment":
+            live_environments_by_name[candidate["name"]].append((candidate["project_id"], candidate["render_id"]))
+        else:
             live_by_name[(candidate["kind"], candidate["name"])].append(candidate["render_id"])
     grouped: defaultdict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     blueprint_to_group: dict[str, tuple[str, str]] = {}
-    for candidate in candidates:
-        identity = candidate["render_id"]
-        if identity is None:
-            live_matches = sorted(set(live_by_name[(candidate["kind"], candidate["name"])]), key=byte_sort_key)
-            identity = live_matches[0] if len(live_matches) == 1 else f"blueprint:{candidate['blueprint_id']}"
+
+    def _group(candidate: dict[str, Any], identity: str) -> None:
         key = (candidate["kind"], identity)
         grouped[key].append(candidate)
         if candidate.get("blueprint_id"):
             blueprint_to_group[candidate["blueprint_id"]] = key
 
+    # Blueprint environments are grouped after project aliases exist, so their match is project-qualified.
+    deferred_environments: list[dict[str, Any]] = []
+    for candidate in candidates:
+        identity = candidate["render_id"]
+        if identity is None:
+            if candidate["kind"] == "render.environment":
+                deferred_environments.append(candidate)
+                continue
+            live_matches = sorted(set(live_by_name[(candidate["kind"], candidate["name"])]), key=byte_sort_key)
+            identity = live_matches[0] if len(live_matches) == 1 else f"blueprint:{candidate['blueprint_id']}"
+        _group(candidate, identity)
+
     project_aliases: dict[str, str] = {}
-    environment_aliases: dict[str, str] = {}
     for (kind, _identity), group in grouped.items():
-        live_ids = sorted(
-            {item["render_id"] for item in group if item["render_id"] is not None},
-            key=byte_sort_key,
-        )
-        if len(live_ids) != 1 or kind not in {"render.project", "render.environment"}:
+        live_ids = sorted({item["render_id"] for item in group if item["render_id"] is not None}, key=byte_sort_key)
+        if len(live_ids) != 1 or kind != "render.project":
             continue
-        aliases = project_aliases if kind == "render.project" else environment_aliases
         for item in group:
             for alias in (item["name"], item.get("blueprint_id")):
-                if not alias:
-                    continue
-                previous = aliases.setdefault(alias, live_ids[0])
-                if previous != live_ids[0]:
+                if alias and project_aliases.setdefault(alias, live_ids[0]) != live_ids[0]:
                     raise NormalizeError("ambiguous_membership_identity")
+    live_project_ids = {candidate["render_id"] for candidate in candidates if candidate["kind"] == "render.project" and candidate["render_id"] is not None}
+
+    for candidate in deferred_environments:
+        project = project_aliases.get(candidate["project_id"], candidate["project_id"])
+        owned = live_environments_by_name[candidate["name"]]
+        if project in live_project_ids:
+            live_matches = sorted({render_id for owner, render_id in owned if project_aliases.get(owner, owner) == project}, key=byte_sort_key)
+        else:
+            # No resolvable project context: only a workspace-unique name may match.
+            live_matches = sorted({render_id for _owner, render_id in owned}, key=byte_sort_key)
+        _group(candidate, live_matches[0] if len(live_matches) == 1 else f"blueprint:{candidate['blueprint_id']}")
+
+    environment_aliases: dict[tuple[str | None, str], str] = {}
+    for (kind, _identity), group in grouped.items():
+        live_items = [item for item in group if item["render_id"] is not None]
+        live_ids = sorted({item["render_id"] for item in live_items}, key=byte_sort_key)
+        if len(live_ids) != 1 or kind != "render.environment":
+            continue
+        owners = {project_aliases.get(item["project_id"], item["project_id"]) for item in live_items}
+        for owner in owners:
+            for item in group:
+                for alias in (item["name"], item.get("blueprint_id")):
+                    if alias and environment_aliases.setdefault((owner, alias), live_ids[0]) != live_ids[0]:
+                        raise NormalizeError("ambiguous_membership_identity")
+    environment_alias_owners: defaultdict[str, set[str | None]] = defaultdict(set)
+    for owner, alias in environment_aliases:
+        environment_alias_owners[alias].add(owner)
 
     for candidate in candidates:
-        project_id = candidate["project_id"]
+        project_id = project_aliases.get(candidate["project_id"], candidate["project_id"])
+        candidate["project_id"] = project_id
         environment_id = candidate["environment_id"]
-        candidate["project_id"] = project_aliases.get(project_id, project_id)
-        candidate["environment_id"] = environment_aliases.get(environment_id, environment_id)
+        if environment_id is None:
+            continue
+        resolved = environment_aliases.get((project_id, environment_id))
+        if resolved is None and project_id not in live_project_ids:
+            owners = environment_alias_owners.get(environment_id, set())
+            if len(owners) == 1:
+                resolved = environment_aliases[(next(iter(owners)), environment_id)]
+        candidate["environment_id"] = environment_id if resolved is None else resolved
 
     live_kind_by_id: dict[str, str] = {}
     for candidate in candidates:
@@ -756,8 +893,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output-inventory", type=Path, required=True)
     parser.add_argument("--output-clusters", type=Path, required=True)
-    parser.add_argument("--output-ai-profile", type=Path)
-    parser.add_argument("--output-ai-discovery", type=Path)
+    parser.add_argument("--output-ai-profile", type=Path, required=True)
+    parser.add_argument("--output-ai-discovery", type=Path, required=True)
     return parser.parse_args()
 
 
@@ -766,23 +903,16 @@ def main() -> int:
     try:
         if not args.migration_dir.is_absolute() or not args.migration_dir.is_dir() or args.migration_dir.is_symlink():
             raise NormalizeError("migration_dir_invalid")
-        for output in (args.output_inventory, args.output_clusters):
+        for output in (args.output_inventory, args.output_clusters, args.output_ai_profile, args.output_ai_discovery):
             require_contained(output, args.migration_dir, "output")
-        for output in (args.output_ai_profile, args.output_ai_discovery):
-            if output is not None:
-                require_contained(output, args.migration_dir, "output")
         inventory, clusters, ai_profile, ai_discovery = normalize(args.migration_dir, args.manifest, args.attempt_id)
-        if ai_profile is not None and (args.output_ai_profile is None or args.output_ai_discovery is None):
-            raise NormalizeError("ai_output_required")
-        outputs: list[tuple[Path, Any | None]] = [
+        # Both AI paths are always part of the transaction: absent AI evidence removes stale files atomically.
+        _write_generation([
             (args.output_inventory, inventory),
             (args.output_clusters, clusters),
-        ]
-        if args.output_ai_profile is not None:
-            outputs.append((args.output_ai_profile, ai_profile))
-        if args.output_ai_discovery is not None:
-            outputs.append((args.output_ai_discovery, ai_discovery))
-        _write_generation(outputs)
+            (args.output_ai_profile, ai_profile),
+            (args.output_ai_discovery, ai_discovery),
+        ])
     except (NormalizeError, PathBoundaryError, OSError, ValueError) as exc:
         code = exc.code if isinstance(exc, NormalizeError) else str(exc)
         if not code or any(character.isspace() for character in code):
