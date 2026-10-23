@@ -55,7 +55,7 @@
         "references/runtime/bma-input-patterns.json",
         "scripts/bma-route-classifier.py"
       ],
-      "sha256": "c32b06ba4bbdecadc05095ed781b31c7cc9d7bac7726f8b7e8adf7abe0e83057",
+      "sha256": "ebaf50be489520f4f02c790962ea198927f5fca350e9c2efe55dbeb259bdb898",
       "type": "script"
     },
     {
@@ -711,7 +711,7 @@
         "references/phases/design/design-ai.md",
         "references/shared/schema-design-aws-ai.md"
       ],
-      "sha256": "91b3c1ea663f72a876792ff303f3f96fb1e28357325a7ed9d9ffda10fc507311",
+      "sha256": "b3bb1be8765d00c7a5dfe5d75a58ecf43509c1f0c207cb493874697cbc1c1862",
       "type": "instruction"
     },
     {
@@ -759,7 +759,7 @@
         "references/shared/validate-artifacts.md",
         "references/shared/validate-migration-report.md"
       ],
-      "sha256": "4e1de39d1ebf61decdfd5497c6d47dbe45cf4e22ed1d394d0fdfc446306843fb",
+      "sha256": "0117267e9d9d9b598178c16b7dd406d12bea973e9bd4ec8636d668baf44c9a2d",
       "type": "instruction"
     },
     {
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "2242651f78543b2d46eb17f1e875c4f616d3eeeb8029e969ff4bc0cb7d1ac96e"
+  "self_hash": "5005e0732b5fd03b315f0873d69ce0a1e38376a6932f0a1a36a4425e8c94d340"
 }

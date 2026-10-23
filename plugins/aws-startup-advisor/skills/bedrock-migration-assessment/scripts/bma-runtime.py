@@ -79,6 +79,19 @@ MUTABLE_OUTPUTS = {
     "preferences-draft.json",
 }
 PREFERENCE_OUTPUTS = {"preferences-draft.json", "preferences.json"}
+# Final documents a same-route rerun may replace, keyed to the phase that owns them. Replacement
+# also needs the exact prior SHA-256 and phase authority (see WriteAudit._replacement_authorized).
+REPLACEABLE_OUTPUTS = {
+    "preferences.json": "clarify",
+    "aws-design-ai.json": "design",
+    "estimation-ai.json": "estimate",
+    "DECISION.md": "estimate",
+    "decision-report.html": "estimate",
+    "generation-ai.json": "generate",
+    "MIGRATION_GUIDE.md": "generate",
+    "README.md": "generate",
+    "migration-report.html": "generate",
+}
 DELEGATED_ROUTES = ("ai_only", "combined")
 TRANSIENT_OUTPUTS = {".anthropic-admin-env", ".openai-admin-env", ".openrouter-key-env"}
 CAPTURE_PREFIXES = ("openai-capture/", "anthropic-capture/", "openrouter-capture/")
@@ -144,6 +157,14 @@ def state_decision(state: dict[str, Any], execute_requested: bool = False) -> di
 def next_phase(state: dict[str, Any], execute_requested: bool = False) -> str:
     decision = state_decision(state, execute_requested)
     return decision["phase"] or "complete"
+
+
+def _replaceable_phase(relative: str) -> str | None:
+    if relative in REPLACEABLE_OUTPUTS:
+        return REPLACEABLE_OUTPUTS[relative]
+    if relative.startswith(GENERATED_PREFIX):
+        return "generate"
+    return None
 
 
 def _checked_route(mode: str, delegated_route: str | None) -> str | None:
@@ -555,13 +576,15 @@ def _assert_no_follow(root: Path, path: Path) -> None:
 class WriteAudit:
     """Closed one-writer guard with staged, rollback-safe publication."""
 
-    def __init__(self, run_dir: Path, mode: str, scenario: str, delegated_route: str | None = None):
+    def __init__(self, run_dir: Path, mode: str, scenario: str, delegated_route: str | None = None,
+                 state: dict[str, Any] | None = None):
         if mode not in WRITERS or not run_dir.is_dir() or run_dir.is_symlink():
             raise ValueError("write_context_invalid")
         self.run_dir = run_dir.resolve()
         self.mode = mode
         self.scenario = scenario
         self.delegated_route = _checked_route(mode, delegated_route)
+        self.state = state if state is not None else {}
         self.operations: list[dict[str, str]] = []
         self._prepared: list[dict[str, Any]] = []
         self._paths: set[str] = set()
@@ -582,12 +605,25 @@ class WriteAudit:
         exists = target.exists()
         mutable = relative in MUTABLE_OUTPUTS or relative.startswith(CAPTURE_PREFIXES) or relative in TRANSIENT_OUTPUTS
         if exists:
-            if target.is_dir() or not mutable:
+            if target.is_dir():
                 raise ValueError("duplicate_final_write")
-            if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
-                raise ValueError("expected_prior_hash_required")
-            if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
-                raise ValueError("expected_prior_hash_mismatch")
+            replaceable = _replaceable_phase(relative)
+            if replaceable is not None and expected_sha256 is not None:
+                if phase != replaceable:
+                    raise ValueError("write_phase_invalid")
+                if not self._replacement_authorized(replaceable):
+                    raise ValueError("replacement_not_authorized")
+                if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+                    raise ValueError("expected_prior_hash_required")
+                if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
+                    raise ValueError("expected_prior_hash_mismatch")
+            elif replaceable is not None or not mutable:
+                raise ValueError("duplicate_final_write")
+            else:
+                if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+                    raise ValueError("expected_prior_hash_required")
+                if hashlib.sha256(target.read_bytes()).hexdigest() != expected_sha256:
+                    raise ValueError("expected_prior_hash_mismatch")
         elif expected_sha256 is not None:
             raise ValueError("expected_prior_hash_unexpected")
         data = _payload_bytes(payload)
@@ -596,6 +632,16 @@ class WriteAudit:
             "phase": phase, "relative": relative, "path": path, "target": target,
             "owner": selected, "data": data, "replace": exists,
         })
+
+    def _replacement_authorized(self, owner_phase: str) -> bool:
+        """Replacement needs stale downstream state, or no completed phase after the owner."""
+        state = self.state
+        if not isinstance(state, dict) or not isinstance(state.get("phases"), dict):
+            return False
+        if state.get("stale_downstream"):
+            return True
+        later = PHASES[PHASES.index(owner_phase) + 1:]
+        return all(state["phases"].get(phase) != "completed" for phase in later)
 
     def write(self, phase: str, relative: str, payload: Any,
               logical_owner: str | None = None,
@@ -772,7 +818,7 @@ def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("delegated_route_required")
     if writes or assemblies:
         run_dir = Path(request.get("run_dir", ""))
-        audit = WriteAudit(run_dir, mode, scenario, delegated_route)
+        audit = WriteAudit(run_dir, mode, scenario, delegated_route, request.get("state", {}))
         for value in writes:
             if not isinstance(value, dict) or set(value) not in (
                 {"phase", "path", "payload", "logical_owner"},
