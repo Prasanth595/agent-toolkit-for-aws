@@ -593,6 +593,27 @@ def test_cli_nullable_data_envelope_yields_no_resource_row(tmp_path: Path) -> No
         module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
 
 
+def test_populated_task_run_detail_normalizes_with_attempts_and_parent(tmp_path: Path) -> None:
+    detail = {"id": "run-safe", "name": "run", "ownerId": "tea-safe", "taskId": "tsk-safe", "status": "succeeded", "attempts": [{"id": "att-safe", "name": "attempt-1", "status": "succeeded"}]}
+    captures = [
+        write_capture(tmp_path, "workflow-tasks.json", "rest", "workflow_tasks_list", live("rest", "workflow_tasks_list", [{"id": "tsk-safe", "name": "task", "workflowVersionId": "wfv-safe", "ownerId": "tea-safe"}], "wfl-safe")),
+        write_capture(tmp_path, "workflow-task-run.json", "cli", "workflow_task_run_show", live("cli", "workflow_task_run_show", detail, "run-safe")),
+    ]
+    inventory, _, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    run = next(resource for resource in inventory["resources"] if resource["kind"] == "render.task_run")
+    assert run["render_id"] == "run-safe"
+    attempt = next(resource for resource in inventory["resources"] if resource["kind"] == "render.task_attempt")
+    assert attempt["render_id"] == "att-safe"
+    edge_types = {(edge["type"], edge["from_id"], edge["to_id"]) for edge in inventory["edges"]}
+    assert ("task_run_has_attempt", run["id"], attempt["id"]) in edge_types
+    assert any(edge["type"] == "workflow_task_has_run" and edge["to_id"] == run["id"] for edge in inventory["edges"])
+def test_nullable_task_run_detail_yields_no_resource_row(tmp_path: Path) -> None:
+    absent = live("cli", "workflow_task_run_show", None, "run-safe")
+    absent["raw_shape"] = "null"
+    captures = [write_capture(tmp_path, "workflow-task-run.json", "cli", "workflow_task_run_show", absent)]
+    inventory, _, _, _ = module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
+    assert inventory["resources"] == []
+    assert module._iter_cli_data("workflow_task_run_show", None) == []
 def two_project_captures(root: Path) -> list[dict[str, Any]]:
     projects = [{"id": "prj-a", "name": "alpha", "ownerId": "tea-safe"}, {"id": "prj-b", "name": "beta", "ownerId": "tea-safe"}]
     environments = [environment("evm-a", "production", "prj-a", ["srv-a"]), environment("evm-b", "production", "prj-b", ["srv-b"])]

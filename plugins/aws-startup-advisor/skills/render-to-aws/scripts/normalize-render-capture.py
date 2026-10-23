@@ -65,6 +65,7 @@ CATEGORY_KINDS = {
     "environment_groups_list": "render.environment_group", "workflows_list": "render.workflow",
     "workflow_get": "render.workflow", "workflow_versions_list": "render.workflow_version",
     "workflow_tasks_list": "render.workflow_task", "workflow_task_runs_list": "render.task_run",
+    "workflow_task_run_show": "render.task_run",
 }
 SERVICE_RESOURCE_KINDS = {"render.web_service", "render.static_site", "render.private_service", "render.background_worker", "render.cron_job"}
 LIFECYCLE_CATEGORIES = {"deploys_list", "service_events", "service_instances", "jobs_list", "log_metadata", "metric_cpu", "metric_memory", "metric_memory_limit", "metric_active_connections", "metric_bandwidth", "metric_http_requests"}
