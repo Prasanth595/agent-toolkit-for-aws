@@ -297,6 +297,42 @@ def test_discovery_enrichment_requires_owner_and_prior_hash(tmp_path: Path) -> N
     assert "enriched_by" in profile.read_text()
 
 
+@pytest.mark.parametrize(("mode", "route", "preferences_owner"), [
+    ("direct", None, "bedrock-migration-assessment"),
+    ("delegated", "ai_only", "bedrock-migration-assessment"),
+    ("delegated", "combined", "gcp-to-aws"),
+])
+def test_delegated_route_selects_preferences_owner(tmp_path: Path, mode: str, route: str | None, preferences_owner: str) -> None:
+    run = tmp_path / f"routes-{mode}-{route}"
+    run.mkdir()
+    state_owner = "gcp-to-aws" if mode == "delegated" else "bedrock-migration-assessment"
+    base = {"schema_version": 1, "mode": mode, "scenario": "route", "run_dir": str(run), "state": {}, "consent": [], "assemblies": []}
+    if route is not None:
+        base["delegated_route"] = route
+    prefs = {"metadata": {"migration_type": "ai-only"}}
+    writes = [
+        {"phase": "clarify", "path": "preferences-draft.json", "payload": prefs, "logical_owner": preferences_owner},
+        {"phase": "clarify", "path": "preferences.json", "payload": prefs, "logical_owner": preferences_owner},
+        {"phase": "clarify", "path": ".phase-status.json", "payload": {"phases": {}}, "logical_owner": state_owner},
+        {"phase": "design", "path": "aws-design-ai.json", "payload": {}, "logical_owner": "bedrock-migration-assessment"},
+    ]
+    if mode == "delegated" and route is None:
+        with pytest.raises(ValueError, match="delegated_route_required"):
+            runtime.execute_contract({**base, "writes": writes})
+        with pytest.raises(ValueError, match="delegated_route_invalid"):
+            runtime.execute_contract({**base, "delegated_route": "unknown", "writes": writes})
+        return
+    with pytest.raises(ValueError, match="writer_owner_invalid"):
+        runtime.execute_contract({**base, "writes": [{**writes[1], "logical_owner": "wrong-owner"}]})
+    result = runtime.execute_contract({**base, "writes": writes})
+    owners = {operation["path"]: operation["logical_owner"] for operation in result["operations"]}
+    assert owners == {
+        "preferences-draft.json": preferences_owner, "preferences.json": preferences_owner,
+        ".phase-status.json": state_owner, "aws-design-ai.json": "bedrock-migration-assessment",
+    }
+    assert runtime.writer(mode, "preferences.json", route) == preferences_owner
+
+
 def test_nested_write_rejects_symlink_parent_without_external_mutation(tmp_path: Path) -> None:
     run = tmp_path / "run"
     external = tmp_path / "external"

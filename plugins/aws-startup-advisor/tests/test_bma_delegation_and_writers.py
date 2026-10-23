@@ -41,6 +41,8 @@ def test_one_writer_per_neutral_artifact() -> None:
         assert len(selected) == len(neutral)
         assert all(owner in {"bedrock-migration-assessment", "gcp-to-aws"} for owner in selected)
     assert runtime.writer("delegated", "preferences.json") == "gcp-to-aws"
+    assert runtime.writer("delegated", "preferences.json", "combined") == "gcp-to-aws"
+    assert runtime.writer("delegated", "preferences.json", "ai_only") == "bedrock-migration-assessment"
     assert runtime.writer("delegated", "aws-design-ai.json") == "bedrock-migration-assessment"
 
 

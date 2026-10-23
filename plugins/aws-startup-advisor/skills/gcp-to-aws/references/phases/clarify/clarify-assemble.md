@@ -22,7 +22,7 @@ _knowledge:
 
 ## Typed BMA contribution boundary
 
-When the AI fragment is active, accept exactly one `BMA_AI_CLARIFY_RESULT` validated by BMA's production runtime and schema. Before the final write, invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with the current state, typed result, and exactly one planned `preferences.json` write owned by `gcp-to-aws`; perform the write only through that command and retain its audit row. Reject duplicate workload IDs, duplicate `{file,line}` call sites, invalid question metadata, or a result that performed a write. Merge its rows once into the selected-base conversation order. This assembler remains the sole combined draft/final `preferences.json` writer and outer `GATE_FAIL`/`HANDOFF_OK` emitter.
+When the AI fragment is active, accept exactly one `BMA_AI_CLARIFY_RESULT` validated by BMA's production runtime and schema. Before the final write, invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with `delegated_route: combined`, the current state, typed result, and exactly one planned `preferences.json` write owned by `gcp-to-aws`; perform the write only through that command and retain its audit row. Reject duplicate workload IDs, duplicate `{file,line}` call sites, invalid question metadata, or a result that performed a write. Merge its rows once into the selected-base conversation order. This assembler remains the sole combined draft/final `preferences.json` writer and outer `GATE_FAIL`/`HANDOFF_OK` emitter.
 
 ## This unit owns the conversation
 

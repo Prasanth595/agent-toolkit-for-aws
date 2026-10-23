@@ -77,6 +77,8 @@ MUTABLE_OUTPUTS = {
     "anthropic-usage-profile.json", "openrouter-usage-profile.json",
     "preferences-draft.json",
 }
+PREFERENCE_OUTPUTS = {"preferences-draft.json", "preferences.json"}
+DELEGATED_ROUTES = ("ai_only", "combined")
 TRANSIENT_OUTPUTS = {".anthropic-admin-env", ".openai-admin-env", ".openrouter-key-env"}
 CAPTURE_PREFIXES = ("openai-capture/", "anthropic-capture/", "openrouter-capture/")
 GENERATED_PREFIX = "ai-migration/"
@@ -143,7 +145,19 @@ def next_phase(state: dict[str, Any], execute_requested: bool = False) -> str:
     return decision["phase"] or "complete"
 
 
-def writer(mode: str, artifact: str) -> str:
+def _checked_route(mode: str, delegated_route: str | None) -> str | None:
+    if delegated_route is None:
+        return None
+    if mode != "delegated" or delegated_route not in DELEGATED_ROUTES:
+        raise ValueError("delegated_route_invalid")
+    return delegated_route
+
+
+def writer(mode: str, artifact: str, delegated_route: str | None = None) -> str:
+    # The delegated AI-only route makes BMA the sole preferences writer. Combined
+    # delegated preferences stay with the GCP assembler, the default when no route is given.
+    if _checked_route(mode, delegated_route) == "ai_only" and artifact in PREFERENCE_OUTPUTS:
+        return BMA_OWNER
     try:
         return WRITERS[mode][artifact]
     except KeyError as exc:
@@ -230,9 +244,12 @@ def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
         "iac_vertex", "source_evidence", "state", "user_decisions",
         "capture_observations",
     }
-    if set(request) != required or request["schema_version"] != 2:
+    if not required <= set(request) <= required | {"delegated_route"} or request["schema_version"] != 2:
         raise ValueError("trace_request_invalid")
     mode = request["mode"]
+    delegated_route = _checked_route(
+        mode, request.get("delegated_route", "combined" if mode == "delegated" else None)
+    )
     route_result = route(
         mode, request["has_ai_profile"], request["source_containing"],
         request["iac_vertex"],
@@ -355,8 +372,8 @@ def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
         },
         "state_decision": state_decision(request["state"], decisions["execute_requested"]),
         "consent": consent_trace,
-        "writers": {artifact: writer(mode, artifact) for artifact in active_artifacts},
-        "report_writers": {target: writer(mode, target) for target in report_targets},
+        "writers": {artifact: writer(mode, artifact, delegated_route) for artifact in active_artifacts},
+        "report_writers": {target: writer(mode, target, delegated_route) for target in report_targets},
     }
 
 
@@ -516,12 +533,13 @@ def _assert_no_follow(root: Path, path: Path) -> None:
 class WriteAudit:
     """Closed one-writer guard with staged, rollback-safe publication."""
 
-    def __init__(self, run_dir: Path, mode: str, scenario: str):
+    def __init__(self, run_dir: Path, mode: str, scenario: str, delegated_route: str | None = None):
         if mode not in WRITERS or not run_dir.is_dir() or run_dir.is_symlink():
             raise ValueError("write_context_invalid")
         self.run_dir = run_dir.resolve()
         self.mode = mode
         self.scenario = scenario
+        self.delegated_route = _checked_route(mode, delegated_route)
         self.operations: list[dict[str, str]] = []
         self._prepared: list[dict[str, Any]] = []
         self._paths: set[str] = set()
@@ -532,7 +550,7 @@ class WriteAudit:
         path = _relative_path(relative)
         if not isinstance(phase, str) or not phase:
             raise ValueError("write_request_invalid")
-        selected = writer(self.mode, relative)
+        selected = writer(self.mode, relative, self.delegated_route)
         if logical_owner is not None and logical_owner != selected:
             raise ValueError("writer_owner_invalid")
         if relative in self._paths:
@@ -649,7 +667,7 @@ def assemble_contributions(audit: WriteAudit, phase: str, target: str,
 
 def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
     """Prevalidate a complete phase request, then publish it rollback-safely."""
-    allowed = {"schema_version", "mode", "scenario", "run_dir", "state",
+    allowed = {"schema_version", "mode", "scenario", "run_dir", "state", "delegated_route",
                "execute_requested", "consent", "clarify_result", "writes", "assemblies"}
     if set(request) - allowed or request.get("schema_version") != 1:
         raise ValueError("execution_request_invalid")
@@ -679,9 +697,14 @@ def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
     assemblies = request.get("assemblies", [])
     if not isinstance(writes, list) or not isinstance(assemblies, list):
         raise ValueError("execution_request_invalid")
+    delegated_route = _checked_route(mode, request.get("delegated_route"))
+    if mode == "delegated" and delegated_route is None and any(
+        isinstance(value, dict) and value.get("path") in PREFERENCE_OUTPUTS for value in writes
+    ):
+        raise ValueError("delegated_route_required")
     if writes or assemblies:
         run_dir = Path(request.get("run_dir", ""))
-        audit = WriteAudit(run_dir, mode, scenario)
+        audit = WriteAudit(run_dir, mode, scenario, delegated_route)
         for value in writes:
             if not isinstance(value, dict) or set(value) not in (
                 {"phase", "path", "payload", "logical_owner"},

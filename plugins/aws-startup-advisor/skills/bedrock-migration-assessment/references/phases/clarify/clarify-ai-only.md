@@ -223,7 +223,7 @@ Interpret → `ai_model_baseline`. Default: auto-detect, fallback Q2 priority-ba
 After the user responds to Batch 1:
 
 1. Interpret all Batch 1 answers (apply interpret rules above; apply defaults for skipped questions).
-2. Write `$MIGRATION_DIR/preferences-draft.json` with Batch 1 answers:
+2. Write `$MIGRATION_DIR/preferences-draft.json` with Batch 1 answers (when delegated, submit this write through `scripts/bma-runtime.py execute` with `delegated_route: ai_only`):
 
 ```json
 {
@@ -356,7 +356,7 @@ After the user responds to Batch 2, interpret all Batch 2 answers and proceed to
 
 Assemble all interpreted answers from both batches into the final file. If `preferences-draft.json` exists, use it as the base — merge in Batch 2 answers, remove draft-specific metadata fields (`draft`, `batches_completed`, `batches_remaining`), and set `metadata.timestamp` to the current time.
 
-Write `$MIGRATION_DIR/preferences.json`:
+Write `$MIGRATION_DIR/preferences.json` (when delegated, submit this write through `scripts/bma-runtime.py execute` with `delegated_route: ai_only`):
 
 **Schema — AI-only structure:**
 

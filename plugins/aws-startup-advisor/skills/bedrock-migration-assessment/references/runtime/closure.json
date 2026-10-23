@@ -55,7 +55,7 @@
         "references/runtime/bma-input-patterns.json",
         "scripts/bma-route-classifier.py"
       ],
-      "sha256": "a2bb46fa5240a9cba7d3a3bb9814febeba502a27b0f1c5defea441ee57364880",
+      "sha256": "f0fb89e7ba45858163e074c715162958f5c6518f5c2eefb7b8a9d600efc4d7dc",
       "type": "script"
     },
     {
@@ -96,7 +96,7 @@
       "runtime_references": [
         "references/shared/openai-on-bedrock.md"
       ],
-      "sha256": "737949d92b3f8d845f84bb915919de2f253194dd756ced3f31fced6b55ba4eda",
+      "sha256": "0ccf01b95a331a0f1af61dd25f68dbd1e7e85155e5c04cbfcf509b30ae6f0d29",
       "source_path": "skills/gcp-to-aws/references/phases/clarify/clarify-ai-only.md",
       "type": "instruction"
     },
@@ -698,7 +698,7 @@
         "references/vendored/clarify/clarify-multicloud.md",
         "references/vendored/clarify/clarify-region.md"
       ],
-      "sha256": "ecef84dda5f9944ce9429a461871a389150b8a1d1713a9630e2872020ac0b86d",
+      "sha256": "e37406030e488c7c8ae49e560110356e43fdd421e9efa8104cdb4ab6d5e921bd",
       "type": "instruction"
     },
     {
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "6f626da1cb412815a1406eb9cafb98052c3fc64dd0e3f1deba400aac8def2fb0"
+  "self_hash": "59ddabadf97884c33ce42b27ebe72dc665f37860c7555427cbc88d1e39d57238"
 }
