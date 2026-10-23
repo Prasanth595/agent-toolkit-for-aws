@@ -130,10 +130,10 @@ def _billing_export(document: dict[str, Any]) -> dict[str, Any]:
 
     seen_ids: set[str] = set()
     intervals: dict[tuple[str, str, str], list[tuple[date, date]]] = {}
-    # Lines are grouped by (service_id, plan_id) and normalized once per group over the
-    # group's covered reporting interval, so a charge split into adjacent prorated lines
-    # yields the same monthly figure as the same charge on a single line.
-    groups: dict[tuple[str, str], list[tuple[str, Decimal, date, date]]] = {}
+    # Lines are grouped by service_id and normalized once per group over the group's covered
+    # reporting interval. Plan segments of one service (sequential or concurrent) and charges
+    # split into adjacent prorated lines therefore pool into the same monthly figure as one line.
+    groups: dict[str, list[tuple[str, Decimal, date, date]]] = {}
     credit_periods: set[tuple[date, date, str]] = set()
     noncredit_periods: set[tuple[date, date, str]] = set()
     for line in lines:
@@ -166,7 +166,7 @@ def _billing_export(document: dict[str, Any]) -> dict[str, Any]:
         intervals[overlap_key].append((start, end))
         period_key = (start, end, currency)
         (credit_periods if basis == "credit" else noncredit_periods).add(period_key)
-        groups.setdefault((overlap_key[0], overlap_key[1]), []).append((currency, amount, start, end))
+        groups.setdefault(overlap_key[0], []).append((currency, amount, start, end))
     if credit_periods - noncredit_periods:
         raise BillingError("credit_period_mismatch")
 
@@ -190,11 +190,16 @@ def _billing_export(document: dict[str, Any]) -> dict[str, Any]:
 
     total = Decimal(0)
     for rows in groups.values():
-        periods = sorted({(start, end) for _currency, _amount, start, end in rows})
-        for (_previous_start, previous_end), (next_start, _next_end) in zip(periods, periods[1:]):
-            if next_start != previous_end:
-                raise BillingError("discontiguous_period")
-        coverage_days = Decimal((periods[-1][1] - periods[0][0]).days)
+        # Merge overlapping or adjacent spans; more than one merged span means a coverage gap.
+        spans: list[tuple[date, date]] = []
+        for start, end in sorted({(start, end) for _currency, _amount, start, end in rows}):
+            if spans and start <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], max(spans[-1][1], end))
+            else:
+                spans.append((start, end))
+        if len(spans) != 1:
+            raise BillingError("discontiguous_period")
+        coverage_days = Decimal((spans[0][1] - spans[0][0]).days)
         group_amount = sum((convert(currency, amount) for currency, amount, _start, _end in rows), Decimal(0))
         total += group_amount / coverage_days * Decimal("30.4375")
     starts = [row[2] for rows in groups.values() for row in rows]

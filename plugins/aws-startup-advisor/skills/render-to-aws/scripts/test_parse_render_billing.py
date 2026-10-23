@@ -134,6 +134,20 @@ def test_discontiguous_group_is_rejected() -> None:
     assert module.parse(separate, ".json")["monthly_total"] == "60.88"
 
 
+def test_sequential_plan_segments_of_one_service_pool_before_normalizing() -> None:
+    # starter 15.00 for 15 days, then standard 30.00 for 15 days, same service:
+    # 45.00 over the 30-day interval -> 45 / 30 * 30.4375 = 45.65625 -> 45.66.
+    # Normalizing each plan segment separately would give 91.31.
+    data = _export([
+        _line("starter-sep", "2026-09-01", "2026-09-16", "15.00", plan_id="starter"),
+        _line("standard-sep", "2026-09-16", "2026-10-01", "30.00", plan_id="standard"),
+    ])
+    result = module.parse(data, ".json")
+    assert result["monthly_total"] == "45.66"
+    assert (result["period_start"], result["period_end"]) == ("2026-09-01", "2026-10-01")
+    assert result["line_item_count"] == 2
+
+
 def test_negative_exponent_nan_and_bad_dates_reject() -> None:
     for amount in ("-1.00", "1e3", "NaN", "Infinity"):
         document = {"schema_version": "1.0.0", "source": "user_stated", "monthly_amount": amount, "currency": "USD", "as_of": "2026-10-21"}
