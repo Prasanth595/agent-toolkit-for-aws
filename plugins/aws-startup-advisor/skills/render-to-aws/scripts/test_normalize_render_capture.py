@@ -732,3 +732,18 @@ def test_failed_rerun_rolls_back_ai_removal(tmp_path: Path, monkeypatch: pytest.
     assert module.main() == 1
     assert "NORMALIZE_FAIL | code=injected commit failure".split(" | ")[0] in capsys.readouterr().err
     assert {name: (tmp_path / name).read_bytes() for name in OUTPUT_NAMES} == before
+
+
+def test_live_manifest_with_local_producers_carries_null_ownership_digest(tmp_path: Path) -> None:
+    # discover.md Step 2: Blueprint, application, and billing entries carry null even inside a live manifest.
+    captures = [write_capture(tmp_path, "projects.json", "rest", "projects_list", live("rest", "projects_list", [{"id": "prj-safe", "name": "project", "ownerId": "tea-safe"}]))]
+    billing_parser = load_script("parse-render-billing.py", "billing_for_mixed_handoff")
+    captures.append(write_capture(tmp_path, "billing.json", "billing", "billing", billing_parser.parse((SCRIPT_DIR.parent / "fixtures/render-billing/user-stated.json").read_bytes(), ".json")))
+    scanner = load_script("scan-render-application.py", "scanner_for_mixed_handoff")
+    captures.append(write_capture(tmp_path, "application.json", "application", "application", scanner.scan(SCRIPT_DIR.parent / "fixtures/render-application")))
+    assert [capture["ownership_index_digest"] for capture in captures[1:]] == [None, None]
+    manifest = {"schema_version": "1.0", "status": "active", "identity_scope": "live", "attempt_id": ATTEMPT, "workspace_id": "tea-safe", "local_identity": None, "consent_digest": DIGEST, "ownership_index_digest": INDEX_DIGEST, "captures": captures}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_bytes(module.canonical_bytes(manifest))
+    inventory, _, _, _ = module.normalize(tmp_path, manifest_path, ATTEMPT)
+    assert any(resource["kind"] == "render.project" for resource in inventory["resources"])

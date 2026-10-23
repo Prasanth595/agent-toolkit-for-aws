@@ -29,7 +29,14 @@
           "ownership_index_digest": {"type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$"},
           "path": {"type": "string", "minLength": 1, "maxLength": 512},
           "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
-        }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"transport": {"enum": ["blueprint", "application", "billing"]}}, "required": ["transport"]},
+            "then": {"properties": {"ownership_index_digest": {"type": "null"}}},
+            "else": {"properties": {"ownership_index_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}}
+          }
+        ]
       }
     }
   },
