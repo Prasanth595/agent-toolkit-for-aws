@@ -70,6 +70,7 @@
     "mvp",
     "rag",
     "bedrock-migration",
+    "bedrock-migration-assessment",
     "rewrite-sdk-calls",
     "deploy-ai-agent",
     "choose-agent-runtime",
