@@ -62,11 +62,8 @@ def test_lowercase_uuid_run_id_is_unchanged(tmp_path: Path) -> None:
     assert data["runId"] == lower, f"runId altered: {data.get('runId')!r}"
 
 
-def test_azure_infra_run_emits_plan_skip(tmp_path: Path) -> None:
-    """AZURE_TO_AWS has no confirmed web handoff yet (PR #435 review, databaseId
-    4240400316: AZURE is not confirmed accepted by the import contract's
-    sourcePlatform enum). An Azure infra run must print PLAN_SKIP and write no
-    plan.json — the same behavior Azure had before this mapping was attempted."""
+def test_azure_infra_run_skips_plan_until_importer_supports_azure(tmp_path: Path) -> None:
+    """A valid Azure estimate fails open while the downstream importer lacks AZURE."""
     golden = PLUGIN_ROOT / "fixtures" / "azure-iac-terraform" / "after-estimate"
     run = tmp_path / "run"
     shutil.copytree(golden, run)
@@ -75,13 +72,15 @@ def test_azure_infra_run_emits_plan_skip(tmp_path: Path) -> None:
     status["owning_skill"] = "AZURE_TO_AWS"
     status["run_id"] = "8c1e4f2a-3b6d-4a7e-9f10-5d2c8b7a6e41"
     status_path.write_text(json.dumps(status, indent=2))
+
     result = subprocess.run(
         [sys.executable, str(WRITER), "--migration-dir", str(run)],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0
-    assert result.stdout.startswith("PLAN_SKIP"), f"expected PLAN_SKIP, got: {result.stdout}"
+    assert result.stdout.startswith("PLAN_SKIP"), result.stdout
+    assert "AZURE_TO_AWS" in result.stdout
     assert not (run / "plan.json").exists()
 
 
