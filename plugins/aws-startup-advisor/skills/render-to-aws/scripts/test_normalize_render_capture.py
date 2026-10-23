@@ -658,6 +658,81 @@ def test_duplicate_environment_name_within_one_project_still_rejected(tmp_path: 
         module.normalize(tmp_path, live_manifest(tmp_path, captures), ATTEMPT)
 
 
+BLUEPRINT_TWO_PROJECTS = """version: "1"
+projects:
+  - name: alpha
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: alpha-api
+            runtime: python
+            repo: https://github.com/example/alpha
+            region: virginia
+            plan: starter
+            buildCommand: pip install -r requirements.txt
+            startCommand: gunicorn app:app
+  - name: beta
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: beta-api
+            runtime: python
+            repo: https://github.com/example/beta
+            region: virginia
+            plan: starter
+            buildCommand: pip install -r requirements.txt
+            startCommand: gunicorn app:app
+"""
+
+
+def test_blueprint_only_same_named_environments_in_two_projects_cluster_apart(tmp_path: Path) -> None:
+    manifest = blueprint_only_manifest(tmp_path, BLUEPRINT_TWO_PROJECTS)
+    inventory, clusters, _, _ = module.normalize(tmp_path, manifest, ATTEMPT)
+    by_name = {resource["name"]: resource["id"] for resource in inventory["resources"] if resource["kind"] == "render.web_service"}
+    cluster_of = {member: cluster["id"] for cluster in clusters["clusters"] for member in cluster["member_ids"]}
+    assert cluster_of[by_name["alpha-api"]] != cluster_of[by_name["beta-api"]]
+    seeds = {cluster["seed"] for cluster in clusters["clusters"]}
+    assert "alpha/production" in seeds and "beta/production" in seeds
+    assert "production" not in seeds
+
+
+def test_blueprint_only_duplicate_environment_name_within_one_project_rejected(tmp_path: Path) -> None:
+    blueprint = """version: "1"
+projects:
+  - name: alpha
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: alpha-api
+            runtime: python
+            repo: https://github.com/example/alpha
+            region: virginia
+            plan: starter
+            buildCommand: pip install -r requirements.txt
+            startCommand: gunicorn app:app
+      - name: production
+        services:
+          - type: web
+            name: alpha-worker-api
+            runtime: python
+            repo: https://github.com/example/alpha
+            region: virginia
+            plan: starter
+            buildCommand: pip install -r requirements.txt
+            startCommand: gunicorn app:app
+"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "render.yaml"
+    source.write_text(blueprint)
+    blueprint_parser = load_script("parse-render-blueprint.py", "blueprint_for_duplicate_environment")
+    with pytest.raises(blueprint_parser.BlueprintError, match="duplicate_normalized_identity"):
+        blueprint_parser.parse_blueprint(source, workspace, tmp_path)
+
+
 def normalizer_argv(root: Path, manifest: Path, *, ai_flags: bool = True) -> list[str]:
     argv = [
         "normalize-render-capture.py", "--migration-dir", str(root), "--attempt-id", ATTEMPT, "--manifest", str(manifest),

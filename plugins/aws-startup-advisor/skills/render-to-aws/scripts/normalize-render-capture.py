@@ -824,8 +824,14 @@ def normalize(migration_dir: Path, manifest_path: Path, attempt_id: str) -> tupl
         adjacency[edge["to_id"]].add(edge["from_id"])
     seed_groups: defaultdict[str, set[str]] = defaultdict(set)
     unseeded: set[str] = set()
+    live_environment_ids = {candidate["render_id"] for candidate in candidates if candidate["kind"] == "render.environment" and candidate["render_id"] is not None}
     for resource in resources:
-        seed = resource["environment_id"] or resource["project_id"]
+        environment_id = resource["environment_id"]
+        if environment_id and environment_id not in live_environment_ids and resource["project_id"]:
+            # Unresolved Blueprint environment names are only unique within their project.
+            seed = f"{resource['project_id']}/{environment_id}"
+        else:
+            seed = environment_id or resource["project_id"]
         if seed:
             seed_groups[seed].add(resource["id"])
         else:
