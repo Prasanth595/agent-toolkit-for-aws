@@ -87,6 +87,11 @@ CLIENT_BOUND_CALLS: dict[str, tuple[str, ...]] = {"chat.completions.create": ("o
 # Model identifiers of a family served by several clients bind to the client(s) constructed
 # or called in the same file; otherwise they fall back to the provider-wide family owner.
 MODEL_CLIENTS: dict[str, tuple[str, ...]] = {"openai": ("openai", "azure_openai")}
+# `name = OpenAI(...)` style constructions and `name.responses.create(` / `name.chat.completions.create(`
+# calls on the same line, used to bind a model identifier to the client it is actually called on.
+CLIENT_CONSTRUCTOR = re.compile(r"(?<![A-Za-z0-9_.])([A-Za-z_]\w*)\s*=\s*(AsyncAzureOpenAI|AzureOpenAI|AsyncOpenAI|OpenAI)\(")
+CLIENT_CONSTRUCTOR_PROVIDER = {"AsyncAzureOpenAI": "azure_openai", "AzureOpenAI": "azure_openai", "AsyncOpenAI": "openai", "OpenAI": "openai"}
+CALL_RECEIVER = re.compile(r"(?<![A-Za-z0-9_.])([A-Za-z_]\w*)\.(?:responses\.create|chat\.completions\.create)\(")
 METHOD_WEIGHTS = {"dependency": 35, "import": 35, "sdk_construction": 40, "method_call": 45, "model_identifier": 25, "endpoint_hostname": 35, "environment_name": 10, "framework": 30, "configuration": 20}
 FRAMEWORKS = {"langgraph": "agent_orchestration", "crewai": "agent_orchestration", "autogen": "agent_orchestration", "strands": "agent_orchestration", "llamaindex": "retrieval", "llama_index": "retrieval"}
 INFRASTRUCTURE = {
@@ -258,10 +263,14 @@ def _project_ai_profile(qualifying_components: dict[str, list[tuple[str, list[di
                     continue
                 sources.add(target)
                 normalized, family = _normalize_model(raw)
-                confidence = "confirmed" if item["path"] in strong_paths else "medium"
+                if item["attribution"] == "ambiguous":
+                    confidence, detail = "low", f"{item['path']}:{item['line']}:unattributed"
+                else:
+                    confidence = "confirmed" if item["path"] in strong_paths else "medium"
+                    detail = f"{item['path']}:{item['line']}"
                 entry = observations[target].setdefault(normalized, {"raws": set(), "family": family, "evidence": set()})
                 entry["raws"].add(raw)
-                entry["evidence"].add((f"{item['path']}:{item['line']}", confidence))
+                entry["evidence"].add((detail, confidence))
     ai_sources: list[dict[str, Any]] = []
     source_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     for provider, source_service in sorted(sources, key=lambda key: (byte_sort_key(key[0]), byte_sort_key(key[1]))):
@@ -395,6 +404,23 @@ def _model_targets(provider: str, active: set[str]) -> tuple[str, ...]:
     return tuple(client for client in clients if client in active) or (provider,)
 
 
+def _bind_model(provider: str, line_text: str, constructors: dict[str, str], active: set[str]) -> tuple[tuple[str, str], ...]:
+    """Return (source, attribution) pairs for a model identifier on one line.
+
+    A call whose receiver is a client constructed in this file binds the model to that client only
+    ("bound"). Otherwise the model stays with the family's clients in this file, marked "ambiguous" when
+    more than one client could own it, so it is never asserted as confirmed usage of a specific source.
+    """
+    clients = MODEL_CLIENTS.get(provider)
+    if clients is None:
+        return ((provider, "bound"),)
+    called = {constructors[name] for name in CALL_RECEIVER.findall(line_text) if name in constructors} & set(clients)
+    if called:
+        return tuple((client, "bound") for client in clients if client in called)
+    targets = _model_targets(provider, active)
+    return tuple((target, "bound" if len(targets) == 1 else "ambiguous") for target in targets)
+
+
 def scan(root: Path, migration_dir: Path | None = None) -> dict[str, Any]:
     if not root.is_absolute() or root.is_symlink() or not root.is_dir():
         raise ScanError("workspace_root_invalid")
@@ -463,12 +489,14 @@ def scan(root: Path, migration_dir: Path | None = None) -> dict[str, Any]:
         if active_clients:
             capabilities[component].add("text_generation")
         matches.extend(file_matches)
+        constructors = {name: CLIENT_CONSTRUCTOR_PROVIDER[kind] for name, kind in CLIENT_CONSTRUCTOR.findall(text)}
+        lines = text.split("\n")
         for provider, pattern in MODEL_PATTERNS.items():
-            targets = _model_targets(provider, active_clients)
             for identifier in sorted(set(pattern.findall(text)), key=byte_sort_key):
-                line = text.count("\n", 0, text.find(identifier)) + 1
-                for target in targets:
-                    matches.append({"component": component, "provider": target, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line})
+                # Locate the identifier as a whole token: `find` would land inside `gpt-4o-mini` for `gpt-4o`.
+                line = next(text.count("\n", 0, found.start()) + 1 for found in pattern.finditer(text) if found.group(0) == identifier)
+                for target, attribution in _bind_model(provider, lines[line - 1], constructors, active_clients):
+                    matches.append({"component": component, "provider": target, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line, "attribution": attribution})
         if any(token in lowered for token in ("while true", "while(true)", "approval", "checkpoint", "fan_out", "fan-in", "compensat")):
             capabilities[component].add("agent_orchestration")
         if any(token in lowered for token in ("documentloader", "document_ingest", "ingest_documents")):

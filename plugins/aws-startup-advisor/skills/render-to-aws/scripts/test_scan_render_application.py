@@ -133,9 +133,27 @@ def test_mixed_direct_and_azure_file_keeps_both_sources_with_models(tmp_path: Pa
     profile = module.scan(tmp_path)["ai_profile"]
     Draft7Validator(json.loads(AI_SCHEMA.read_text())).validate(profile)
     sources = _sources(profile)
-    assert set(sources) == {("openai", "openai_api"), ("openai", "azure_openai")}
-    assert "gpt-4o-mini" in sources[("openai", "openai_api")]
-    assert "gpt-4o" in sources[("openai", "azure_openai")]
+    assert sources == {("openai", "openai_api"): ["gpt-4o-mini"], ("openai", "azure_openai"): ["gpt-4o"]}
+
+
+def test_shared_client_model_without_receiver_is_unattributed_not_confirmed(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom openai import OpenAI, AzureOpenAI\n"
+        'direct = OpenAI(api_key=os.environ["OPENAI_API_KEY"])\n'
+        'azure = AzureOpenAI(azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_key=os.environ["AZURE_OPENAI_API_KEY"])\n'
+        'direct.responses.create(model="gpt-4o-mini", input="x")\n'
+        'MODEL = "gpt-4o"\n'
+    )
+    profile = module.scan(tmp_path)["ai_profile"]
+    Draft7Validator(json.loads(AI_SCHEMA.read_text())).validate(profile)
+    sources = _sources(profile)
+    assert sources[("openai", "openai_api")] == ["gpt-4o", "gpt-4o-mini"]
+    assert sources[("openai", "azure_openai")] == ["gpt-4o"]
+    unattributed = next(s for s in profile["ai_sources"] if s["provider"] == "openai" and s["source_service"] == "azure_openai")
+    observation = unattributed["model_observations"][0]
+    assert observation["evidence"] == [{"provenance": "code", "confidence": "low", "detail": "app.py:6:unattributed"}]
+    direct = next(s for s in profile["ai_sources"] if s["source_service"] == "openai_api")
+    assert {e["confidence"] for o in direct["model_observations"] for e in o["evidence"] if o["normalized_model"] == "gpt-4o-mini"} == {"confirmed"}
 
 
 def test_direct_only_file_does_not_emit_azure_source(tmp_path: Path) -> None:
