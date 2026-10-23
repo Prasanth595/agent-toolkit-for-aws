@@ -195,8 +195,11 @@ def signal_patterns(signals: dict[str, list[str]]) -> dict[str, re.Pattern[bytes
         for token in tokens:
             escaped = re.escape(token.encode())
             if family == "imports":
-                alternatives.append(rb"(?:^|[\s;])(?:import|from)\s+" + escaped + end)
-                alternatives.append(rb"(?:from\s+|require\(\s*|import\(\s*)[\"']" + escaped + end)
+                # Google Cloud client packages are versioned (`speech_v1`, `documentai_v1`). Accept the
+                # version suffix on these tokens only; unversioned and other tokens keep the strict end.
+                version = rb"(?:_v[0-9]+[A-Za-z0-9_]*)?" if token.startswith("google.cloud.") else b""
+                alternatives.append(rb"(?:^|[\s;])(?:import|from)\s+" + escaped + version + end)
+                alternatives.append(rb"(?:from\s+|require\(\s*|import\(\s*)[\"']" + escaped + version + end)
                 if "/" in token:
                     alternatives.append(rb"[\"']" + escaped + end)
                 elif "." in token:
@@ -205,8 +208,8 @@ def signal_patterns(signals: dict[str, list[str]]) -> dict[str, re.Pattern[bytes
                     # The parenthesised form may span lines: `from google.cloud import (\n storage,\n aiplatform,\n)`.
                     package, leaf = token.rsplit(".", 1)
                     head = rb"(?:^|[\s;])from\s+" + re.escape(package.encode()) + rb"\s+import"
-                    alternatives.append(head + rb"\s+(?:[^\n#]*?[\s,(])?" + re.escape(leaf.encode()) + end)
-                    alternatives.append(head + rb"\s*\((?:[^)]*?[\s,])?" + re.escape(leaf.encode()) + end)
+                    alternatives.append(head + rb"\s+(?:[^\n#]*?[\s,(])?" + re.escape(leaf.encode()) + version + end)
+                    alternatives.append(head + rb"\s*\((?:[^)]*?[\s,])?" + re.escape(leaf.encode()) + version + end)
             elif family == "model_prefixes":
                 alternatives.append(boundary + escaped)
             else:
