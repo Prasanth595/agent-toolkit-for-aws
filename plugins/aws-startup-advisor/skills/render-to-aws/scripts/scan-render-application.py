@@ -493,10 +493,12 @@ def scan(root: Path, migration_dir: Path | None = None) -> dict[str, Any]:
         lines = text.split("\n")
         for provider, pattern in MODEL_PATTERNS.items():
             for identifier in sorted(set(pattern.findall(text)), key=byte_sort_key):
-                # Locate the identifier as a whole token: `find` would land inside `gpt-4o-mini` for `gpt-4o`.
-                line = next(text.count("\n", 0, found.start()) + 1 for found in pattern.finditer(text) if found.group(0) == identifier)
-                for target, attribution in _bind_model(provider, lines[line - 1], constructors, active_clients):
-                    matches.append({"component": component, "provider": target, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line, "attribution": attribution})
+                # Match the identifier as a whole token: `find` would land inside `gpt-4o-mini` for `gpt-4o`.
+                # Every occurrence line is bound on its own so each call site credits its own client.
+                occurrence_lines = sorted({text.count("\n", 0, found.start()) + 1 for found in pattern.finditer(text) if found.group(0) == identifier})
+                for line in occurrence_lines:
+                    for target, attribution in _bind_model(provider, lines[line - 1], constructors, active_clients):
+                        matches.append({"component": component, "provider": target, "path": relative, "method": "model_identifier", "symbol": identifier, "line": line, "attribution": attribution})
         if any(token in lowered for token in ("while true", "while(true)", "approval", "checkpoint", "fan_out", "fan-in", "compensat")):
             capabilities[component].add("agent_orchestration")
         if any(token in lowered for token in ("documentloader", "document_ingest", "ingest_documents")):

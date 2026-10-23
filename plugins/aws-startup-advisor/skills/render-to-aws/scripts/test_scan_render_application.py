@@ -136,6 +136,22 @@ def test_mixed_direct_and_azure_file_keeps_both_sources_with_models(tmp_path: Pa
     assert sources == {("openai", "openai_api"): ["gpt-4o-mini"], ("openai", "azure_openai"): ["gpt-4o"]}
 
 
+def test_same_model_on_both_clients_on_separate_lines_binds_each_source(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "import os\nfrom openai import OpenAI, AzureOpenAI\n"
+        'direct = OpenAI(api_key=os.environ["OPENAI_API_KEY"])\n'
+        'azure = AzureOpenAI(azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"], api_key=os.environ["AZURE_OPENAI_API_KEY"])\n'
+        'direct.responses.create(model="gpt-4o", input="x")\n'
+        'azure.chat.completions.create(model="gpt-4o")\n'
+    )
+    profile = module.scan(tmp_path)["ai_profile"]
+    Draft7Validator(json.loads(AI_SCHEMA.read_text())).validate(profile)
+    sources = _sources(profile)
+    assert sources == {("openai", "openai_api"): ["gpt-4o"], ("openai", "azure_openai"): ["gpt-4o"]}
+    azure = next(s for s in profile["ai_sources"] if s["source_service"] == "azure_openai")
+    assert azure["model_observations"][0]["evidence"] == [{"provenance": "code", "confidence": "confirmed", "detail": "app.py:6"}]
+
+
 def test_shared_client_model_without_receiver_is_unattributed_not_confirmed(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text(
         "import os\nfrom openai import OpenAI, AzureOpenAI\n"
