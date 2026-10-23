@@ -843,3 +843,29 @@ def test_live_manifest_with_local_producers_carries_null_ownership_digest(tmp_pa
     manifest_path.write_bytes(module.canonical_bytes(manifest))
     inventory, _, _, _ = module.normalize(tmp_path, manifest_path, ATTEMPT)
     assert any(resource["kind"] == "render.project" for resource in inventory["resources"])
+
+
+def test_live_manifest_rejects_copied_digest_on_local_producer(tmp_path: Path) -> None:
+    # discover.md Step 2: local producer entries carry null in a live manifest.
+    # A copied active digest is rejected by the manifest JSON schema (allOf if/then from 1ccaf359)
+    # before the per-entry capture_evidence_mismatch check runs, so the code asserted here is manifest_invalid.
+    captures = [write_capture(tmp_path, "projects.json", "rest", "projects_list", live("rest", "projects_list", [{"id": "prj-safe", "name": "project", "ownerId": "tea-safe"}]))]
+    billing_parser = load_script("parse-render-billing.py", "billing_for_copied_digest")
+    captures.append(write_capture(tmp_path, "billing.json", "billing", "billing", billing_parser.parse((SCRIPT_DIR.parent / "fixtures/render-billing/user-stated.json").read_bytes(), ".json")))
+    scanner = load_script("scan-render-application.py", "scanner_for_copied_digest")
+    captures.append(write_capture(tmp_path, "application.json", "application", "application", scanner.scan(SCRIPT_DIR.parent / "fixtures/render-application")))
+    manifest_path = tmp_path / "manifest.json"
+
+    def normalize_with_local_digest(local_digest: str | None) -> Any:
+        for capture in captures[1:]:
+            capture["ownership_index_digest"] = local_digest
+        manifest = {"schema_version": "1.0", "status": "active", "identity_scope": "live", "attempt_id": ATTEMPT, "workspace_id": "tea-safe", "local_identity": None, "consent_digest": DIGEST, "ownership_index_digest": INDEX_DIGEST, "captures": captures}
+        manifest_path.write_bytes(module.canonical_bytes(manifest))
+        return module.normalize(tmp_path, manifest_path, ATTEMPT)
+
+    with pytest.raises(module.NormalizeError) as rejected:
+        normalize_with_local_digest(INDEX_DIGEST)
+    assert rejected.value.code == "manifest_invalid"
+
+    inventory, _, _, _ = normalize_with_local_digest(None)
+    assert any(resource["kind"] == "render.project" for resource in inventory["resources"])
