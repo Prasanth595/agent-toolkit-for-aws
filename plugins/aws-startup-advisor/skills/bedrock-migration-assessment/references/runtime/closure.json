@@ -21,7 +21,7 @@
         "references/shared/schema-phase-status.md",
         "scripts/bma-runtime.py"
       ],
-      "sha256": "19a67ce6191c53d941a04f68079c87f7bcc40c65e8338d1acaa5199c00ae9726",
+      "sha256": "ceba860c81d0aa23a4069330e6d58ddba0eb018f9c7f47f2f9b18d1586a751ac",
       "source_path": "skills/gcp-to-aws/SKILL.md",
       "type": "instruction"
     },
@@ -727,7 +727,7 @@
         "references/phases/discover/discover-openrouter-api.md",
         "references/phases/discover/discover-preview.md"
       ],
-      "sha256": "95bcc74910e44c2605f0eca6c3d833cc7d8e0822d062463966a18ca7f07dfef5",
+      "sha256": "998c3aebf573bfe8dbff4e7022126196639949439a46bd0d01ac55180e53cb0b",
       "type": "instruction"
     },
     {
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "9e957ef15957f37385d99830d6f6add989aeb4ee64e2cd4e75550e1c071063bd"
+  "self_hash": "6f626da1cb412815a1406eb9cafb98052c3fc64dd0e3f1deba400aac8def2fb0"
 }
