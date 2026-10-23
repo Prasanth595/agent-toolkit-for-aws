@@ -25,7 +25,7 @@ run = "python3 tools/sync-plugin-skills.py --check"
 
 [tasks."lint:spec"]
 description = "Validate Agent Plugins v1.0.0 conformance (plugins/)"
-run = "uv run --with 'jsonschema==4.23.0' --with 'PyYAML==6.0.2' python tools/validate_spec.py"
+run = "uv run --with jsonschema --with pyyaml python tools/validate_spec.py"
 
 [tasks."test:tools"]
 description = "Run tests for the repo validation tools"
