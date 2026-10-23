@@ -21,7 +21,7 @@
         "references/shared/schema-phase-status.md",
         "scripts/bma-runtime.py"
       ],
-      "sha256": "ceba860c81d0aa23a4069330e6d58ddba0eb018f9c7f47f2f9b18d1586a751ac",
+      "sha256": "7a56f831d2afa3261ca4b979485be1498eb4948f9516ddacded2b54ef375c1f7",
       "source_path": "skills/gcp-to-aws/SKILL.md",
       "type": "instruction"
     },
@@ -55,7 +55,7 @@
         "references/runtime/bma-input-patterns.json",
         "scripts/bma-route-classifier.py"
       ],
-      "sha256": "f0fb89e7ba45858163e074c715162958f5c6518f5c2eefb7b8a9d600efc4d7dc",
+      "sha256": "c32b06ba4bbdecadc05095ed781b31c7cc9d7bac7726f8b7e8adf7abe0e83057",
       "type": "script"
     },
     {
@@ -650,7 +650,7 @@
         "references/runtime/content-contribution.schema.json",
         "scripts/emit-plan-json.py"
       ],
-      "sha256": "db4627ad49995faf51da22c89fb39c5fc6988677d818467c969539a2f5a528cd",
+      "sha256": "abe0d6b62bde9a395426bbd89b9b9df936823a070da9b66883f10157e041121f",
       "type": "instruction"
     },
     {
@@ -663,7 +663,7 @@
         "references/report-sections/ai-guide.md",
         "references/report-sections/ai-readme.md"
       ],
-      "sha256": "82b1c61308359a0f8d03d59ee35d0493c181095068742b39f228413da2b76334",
+      "sha256": "0b198bfdbb65ab14443d449e77c874e4913ec3ccc31d438d4b6ede66bf6a8b85",
       "type": "instruction"
     },
     {
@@ -676,7 +676,7 @@
         "references/report-sections/ai-migration-report.md",
         "scripts/validate-migration-report.py"
       ],
-      "sha256": "3dc1b3cc4a3070dcb4e69afbc264a3cc3261ff7d9e7f6b716f79e099867f7284",
+      "sha256": "093eb76693097803bdc721a5a0a716ac390fa0c6d71a034c61960231b9aeebf4",
       "type": "instruction"
     },
     {
@@ -759,7 +759,7 @@
         "references/shared/validate-artifacts.md",
         "references/shared/validate-migration-report.md"
       ],
-      "sha256": "92a89fdd6731c550c9b39596f33c5e0ddfcff7a334c1f49f812f7f165279f1b7",
+      "sha256": "4e1de39d1ebf61decdfd5497c6d47dbe45cf4e22ed1d394d0fdfc446306843fb",
       "type": "instruction"
     },
     {
@@ -829,7 +829,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "2d5b4bc0d9c906df5ace6b3e6ef7469d9a3de7902a5ec327181848f913eb8364",
+      "sha256": "97e9dd312ec55695fd4c30a560a45e0672c843484702c85afe38be6513ee980a",
       "type": "data"
     },
     {
@@ -879,5 +879,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "59ddabadf97884c33ce42b27ebe72dc665f37860c7555427cbc88d1e39d57238"
+  "self_hash": "2242651f78543b2d46eb17f1e875c4f616d3eeeb8029e969ff4bc0cb7d1ac96e"
 }

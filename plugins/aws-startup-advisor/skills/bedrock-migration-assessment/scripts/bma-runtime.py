@@ -17,6 +17,7 @@ import stat
 import sys
 import tempfile
 import types
+from html import escape as html_escape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -404,7 +405,26 @@ CONTRIBUTION_KINDS = {
     "README.md": {"callout", "catalog_row", "subsection", "table_row"},
     "migration-report.html": {"callout", "subsection", "table_row"},
 }
-CONTRIBUTION_FIELDS = {"id", "bucket", "source_order", "target", "kind", "content"}
+CONTRIBUTION_FIELDS = {"id", "bucket", "source_order", "target", "kind", "content", "section"}
+SECTION_ID = re.compile(r"^[a-z][a-z0-9-]*$")
+ASSEMBLY_FIELDS = {"phase", "target", "contributions", "document", "report_mode"}
+HTML_TARGETS = {"decision-report.html": {"decision"}, "migration-report.html": {"full", "ai_only"}}
+# Section IDs the validator requires per report mode. Keep in sync with validate-migration-report.py.
+DOCUMENT_SECTIONS = {
+    "full": [
+        "decision-summary", "exec-assumptions", "exec-services", "exec-costs", "exec-timeline",
+        "exec-risks", "appendix-services", "appendix-costs", "appendix-steps", "appendix-artifacts",
+    ],
+    "ai_only": [
+        "decision-summary", "exec-assumptions", "exec-risks", "appendix-ai", "appendix-artifacts",
+        "appendix-config", "appendix-glossary",
+    ],
+    "decision": [
+        "decision-summary", "exec-assumptions", "exec-services", "exec-costs", "exec-timeline",
+        "exec-risks", "decision-cta",
+    ],
+}
+DOCUMENT_ANCHOR = re.compile(r"<!-- bma-contributions:([a-z][a-z0-9-]*) -->")
 CONTENT_FIELDS = {"text", "links", "traceability"}
 TRACEABILITY_FIELDS = {"provider", "source_service", "model", "call_sites"}
 MARKDOWN_LINK = re.compile(r"!?\[[^\]\n]*\]\s*\(")
@@ -492,6 +512,8 @@ def order_contributions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 or not isinstance(value["bucket"], int) or isinstance(value["bucket"], bool)
                 or not isinstance(value["source_order"], int) or isinstance(value["source_order"], bool)):
             raise ValueError("contribution_schema_invalid")
+        if not isinstance(value["section"], str) or not SECTION_ID.fullmatch(value["section"]):
+            raise ValueError("contribution_section_invalid")
         _validate_content(value["content"])
     return sorted(values, key=lambda value: (value["bucket"], value["source_order"], value["id"].encode("utf-8")))
 
@@ -645,24 +667,70 @@ class WriteAudit:
             shutil.rmtree(stage, ignore_errors=True)
 
 
-def _render_contribution(value: dict[str, Any]) -> str:
+def _check_document(target: str, document: Any, report_mode: str | None) -> None:
+    """Preflight the controller-supplied complete document before any contribution is placed."""
+    if not isinstance(document, str) or not document.strip():
+        raise ValueError("document_required")
+    if target in HTML_TARGETS:
+        if report_mode not in HTML_TARGETS[target]:
+            raise ValueError("report_mode_invalid")
+        structural = (
+            re.match(r"\s*<!doctype html>", document, re.IGNORECASE),
+            re.search(r'<html[^>]*\blang="[A-Za-z-]+"', document),
+            len(re.findall(r"<h1[\s>]", document)) == 1,
+            "<style" in document,
+            re.search(r'<nav class="toc"', document),
+        )
+        if not all(structural):
+            raise ValueError("document_structure_invalid")
+        for section_id in DOCUMENT_SECTIONS[report_mode]:
+            if not re.search(r'<section id="%s"' % re.escape(section_id), document):
+                raise ValueError("document_structure_invalid")
+    elif report_mode is not None:
+        raise ValueError("report_mode_invalid")
+    anchors = DOCUMENT_ANCHOR.findall(document)
+    if len(anchors) != len(set(anchors)):
+        raise ValueError("document_structure_invalid")
+
+
+def _render_contribution(value: dict[str, Any], html: bool) -> str:
     text = value["content"]["text"]
     links = value["content"]["links"]
+    if not html:
+        if links:
+            text += "\n" + " ".join(f'[{link["label"]}]({link["href"]})' for link in links)
+        return text
+    # HTML targets get escaped paragraphs only; the runtime never emits table or list markup.
+    body = html_escape(text, quote=False)
     if links:
-        text += "\n" + " ".join(f'[{link["label"]}]({link["href"]})' for link in links)
-    return text
+        body += " " + " ".join(
+            f'<a href="{html_escape(link["href"])}">{html_escape(link["label"], quote=False)}</a>'
+            for link in links
+        )
+    css = ' class="callout"' if value["kind"] == "callout" else ""
+    return f"<p{css}>{body}</p>"
 
 
-def _assembly_payload(target: str, contributions: list[dict[str, Any]]) -> str:
+def _assembly_payload(target: str, contributions: list[dict[str, Any]], document: Any,
+                      report_mode: str | None = None) -> str:
     ordered = order_contributions(contributions)
     if target not in CONTRIBUTION_KINDS or any(value["target"] != target for value in ordered):
         raise ValueError("contribution_target_invalid")
-    return "\n".join(_render_contribution(value) for value in ordered) + "\n"
+    _check_document(target, document, report_mode)
+    anchors = set(DOCUMENT_ANCHOR.findall(document))
+    rows: dict[str, list[str]] = {}
+    for value in ordered:
+        if value["section"] not in anchors:
+            raise ValueError("contribution_anchor_missing")
+        rows.setdefault(value["section"], []).append(_render_contribution(value, target in HTML_TARGETS))
+    # One final writer: each anchor is replaced by its section's rows, or removed when it has none.
+    return DOCUMENT_ANCHOR.sub(lambda match: "\n".join(rows.get(match.group(1), [])), document)
 
 
 def assemble_contributions(audit: WriteAudit, phase: str, target: str,
-                           contributions: list[dict[str, Any]]) -> None:
-    audit.write(phase, target, _assembly_payload(target, contributions))
+                           contributions: list[dict[str, Any]], document: Any,
+                           report_mode: str | None = None) -> None:
+    audit.write(phase, target, _assembly_payload(target, contributions, document, report_mode))
 
 
 def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
@@ -714,10 +782,14 @@ def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
             audit.prepare(value["phase"], value["path"], value["payload"],
                           value["logical_owner"], value.get("expected_sha256"))
         for value in assemblies:
-            if not isinstance(value, dict) or set(value) != {"phase", "target", "contributions"}:
+            if isinstance(value, dict) and "document" not in value:
+                raise ValueError("document_required")
+            if (not isinstance(value, dict) or set(value) - ASSEMBLY_FIELDS
+                    or not {"phase", "target", "contributions"} <= set(value)):
                 raise ValueError("assembly_request_invalid")
             audit.prepare(value["phase"], value["target"],
-                          _assembly_payload(value["target"], value["contributions"]))
+                          _assembly_payload(value["target"], value["contributions"],
+                                            value["document"], value.get("report_mode")))
         audit.publish()
         result["operations"] = audit.operations
     return result

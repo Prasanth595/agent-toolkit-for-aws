@@ -48,6 +48,39 @@ def execute(request: dict[str, object], tmp_path: Path, scenario: str) -> dict[s
     return json.loads(completed.stdout)
 
 
+HTML_DOCUMENT_SECTIONS = {
+    "migration-report.html": ("full", [
+        "decision-summary", "exec-assumptions", "exec-services", "exec-costs", "exec-timeline",
+        "exec-risks", "appendix-services", "appendix-costs", "appendix-steps", "appendix-artifacts",
+    ]),
+    "decision-report.html": ("decision", [
+        "decision-summary", "exec-assumptions", "exec-services", "exec-costs", "exec-timeline",
+        "exec-risks", "decision-cta",
+    ]),
+}
+
+
+def assembly_for(target: str, contributions: list[dict[str, object]]) -> dict[str, object]:
+    """Complete controller-supplied document with one anchor for the contribution section."""
+    if target not in HTML_DOCUMENT_SECTIONS:
+        return {"phase": "generate", "target": target, "contributions": contributions,
+                "document": "<!-- bma-contributions:ai-notes -->\n"}
+    report_mode, section_ids = HTML_DOCUMENT_SECTIONS[target]
+    sections = "".join(
+        f'<section id="{section_id}">\n<!-- bma-contributions:ai-notes -->\n</section>\n'
+        if index == 0 else f'<section id="{section_id}">\n</section>\n'
+        for index, section_id in enumerate(section_ids)
+    )
+    document = (
+        '<!doctype html>\n<html lang="en">\n<head><meta charset="utf-8"><title>Run</title>'
+        "<style>body{font-family:sans-serif}</style></head>\n<body>\n<h1>Run</h1>\n"
+        '<nav class="toc"><a href="#decision-summary">Summary</a></nav>\n'
+        f"{sections}</body>\n</html>\n"
+    )
+    return {"phase": "generate", "target": target, "contributions": contributions,
+            "document": document, "report_mode": report_mode}
+
+
 def contribution(target: str, request: dict[str, object], scenario: str) -> dict[str, object]:
     evidence = request["source_evidence"]
     assert isinstance(evidence, list) and evidence
@@ -58,7 +91,7 @@ def contribution(target: str, request: dict[str, object], scenario: str) -> dict
     assert isinstance(models, list) and models and isinstance(sites, list) and sites
     return {
         "id": f"ai.{scenario}", "bucket": 100, "source_order": 0,
-        "target": target, "kind": "subsection",
+        "target": target, "kind": "subsection", "section": "ai-notes",
         "content": {
             "text": f"Validated {scenario} report contribution.", "links": [],
             "traceability": {
@@ -280,10 +313,10 @@ def test_capture_selected_base_to_extracted_evidence(tmp_path: Path) -> None:
             })
         report_writers = actual_trace["report_writers"]
         assert isinstance(report_writers, dict)
-        assemblies = [{
-            "phase": "generate", "target": target,
-            "contributions": [contribution(target, request, scenario)],
-        } for target in sorted(report_writers)]
+        assemblies = [
+            assembly_for(target, [contribution(target, request, scenario)])
+            for target in sorted(report_writers)
+        ]
         result = execute({
             "schema_version": 1, "mode": mode, "scenario": scenario,
             "run_dir": str(run), "state": request["state"],

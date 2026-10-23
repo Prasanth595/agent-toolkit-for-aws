@@ -9,12 +9,17 @@
     "source_order",
     "target",
     "kind",
-    "content"
+    "content",
+    "section"
   ],
   "properties": {
     "id": {
       "type": "string",
       "pattern": "^ai\\."
+    },
+    "section": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
     },
     "bucket": {
       "type": "integer"

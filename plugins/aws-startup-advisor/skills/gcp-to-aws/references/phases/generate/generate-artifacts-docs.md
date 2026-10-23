@@ -6,7 +6,7 @@
 
 ## Contribution boundary
 
-For an active AI track, consume exactly one validated set of BMA `ai.*` guide and README contributions. Invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with those contributions as the assembly list; write the combined `MIGRATION_GUIDE.md` and `README.md` only through that production command and retain its operation rows. Reject duplicate IDs/order keys, inactive targets, invalid markup, traceability mismatches, existing final targets, or last-write-wins attempts before writing. This GCP assembler remains the sole combined `MIGRATION_GUIDE.md` and `README.md` writer; it never merges competing final files.
+For an active AI track, consume exactly one validated set of BMA `ai.*` guide and README contributions. Invoke `$BMA_BASE/scripts/bma-runtime.py execute --request -` in delegated mode with those contributions as the assembly list; write the combined `MIGRATION_GUIDE.md` and `README.md` only through that production command and retain its operation rows. Reject duplicate IDs/order keys, inactive targets, invalid markup, traceability mismatches, existing final targets, or last-write-wins attempts before writing. This GCP assembler remains the sole combined `MIGRATION_GUIDE.md` and `README.md` writer; it never merges competing final files. The outer renderer supplies each final target's complete `document` with section anchors, and the BMA runtime performs the only final write.
 
 ## Overview
 

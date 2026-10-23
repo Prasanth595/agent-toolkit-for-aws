@@ -16,10 +16,13 @@ exec(compile(PATH.read_text(encoding="utf-8"), str(PATH), "exec"), runtime.__dic
 SCHEMA = ROOT / "skills/bedrock-migration-assessment/references/runtime/content-contribution.schema.json"
 
 
+README_DOCUMENT = "<!-- bma-contributions:ai-notes -->\n"
+
+
 def contribution(target: str = "README.md", kind: str = "subsection") -> dict:
     return {
         "id": "ai.valid", "bucket": 100, "source_order": 1,
-        "target": target, "kind": kind,
+        "target": target, "kind": kind, "section": "ai-notes",
         "content": {
             "text": "Valid traced contribution.",
             "links": [],
@@ -93,6 +96,8 @@ def test_content_contribution_schema_declares_closed_runtime_contract() -> None:
     content = schema["properties"]["content"]
     assert content["additionalProperties"] is False
     assert content["required"] == ["text", "links", "traceability"]
+    assert "section" in schema["required"]
+    assert schema["properties"]["section"]["pattern"] == "^[a-z][a-z0-9-]*$"
     traceability = content["properties"]["traceability"]
     assert traceability["additionalProperties"] is False
     assert traceability["required"] == ["provider", "source_service", "model", "call_sites"]
@@ -158,7 +163,7 @@ def test_contribution_rejection_precedes_staging_and_mutation(
     request = {
         "schema_version": 1, "mode": mode, "scenario": case, "run_dir": str(run),
         "state": {}, "consent": [], "writes": [],
-        "assemblies": [{"phase": "generate", "target": "README.md", "contributions": [value]}],
+        "assemblies": [{"phase": "generate", "target": "README.md", "contributions": [value], "document": README_DOCUMENT}],
     }
     with pytest.raises(ValueError, match="contribution_(?:content|link|traceability)_invalid"):
         runtime.execute_contract(request)
@@ -181,7 +186,7 @@ def test_allowed_content_links_and_traceability_assemble_in_both_modes(
     request = {
         "schema_version": 1, "mode": mode, "scenario": "positive", "run_dir": str(run),
         "state": {}, "consent": [], "writes": [],
-        "assemblies": [{"phase": "generate", "target": "README.md", "contributions": [value]}],
+        "assemblies": [{"phase": "generate", "target": "README.md", "contributions": [value], "document": README_DOCUMENT}],
     }
     result = runtime.execute_contract(request)
     rendered = (run / "README.md").read_text()
@@ -398,15 +403,15 @@ def test_physical_write_audit_and_assembler_reject_duplicates(tmp_path: Path) ->
     second.update({"id": "ai.1", "bucket": 10, "source_order": 1})
     second["content"]["text"] = "first"
     values = [first, second]
-    runtime.assemble_contributions(audit, "generate", "README.md", values)
+    runtime.assemble_contributions(audit, "generate", "README.md", values, README_DOCUMENT)
     assert (direct / "README.md").read_text() == "first\nsecond\n"
     assert audit.operations == [{"scenario": "direct-openai", "phase": "generate", "logical_owner": "bedrock-migration-assessment", "path": "README.md", "operation": "write", "sha256": audit.operations[0]["sha256"]}]
     with pytest.raises(ValueError, match="duplicate_final_write"):
-        runtime.assemble_contributions(audit, "generate", "README.md", values)
+        runtime.assemble_contributions(audit, "generate", "README.md", values, README_DOCUMENT)
 
     delegated = tmp_path / "delegated"; delegated.mkdir()
     outer = runtime.WriteAudit(delegated, "delegated", "gcp-combined")
-    runtime.assemble_contributions(outer, "generate", "README.md", values)
+    runtime.assemble_contributions(outer, "generate", "README.md", values, README_DOCUMENT)
     assert outer.operations[0]["logical_owner"] == "gcp-to-aws"
     with pytest.raises(ValueError, match="writer_owner_invalid"):
         outer.write("generate", "estimation-ai.json", {}, "gcp-to-aws")
