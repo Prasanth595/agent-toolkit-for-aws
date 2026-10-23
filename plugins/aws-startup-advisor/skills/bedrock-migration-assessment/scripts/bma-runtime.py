@@ -779,6 +779,29 @@ def assemble_contributions(audit: WriteAudit, phase: str, target: str,
     audit.write(phase, target, _assembly_payload(target, contributions, document, report_mode))
 
 
+def _generate_owned(value: Any) -> bool:
+    """True for a write or assembly that belongs to the Generate phase (phase or target path)."""
+    if not isinstance(value, dict):
+        return False
+    if value.get("phase") == "generate":
+        return True
+    path = value.get("path", value.get("target"))
+    return isinstance(path, str) and _replaceable_phase(path) == "generate"
+
+
+def _replaces_existing(run_dir: Any, value: Any) -> bool:
+    """True when a write or assembly targets a path that already exists under the run directory."""
+    if not isinstance(value, dict) or not isinstance(run_dir, str) or not run_dir:
+        return False
+    relative = value.get("path", value.get("target"))
+    if not isinstance(relative, str):
+        return False
+    try:
+        return (Path(run_dir) / _relative_path(relative)).exists()
+    except ValueError:
+        return False
+
+
 def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
     """Prevalidate a complete phase request, then publish it rollback-safely."""
     allowed = {"schema_version", "mode", "scenario", "run_dir", "state", "delegated_route",
@@ -811,6 +834,14 @@ def execute_contract(request: dict[str, Any]) -> dict[str, Any]:
     assemblies = request.get("assemblies", [])
     if not isinstance(writes, list) or not isinstance(assemblies, list):
         raise ValueError("execution_request_invalid")
+    if result["state_decision"]["action"] == "offer_generate" and any(
+        _generate_owned(value) for value in writes + assemblies
+    ):
+        raise ValueError("generate_not_requested")
+    if result["state_decision"]["action"] == "confirm_reentry" and any(
+        _replaces_existing(request.get("run_dir", ""), value) for value in writes + assemblies
+    ):
+        raise ValueError("reentry_confirmation_required")
     delegated_route = _checked_route(mode, request.get("delegated_route"))
     if mode == "delegated" and delegated_route is None and any(
         isinstance(value, dict) and value.get("path") in PREFERENCE_OUTPUTS for value in writes

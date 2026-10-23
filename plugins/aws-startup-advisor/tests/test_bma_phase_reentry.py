@@ -63,8 +63,15 @@ def test_design_rerun_after_estimate_needs_stale_downstream(design_run: tuple[Pa
     with pytest.raises(ValueError, match="replacement_not_authorized"):
         runtime.execute_contract(request(run, state, [design_write({"design": "rerun"}, prior)]))
     assert '"design": "first"' in (run / "aws-design-ai.json").read_text()
-    runtime.execute_contract(request(run, {**state, "stale_downstream": True}, [design_write({"design": "rerun"}, prior)]))
-    assert '"design": "rerun"' in (run / "aws-design-ai.json").read_text()
+
+
+def test_stale_downstream_reentry_needs_confirmation_before_replacing_design(design_run: tuple[Path, str]) -> None:
+    run, prior = design_run
+    before = tree_bytes(run)
+    state = {"phases": PHASES_THROUGH_ESTIMATE, "stale_downstream": True}
+    with pytest.raises(ValueError, match="reentry_confirmation_required"):
+        runtime.execute_contract(request(run, state, [design_write({"design": "rerun"}, prior)]))
+    assert tree_bytes(run) == before
 
 
 def test_reconstructed_state_never_authorizes_replacement(design_run: tuple[Path, str]) -> None:
@@ -131,6 +138,30 @@ def test_partial_generate_recovery_without_hashes_is_rejected(tmp_path: Path) ->
     state = {"phases": GENERATE_IN_PROGRESS, "dirty_state": {"phase": "generate", "stage": "stage_1_planning"}}
     with pytest.raises(ValueError, match="duplicate_final_write"):
         runtime.execute_contract(request(run, state, generate_writes("rerun")))
+
+
+DECIDE_COMPLETE = {"current_phase": "complete", "run_mode": "decide", "phases": PHASES_THROUGH_ESTIMATE}
+
+
+def test_generate_writes_refused_without_generate_opt_in(tmp_path: Path) -> None:
+    run = tmp_path / "decide-complete"
+    run.mkdir()
+    before = tree_bytes(run)
+    writes = [{"phase": "generate", "path": "ai-migration/adapter.py", "payload": "# placeholder\n",
+               "logical_owner": "bedrock-migration-assessment"}]
+    with pytest.raises(ValueError, match="generate_not_requested"):
+        runtime.execute_contract(request(run, DECIDE_COMPLETE, writes))
+    assert tree_bytes(run) == before
+
+
+def test_estimate_decision_pack_still_writes_without_generate_opt_in(tmp_path: Path) -> None:
+    run = tmp_path / "decision-pack"
+    run.mkdir()
+    writes = [{"phase": "estimate", "path": "DECISION.md", "payload": "# Decision\n",
+               "logical_owner": "bedrock-migration-assessment"}]
+    result = runtime.execute_contract(request(run, DECIDE_COMPLETE, writes))
+    assert result["state_decision"]["action"] == "offer_generate"
+    assert (run / "DECISION.md").read_text() == "# Decision\n"
 
 
 def test_replacement_publish_failure_restores_prior_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
