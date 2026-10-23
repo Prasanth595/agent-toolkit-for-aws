@@ -646,6 +646,160 @@ def test_generated_terraform_passes_local_policy_and_fmt_when_available() -> Non
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+INIT_DNS_FAILURE = '''Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider hashicorp/aws:
+could not connect to registry.terraform.io: failed to request discovery
+document: Get "https://registry.terraform.io/.well-known/terraform.json":
+dial tcp: lookup registry.terraform.io: no such host
+'''
+INIT_CONNECTION_REFUSED = '''Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider hashicorp/aws:
+Get "https://registry.terraform.io/v1/providers/hashicorp/aws/versions":
+dial tcp 203.0.113.10:443: connect: connection refused
+'''
+INIT_TLS_TIMEOUT = '''Error: Failed to install provider
+
+Error while installing hashicorp/aws v5.80.0: Get
+"https://releases.hashicorp.com/terraform-provider-aws/5.80.0/terraform-provider-aws_5.80.0_darwin_arm64.zip":
+net/http: TLS handshake timeout
+'''
+INIT_CHECKSUM_MISMATCH = '''Error: Failed to install provider
+
+Error while installing hashicorp/aws v5.80.0: checksum mismatch for
+registry.terraform.io/hashicorp/aws: the downloaded archive does not match
+the checksum recorded in the dependency lock file
+'''
+INIT_UNAUTHORIZED = '''Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider
+registry.terraform.io/hashicorp/aws: 401 Unauthorized
+'''
+INIT_FORBIDDEN = '''Error: Failed to install provider
+
+Error while installing hashicorp/aws v5.80.0 from registry.terraform.io:
+403 Forbidden
+'''
+INIT_INVALID_CONFIGURATION = '''Error: Invalid provider configuration
+
+Provider "registry.terraform.io/hashicorp/aws" requires explicit
+configuration. Add a provider block to the root module.
+'''
+INIT_LOCK_FILE_MISMATCH = '''Error: Failed to install provider
+
+Error while installing hashicorp/aws v5.80.0: the current package for
+registry.terraform.io/hashicorp/aws 5.80.0 doesn't match any of the
+checksums recorded in the dependency lock file
+'''
+INIT_MIXED_DNS_AND_CHECKSUM = INIT_DNS_FAILURE + "\n" + INIT_CHECKSUM_MISMATCH
+INIT_NO_RELEASES_MATCH = '''Error: Failed to query available provider packages
+
+Could not retrieve the list of available versions for provider hashicorp/aws:
+no available releases match the given constraints ~> 5.80
+'''
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        pytest.param(INIT_DNS_FAILURE, "provider_registry_unavailable", id="dns-no-such-host"),
+        pytest.param(INIT_CONNECTION_REFUSED, "provider_registry_unavailable", id="connection-refused"),
+        pytest.param(INIT_TLS_TIMEOUT, "provider_registry_unavailable", id="tls-handshake-timeout"),
+        pytest.param(INIT_CHECKSUM_MISMATCH, None, id="checksum-mismatch-naming-registry"),
+        pytest.param(INIT_UNAUTHORIZED, None, id="401-unauthorized"),
+        pytest.param(INIT_FORBIDDEN, None, id="403-forbidden"),
+        pytest.param(INIT_INVALID_CONFIGURATION, None, id="invalid-provider-configuration"),
+        pytest.param(INIT_LOCK_FILE_MISMATCH, None, id="lock-file-mismatch"),
+        pytest.param(INIT_NO_RELEASES_MATCH, None, id="no-available-releases"),
+        pytest.param(INIT_MIXED_DNS_AND_CHECKSUM, None, id="dns-plus-checksum-rejected-wins"),
+        pytest.param("registry.terraform.io timeout connection", None, id="bare-substrings-are-not-enough"),
+        pytest.param("", None, id="empty-output"),
+    ],
+)
+def test_terraform_init_failure_classification_is_signature_specific(output: str, expected: str | None) -> None:
+    harness = _load_script_module(
+        Path(__file__).with_name("render_pipeline_harness.py"),
+        "render_pipeline_harness_init_classifier",
+    )
+    assert harness.classify_terraform_init_failure(output) == expected
+
+
+def _simulated_terraform_run(init_output: str, recorded: list[list[str]]):
+    def fake_run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+        recorded.append([str(part) for part in command])
+        name = Path(command[0]).name
+        if name == "terraform" and command[1] == "init":
+            return subprocess.CompletedProcess(command, 1, "", init_output)
+        if name == "terraform":
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[1:2] and command[1].endswith("validate-terraform-policy.py"):
+            return subprocess.CompletedProcess(command, 0, "POLICY_OK\n", "")
+        if command[1:2] and command[1].endswith("validate-render-migration-report.py"):
+            return subprocess.CompletedProcess(command, 0, "REPORT_OK\n", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    return fake_run
+
+
+def _simulated_pack(tmp_path: Path) -> tuple[Path, Path, dict]:
+    root = tmp_path / "run"
+    generated = root / "generated"
+    shutil.copytree(
+        EXPECTED / "generated",
+        generated,
+        ignore=shutil.ignore_patterns(".terraform", ".terraform.lock.hcl"),
+    )
+    return root, generated, load(EXPECTED / "generated/generation-warnings.json")
+
+
+def test_validate_generated_pack_degrades_only_on_registry_connectivity_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    harness = _load_script_module(
+        Path(__file__).with_name("render_pipeline_harness.py"),
+        "render_pipeline_harness_offline_degrade",
+    )
+    root, generated, ledger = _simulated_pack(tmp_path)
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(harness.shutil, "which", lambda name: f"/simulated/bin/{name}")
+    monkeypatch.setattr(harness, "_run", _simulated_terraform_run(INIT_DNS_FAILURE, recorded))
+
+    validation = harness._validate_generated_pack(root, generated, ledger)
+
+    assert validation["status"] == "passed_degraded_offline"
+    assert validation["offline_fallback_used"] is True
+    assert validation["checks"]["terraform_init"]["status"] == "provider_registry_unavailable"
+    assert validation["checks"]["terraform_validate"]["status"] == "provider_registry_unavailable"
+    terraform_subcommands = [command[1] for command in recorded if Path(command[0]).name == "terraform"]
+    assert terraform_subcommands == ["fmt", "init"]
+
+
+@pytest.mark.parametrize(
+    ("init_output", "match"),
+    [
+        pytest.param(INIT_CHECKSUM_MISMATCH, "checksum mismatch", id="checksum"),
+        pytest.param(INIT_UNAUTHORIZED, "401 Unauthorized", id="auth"),
+        pytest.param(INIT_INVALID_CONFIGURATION, "Invalid provider configuration", id="config"),
+        pytest.param(INIT_MIXED_DNS_AND_CHECKSUM, "checksum mismatch", id="mixed"),
+    ],
+)
+def test_validate_generated_pack_keeps_rejected_init_errors_as_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, init_output: str, match: str
+) -> None:
+    harness = _load_script_module(
+        Path(__file__).with_name("render_pipeline_harness.py"),
+        "render_pipeline_harness_rejected_init",
+    )
+    root, generated, ledger = _simulated_pack(tmp_path)
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(harness.shutil, "which", lambda name: f"/simulated/bin/{name}")
+    monkeypatch.setattr(harness, "_run", _simulated_terraform_run(init_output, recorded))
+
+    with pytest.raises(AssertionError, match=match):
+        harness._validate_generated_pack(root, generated, ledger)
+    terraform_subcommands = [command[1] for command in recorded if Path(command[0]).name == "terraform"]
+    assert terraform_subcommands == ["fmt", "init"]
+
+
 def test_validation_report_has_independent_fail_closed_statuses() -> None:
     schema = load(SKILL_ROOT / "references/shared/schema-validation-report.json")
     report = load(EXPECTED / "generated/validation-report.json")

@@ -1223,6 +1223,53 @@ def assert_generated_infrastructure_graph(terraform: Path) -> None:
     assert len(image_references) == 4
 
 
+REGISTRY_TRANSPORT_SIGNATURES = (
+    "lookup registry.terraform.io",
+    "no such host",
+    "i/o timeout",
+    "connection refused",
+    "network is unreachable",
+)
+REGISTRY_CONNECTIVITY_SIGNATURES = (
+    "could not connect to registry.terraform.io",
+    "tls handshake timeout",
+)
+REJECTED_INIT_SIGNATURES = (
+    "checksum",
+    "does not match",
+    "doesn't match",
+    "401",
+    "403",
+    "unauthorized",
+    "forbidden",
+    "invalid provider",
+    "unsupported",
+    "invalid configuration",
+    "lock file",
+    "no available releases match",
+)
+
+
+def classify_terraform_init_failure(output: str) -> str | None:
+    """Return provider_registry_unavailable only for registry DNS/connectivity failures.
+
+    Checksum, authentication, configuration, and lock-file diagnostics return None
+    so the caller keeps them as hard failures, even when they also name the
+    registry host or appear alongside a transport error.
+    """
+    text = output.lower()
+    if any(signature in text for signature in REJECTED_INIT_SIGNATURES):
+        return None
+    transport = any(signature in text for signature in REGISTRY_TRANSPORT_SIGNATURES)
+    if "dial tcp" in text and transport:
+        return "provider_registry_unavailable"
+    if any(signature in text for signature in REGISTRY_CONNECTIVITY_SIGNATURES):
+        return "provider_registry_unavailable"
+    if "failed to query available provider packages" in text and transport:
+        return "provider_registry_unavailable"
+    return None
+
+
 def _validate_generated_pack(root: Path, generated: Path, ledger: dict[str, Any]) -> dict[str, Any]:
     terraform = generated / "terraform"
     assert_generated_infrastructure_graph(terraform)
@@ -1238,9 +1285,9 @@ def _validate_generated_pack(root: Path, generated: Path, ledger: dict[str, Any]
         raise AssertionError(fmt.stdout + fmt.stderr)
 
     init = _run([terraform_binary, "init", "-backend=false", "-input=false"], terraform)
-    registry_failure = init.returncode != 0 and any(
-        marker in (init.stdout + init.stderr).lower()
-        for marker in ("registry.terraform.io", "failed to query available provider", "could not retrieve", "timeout", "connection")
+    registry_failure = (
+        init.returncode != 0
+        and classify_terraform_init_failure(init.stdout + init.stderr) == "provider_registry_unavailable"
     )
     if init.returncode != 0 and not registry_failure:
         raise AssertionError(init.stdout + init.stderr)
