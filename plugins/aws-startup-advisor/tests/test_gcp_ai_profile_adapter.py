@@ -1,0 +1,248 @@
+"""GCP boundary adapter: legacy GCP AI profile -> #415, with named fail-closed errors."""
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+GCP = ROOT / "skills/gcp-to-aws"
+ADAPTER_PATH = GCP / "scripts/gcp-ai-profile-adapter.py"
+VENDORED_SCHEMA = GCP / "references/contracts/ai-workload-profile.schema.json"
+CANONICAL_SCHEMA = ROOT / "scripts/contracts/ai-workload-profile.schema.json"
+
+_spec = importlib.util.spec_from_file_location("gcp_ai_profile_adapter", ADAPTER_PATH)
+adapter = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(adapter)
+
+# Legacy GCP-shaped sample: direct Anthropic and OpenAI models found in application code.
+LEGACY_SAMPLE = {
+    "current_costs": {"monthly_ai_spend": 100, "services_detected": ["Anthropic API"], "source": "anthropic_usage_api"},
+    "detection_signals": [{"confidence": 0.95, "evidence": "src/ai/anthropic_client.py line 3", "method": "code", "pattern": "anthropic import"}],
+    "infrastructure": [],
+    "integration": {"gateway_type": "direct", "pattern": "direct_sdk", "primary_sdk": "anthropic", "languages": ["python"]},
+    "metadata": {"profile_source": "application_code", "report_date": "2026-02-26"},
+    "models": [
+        {
+            "capabilities_used": ["text_generation"], "detected_via": ["code"],
+            "evidence": [{"file": "src/ai/anthropic_client.py", "line": 18, "pattern": "anthropic.Anthropic()", "source": "code"}],
+            "model_id": "claude-3-5-sonnet-20240620", "service": "anthropic_api", "usage_context": "Summarization",
+        },
+        {
+            "capabilities_used": ["text_generation"], "detected_via": ["code"],
+            "evidence": [{"file": "src/ai/openai_client.py", "line": 9, "pattern": "OpenAI()", "source": "code"}],
+            "model_id": "gpt-4o", "service": "openai_api", "usage_context": "Classification",
+        },
+    ],
+    "summary": {"ai_source": "both", "confidence_level": "very_high", "inferred_from_iac": False, "overall_confidence": 0.95},
+}
+
+EXPECTED_SAMPLE_415 = {
+    "schema_version": "1.0",
+    "ai_sources": [
+        {
+            "provider": "anthropic", "source_service": "anthropic_api", "model_families": ["claude"],
+            "model_evidence": "observed", "models": ["claude-3-5-sonnet-20240620"],
+            "model_observations": [{
+                "normalized_model": "claude-3-5-sonnet-20240620", "raw_model": "claude-3-5-sonnet-20240620",
+                "model_family": "claude",
+                "evidence": [{"provenance": "code", "confidence": "high", "detail": "src/ai/anthropic_client.py:18"}],
+            }],
+        },
+        {
+            "provider": "openai", "source_service": "openai_api", "model_families": ["gpt"],
+            "model_evidence": "observed", "models": ["gpt-4o"],
+            "model_observations": [{
+                "normalized_model": "gpt-4o", "raw_model": "gpt-4o", "model_family": "gpt",
+                "evidence": [{"provenance": "code", "confidence": "high", "detail": "src/ai/openai_client.py:9"}],
+            }],
+        },
+    ],
+    "gateways": [],
+}
+
+
+def _legacy(mutate=None) -> dict:
+    doc = copy.deepcopy(LEGACY_SAMPLE)
+    if mutate is not None:
+        mutate(doc)
+    return doc
+
+
+def _validate_jsonschema(document: dict) -> list[str]:
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads(VENDORED_SCHEMA.read_text(encoding="utf-8"))
+    validator = jsonschema.Draft7Validator(schema)
+    return [error.message for error in validator.iter_errors(document)]
+
+
+def test_vendored_schema_is_byte_identical_to_canonical():
+    assert VENDORED_SCHEMA.read_bytes() == CANONICAL_SCHEMA.read_bytes()
+
+
+def test_sample_converts_to_expected_415_document():
+    assert adapter.convert_legacy_profile(_legacy()) == EXPECTED_SAMPLE_415
+    assert _validate_jsonschema(EXPECTED_SAMPLE_415) == []
+
+
+def test_conversion_is_deterministic():
+    first = json.dumps(adapter.convert_legacy_profile(_legacy()), sort_keys=True)
+    second = json.dumps(adapter.convert_legacy_profile(_legacy()), sort_keys=True)
+    assert first == second
+
+
+def test_mixed_direct_and_azure_keeps_both_services():
+    def add_azure(doc):
+        doc["models"].append({
+            "detected_via": ["terraform"], "model_id": "gpt-4o", "service": "azure_openai",
+            "evidence": [{"file": "azure.tf", "resource": "azurerm_cognitive_deployment.gpt4o", "source": "terraform"}],
+        })
+        doc["detection_signals"].append({"confidence": 0.8, "method": "terraform", "pattern": "azure", "evidence": "azure.tf"})
+
+    document = adapter.convert_legacy_profile(_legacy(add_azure))
+    openai = [source for source in document["ai_sources"] if source["provider"] == "openai"]
+    assert [source["source_service"] for source in openai] == ["azure_openai", "openai_api"]
+    azure = openai[0]["model_observations"][0]
+    assert azure["evidence"] == [{"provenance": "iac", "confidence": "medium", "detail": "azurerm_cognitive_deployment.gpt4o"}]
+    assert _validate_jsonschema(document) == []
+
+
+def test_openrouter_upstreams_form_observed_gateway():
+    def add_openrouter(doc):
+        doc["integration"]["gateway_type"] = "llm_router"
+        doc["models"].append({
+            "detected_via": ["code"], "model_id": "anthropic/claude-3.5-sonnet", "service": "openrouter_api",
+            "evidence": [{"file": "src/ai/router.py", "line": 4, "source": "code"}],
+        })
+        doc["models"].append({
+            "detected_via": ["code"], "model_id": "google/gemini-1.5-pro", "service": "openrouter_api",
+            "evidence": [{"file": "src/ai/router.py", "line": 5, "source": "code"}],
+        })
+
+    document = adapter.convert_legacy_profile(_legacy(add_openrouter))
+    gateway = document["gateways"][0]
+    assert gateway["product"] == "openrouter" and gateway["type"] == "llm_router"
+    assert gateway["upstream_evidence"] == "observed"
+    assert [(up["provider"], up["source_service"]) for up in gateway["upstreams"]] == [
+        ("anthropic", "anthropic_api"), ("google", "vertex_ai"),
+    ]
+    assert gateway["upstreams"][1]["model_families"] == [
+        {"family": "gemini", "model_evidence": "observed", "models": ["gemini-1.5-pro"]},
+    ]
+    assert all(source["provider"] != "openrouter" for source in document["ai_sources"])
+    assert _validate_jsonschema(document) == []
+
+
+def test_openrouter_without_prefix_is_unresolved_with_no_upstreams():
+    def add_unprefixed(doc):
+        doc["integration"]["gateway_type"] = "llm_router"
+        doc["models"].append({
+            "detected_via": ["code"], "model_id": "claude-3-haiku-20240307", "service": "openrouter_api",
+            "evidence": [{"file": "src/ai/router.py", "line": 9, "source": "code"}],
+        })
+
+    document = adapter.convert_legacy_profile(_legacy(add_unprefixed))
+    assert document["gateways"] == [{"product": "openrouter", "type": "llm_router", "upstream_evidence": "unresolved", "upstreams": []}]
+    assert _validate_jsonschema(document) == []
+
+
+def test_iac_only_declared_family_stays_not_observed():
+    def iac_only(doc):
+        doc["models"] = []
+        doc["metadata"]["profile_source"] = "iac_vertex"
+        doc["summary"]["ai_source"] = "gemini"
+        doc["summary"]["inferred_from_iac"] = True
+
+    document = adapter.convert_legacy_profile(_legacy(iac_only))
+    assert document["ai_sources"] == [{
+        "provider": "google", "source_service": "vertex_ai", "model_families": ["gemini"],
+        "model_evidence": "not_observed", "models": [], "model_observations": [],
+    }]
+    assert _validate_jsonschema(document) == []
+
+
+def test_legacy_shape_check_rejects_an_already_415_document():
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_profile(EXPECTED_SAMPLE_415)
+    assert (info.value.code, info.value.field_path) == ("LEGACY_SHAPE_UNEXPECTED", "$")
+
+
+def _set(path, value):
+    def mutate(doc):
+        target = doc
+        keys = path.split(".")
+        for key in keys[:-1]:
+            target = target[int(key)] if key.isdigit() else target[key]
+        last = keys[-1]
+        target[int(last) if last.isdigit() else last] = value
+    return mutate
+
+
+NAMED_ERROR_CASES = [
+    ("service unmapped", _set("models.0.service", "bedrock_api"), "LEGACY_SERVICE_UNMAPPED", "$.models[0].service"),
+    ("ai_source disagrees with models", _set("summary.ai_source", "gemini"), "LEGACY_AI_SOURCE_UNREPRESENTABLE", "$.summary.ai_source"),
+    ("ai_source unknown value", _set("summary.ai_source", "azure"), "LEGACY_AI_SOURCE_UNREPRESENTABLE", "$.summary.ai_source"),
+    ("model id has a space", _set("models.0.model_id", "Claude Pro"), "LEGACY_MODEL_ID_INVALID", "$.models[0].model_id"),
+    ("model family unknown", _set("models.0.model_id", "mistral-large"), "LEGACY_MODEL_FAMILY_UNKNOWN", "$.models[0].model_id"),
+    ("embedding model has no family rule", _set("models.0.model_id", "text-embedding-004"), "LEGACY_MODEL_FAMILY_UNKNOWN", "$.models[0].model_id"),
+    ("detection method unknown", _set("models.0.detected_via", ["slack"]), "LEGACY_PROVENANCE_UNKNOWN", "$.models[0].detected_via"),
+    ("no numeric confidence for method", _set("detection_signals", []), "LEGACY_CONFIDENCE_MISSING", "$.models[0].detected_via"),
+    ("gateway type not llm_router", lambda doc: (
+        doc["models"].append({"detected_via": ["code"], "model_id": "openai/gpt-4o", "service": "openrouter_api", "evidence": []}),
+        doc["integration"].update(gateway_type="direct"),
+    ), "LEGACY_GATEWAY_UNREPRESENTABLE", "$.integration.gateway_type"),
+    ("both with no models", lambda doc: (doc.update(models=[]), doc["summary"].update(ai_source="both")), "LEGACY_AI_SOURCE_UNREPRESENTABLE", "$.summary.ai_source"),
+    ("absent family with no models", lambda doc: (doc.update(models=[]), doc["summary"].pop("ai_source")), "LEGACY_IAC_FAMILY_UNKNOWN", "$.summary.ai_source"),
+]
+
+
+@pytest.mark.parametrize(("name", "mutate", "code", "field_path"), NAMED_ERROR_CASES, ids=[case[0] for case in NAMED_ERROR_CASES])
+def test_unrepresentable_legacy_fails_closed_with_named_error(name, mutate, code, field_path):
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_profile(_legacy(mutate))
+    assert info.value.code == code
+    assert info.value.field_path == field_path
+    assert str(info.value).startswith(f"GcpProfileNotRepresentable: {code} at {field_path}:")
+
+
+def test_schema_gate_fails_closed_when_the_converted_document_is_invalid(monkeypatch, tmp_path):
+    schema = json.loads(VENDORED_SCHEMA.read_text(encoding="utf-8"))
+    schema["properties"]["schema_version"] = {"const": "2.0"}
+    altered = tmp_path / "schema.json"
+    altered.write_text(json.dumps(schema), encoding="utf-8")
+    monkeypatch.setattr(adapter, "SCHEMA_PATH", altered)
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_profile(_legacy())
+    assert info.value.code == "SCHEMA_415_INVALID"
+    assert info.value.field_path == "$.schema_version"
+
+
+def test_cli_writes_valid_document_and_nothing_on_failure(tmp_path):
+    legacy_path = tmp_path / "legacy.json"
+    out_path = tmp_path / "bma-input" / "ai-workload-profile.json"
+    legacy_path.write_text(json.dumps(_legacy()), encoding="utf-8")
+    ok = subprocess.run(
+        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(legacy_path), "--out", str(out_path)],
+        capture_output=True, text=True,
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert json.loads(out_path.read_text(encoding="utf-8")) == EXPECTED_SAMPLE_415
+
+    bad_path = tmp_path / "bad-legacy.json"
+    bad_out = tmp_path / "bad-out.json"
+    bad_path.write_text(json.dumps(_legacy(_set("models.0.service", "bedrock_api"))), encoding="utf-8")
+    failed = subprocess.run(
+        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(bad_path), "--out", str(bad_out)],
+        capture_output=True, text=True,
+    )
+    assert failed.returncode == 1
+    assert not bad_out.exists()
+    error = json.loads(failed.stderr)
+    assert error["error"] == "GcpProfileNotRepresentable"
+    assert error["code"] == "LEGACY_SERVICE_UNMAPPED"
+    assert error["field_path"] == "$.models[0].service"
