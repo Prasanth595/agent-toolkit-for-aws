@@ -6,7 +6,7 @@
 > `references/vendored/ai/ai-anthropic-to-bedrock.md` and kept byte-identical by
 > `shared:check`; edit HERE, then run `shared:sync`.
 >
-> Loaded by `design-ai.md` when `ai_source == "anthropic"`.
+> Loaded by `design-ai.md` when the #415 profile has an `ai_sources[]` entry with `provider` `anthropic`.
 > The user is already on Claude via the Anthropic SDK. Migration is a client swap only.
 > Mapping an older Claude version to a newer target is a model change. Validate
 > request controls and output behavior before cutover.

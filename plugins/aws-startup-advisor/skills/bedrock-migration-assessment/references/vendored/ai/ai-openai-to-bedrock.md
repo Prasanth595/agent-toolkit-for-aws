@@ -10,8 +10,7 @@
 
 **Applies to:** OpenAI SDK usage detected in applications hosted on any source cloud → Amazon Bedrock
 
-This file is loaded by `design-ai.md` when `ai-workload-profile.json` has `summary.ai_source` = `"openai"` or
-`"both"`. It provides the selection policy and mapping tables for OpenAI → Bedrock migration decisions.
+This file is loaded by `design-ai.md` when the #415 profile has an `ai_sources[]` entry with `provider` `openai` (`openai_api` or `azure_openai` source service, or an OpenRouter upstream). It provides the selection policy and mapping tables for OpenAI → Bedrock migration decisions.
 
 **Facts live in `references/shared/openai-on-bedrock.md`** — model IDs, endpoint paths, region matrix, quotas, prompt
 caching rules, and pricing provenance. Read it before applying this file. Do not restate those facts here.

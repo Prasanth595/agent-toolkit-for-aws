@@ -404,7 +404,7 @@
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "e869d7b0eea23b7b920482e36124c86ec1d13c2fb85d430b025b42da0f063257",
+      "sha256": "29a03f61e2b7370b2620561694c080f5c24fb7a496cbe97515f54948f55e1f5a",
       "source_path": "skills/shared/ai/ai-anthropic-to-bedrock.md",
       "type": "instruction"
     },
@@ -419,7 +419,7 @@
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "a04968fdf85846647cf1cae2de33ec7f4ded4c70710f9570158c967722e05e6c",
+      "sha256": "a583ac89e3e1201b6ca584732e15fb9374bb2c0b9af4e430ba1bd5f89bc2dfbc",
       "source_path": "skills/shared/ai/ai-gemini-to-bedrock.md",
       "type": "instruction"
     },
@@ -465,7 +465,7 @@
         "references/vendored/ai/ai-openai-to-bedrock.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "938613fe83768efb84c6b2b383f8e238655aa2cf72e7cd9adc6478ddd010c4b7",
+      "sha256": "1e2d9d85b4a9b85c1cbb17a6fac597110d233b6e5a2e7b61d880a1eb897ce201",
       "source_path": "skills/shared/ai/ai-openai-to-bedrock.md",
       "type": "instruction"
     },
@@ -538,7 +538,7 @@
         "references/vendored/ai/ai-migration-guardrails.md",
         "references/vendored/ai/design-ref-harness.md"
       ],
-      "sha256": "90e8186f7a299b1917aa8c032601cf97652f7cff78489cbab5b98d3f3229d936",
+      "sha256": "0959c45d292499c89b8aa214dc95c3681e2dc75259b827261a8576cffff31b43",
       "source_path": "skills/shared/ai/design-ref-harness.md",
       "type": "instruction"
     },
@@ -891,5 +891,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "146eab4a32a853f54b95b1e402b915c0d1b686d8a7108f3986c1de945c681b62"
+  "self_hash": "ef921de98276d4d17e9a1c7f93d050cb392fbf61364244404eafd1a17af8fe5b"
 }
