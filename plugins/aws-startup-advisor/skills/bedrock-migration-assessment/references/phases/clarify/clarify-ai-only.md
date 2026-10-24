@@ -1,5 +1,6 @@
 # AI-Only Migration — Clarify Requirements
 
+> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
 **Standalone flow** — Used when ONLY `ai-workload-profile.json` exists (no infrastructure or billing artifacts). The existing application environment remains unchanged; only AI/LLM calls move to AWS Bedrock.
 
 Produces the same `preferences.json` output but with `design_constraints` limited to region and compliance, `startup_constraints` populated, and `ai_constraints` fully populated. Questions are presented in **two progressive batches** with an intermediate save — partial answers persist across sessions.
@@ -44,11 +45,11 @@ Check `$MIGRATION_DIR/` for existing state:
 > **AI-Only Migration Detected**
 > Your project has AI workloads but no cloud-infrastructure assessment artifacts. I’ll focus on migrating AI/LLM calls to AWS Bedrock while your existing application environment remains unchanged.
 >
-> **AI source:** [from `summary.ai_source`]
-> **Models detected:** [from `models[].model_id`]
-> **Capabilities in use:** [from `integration.capabilities_summary` where true]
-> **Integration pattern:** [from `integration.pattern`] via [from `integration.primary_sdk`]
-> **Gateway/router:** [from `integration.gateway_type`, or "None (direct SDK)"]
+> **AI source:** [from `ai_sources[].provider`]
+> **Models detected:** [from `ai_sources[].models`]
+> **Capabilities in use:** [from the sidecar's `integration_context.capabilities_summary` where true]
+> **Integration pattern:** [from the sidecar's `integration_context.pattern`] via [from `integration_context.primary_sdk`]
+> **Gateway/router:** [from `gateways[].type`, or "None (direct SDK)"]
 
 ---
 
@@ -76,7 +77,7 @@ Before asking anything, present what discovery already answered and what will be
 | ------- | ----- | ------ |
 | Framework | [e.g. Direct SDK] | ai-workload-profile.json |
 | Primary model | [e.g. gpt-4o] | code scan (confidence [x]) |
-| Input types | [e.g. text only] | capabilities_summary |
+| Input types | [e.g. text only] | integration_context.capabilities_summary |
 
 **Will be assumed unless you correct them:**
 | Setting | Assumed value | Consequence |
@@ -117,7 +118,7 @@ Same decision logic, auto-detect signals, and interpretation as Q14 in `clarify-
 
 Auto-detect: No framework → 1, LiteLLM/OpenRouter/Kong/Apigee → 2, LangChain/LangGraph → 3, CrewAI/AutoGen → 4, OpenAI Agents SDK → 5, MCP/A2A → 6, Vapi/Bland.ai/Retell → 7.
 
-_Skip when:_ `integration.pattern`, `integration.gateway_type`, and `integration.frameworks` together give a definitive answer — including a definitive no-framework signal (`pattern: "direct_api"` with empty `frameworks` and null `gateway_type` → 1). Use extracted values with `chosen_by: "extracted"` and do not present this question. Ask only when the signals are missing or contradict each other.
+_Skip when:_ `integration_context.pattern`, `gateways[].type`, and `integration_context.frameworks` together give a definitive answer — including a definitive no-framework signal (`pattern: "direct_api"` with empty `frameworks` and null `gateway_type` → 1). Use extracted values with `chosen_by: "extracted"` and do not present this question. Ask only when the signals are missing or contradict each other.
 
 > 1\) No framework — direct API calls | 2\) LLM router/gateway | 3\) LangChain / LangGraph | 4\) Multi-agent framework | 5\) OpenAI Agents SDK | 6\) MCP/A2A | 7\) Voice platform
 
@@ -184,7 +185,7 @@ Interpret → `cross_cloud`. Default: 2 → `"latency-acceptable"`.
 
 Establishes baseline Bedrock recommendation. Override hierarchy: Q10 special features > Q2 priority > Q7/Q8 volume/latency > Q5 baseline.
 
-_Skip when:_ `models[].model_id` is populated in `ai-workload-profile.json` **with confidence ≥ 0.8** (the same threshold as full-flow Q19) — auto-detect with `chosen_by: "extracted"` and do not present this question. The detected models are already shown in the Step 1 summary. Below 0.8, present the question with the detected model(s) offered as the suggested answer. With 2+ detected models, record `ai_model_baseline` as an array (one entry per model).
+_Skip when:_ `ai_sources[].models` is populated in `ai-workload-profile.json` **with evidence confidence `high` or `confirmed`** (the same threshold as full-flow Q19) — auto-detect with `chosen_by: "extracted"` and do not present this question. The detected models are already shown in the Step 1 summary. Below 0.8, present the question with the detected model(s) offered as the suggested answer. With 2+ detected models, record `ai_model_baseline` as an array (one entry per model).
 
 > 1\) Gemini Flash | 2\) Gemini Pro | 3\) GPT-3.5 Turbo | 4\) GPT-4/4 Turbo | 5\) GPT-4o | 6\) GPT-5.4/Mini/Nano | 7\) GPT-5.6 Sol/Terra/Luna | 8\) GPT-5/5.x (older) | 9\) GPT-5.5/Pro | 10\) GPT-6/6.1 (Astra/Sol/Luna) | 11\) o-series | 12\) Claude (Anthropic SDK) | 13\) Other/Multiple | 14\) Don't know
 
@@ -259,7 +260,7 @@ You can answer each, skip individual ones, or say "use defaults for the rest."
 
 ## Q6 — What input types must the model accept: text only, images (vision), or audio/video?
 
-_Skip when:_ `integration.capabilities_summary` in `ai-workload-profile.json` has definitive values for `vision` AND (`speech_to_text` or `text_to_speech`) — derive from capabilities with `chosen_by: "extracted"` and do not present this question. Only ask if capabilities are unknown or ambiguous (all false with no evidence either way).
+_Skip when:_ the sidecar's `integration_context.capabilities_summary` has definitive values for `vision` AND (`speech_to_text` or `text_to_speech`) — derive from capabilities with `chosen_by: "extracted"` and do not present this question. Only ask if capabilities are unknown or ambiguous (all false with no evidence either way).
 
 > 1\) Text only | 2\) Vision required | 3\) Audio/Video inputs
 
@@ -380,7 +381,7 @@ Write `$MIGRATION_DIR/preferences.json` (when delegated, submit this write throu
 | `ai_latency`               | `ai_constraints.ai_latency`                  | From Q8                                                                                                                                                                                                                                         |
 | `ai_complexity`            | `ai_constraints.ai_complexity`               | From Q9                                                                                                                                                                                                                                         |
 | `ai_critical_feature`      | `ai_constraints.ai_critical_feature`         | From Q10                                                                                                                                                                                                                                        |
-| `ai_capabilities_required` | `ai_constraints.ai_capabilities_required`    | Derived from `capabilities_summary`                                                                                                                                                                                                             |
+| `ai_capabilities_required` | `ai_constraints.ai_capabilities_required`    | Derived from `integration_context.capabilities_summary`                                                                                                                                                                                                             |
 
 Each constraint carries the FULL clarify.md field shape — `value`, `chosen_by` (`user`|`extracted`|`default`|`derived`), `prompt`, `design_consequence`, and `source`/`question_id` per the clarify.md source-field rules. (The short `{ value, chosen_by }` form shown above is an abbreviation, not the schema.) No nulls. All schema rules from `clarify.md` apply, with two AI-only bindings: `metadata.clarify_mode` is `"fast_path"` when Step 1.5 fired, `"full"` for the two-batch flow; and this flow's `questions_extracted` is the full flow's `questions_skipped_extracted` (downstream consumers accept both names).
 

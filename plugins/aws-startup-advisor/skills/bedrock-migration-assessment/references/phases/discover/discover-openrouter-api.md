@@ -4,13 +4,13 @@
 > token-usage data directly from the OpenRouter API — read-only, consent-gated,
 > aggregate per-model/per-day counts only — as an alternative to the user
 > exporting usage by hand. Produces `openrouter-usage-profile.json` and, when
-> `ai-workload-profile.json` exists, fills its `current_costs` section with real
+> `ai-workload-profile.json` exists, fills its sidecar `observed_costs` entry with real
 > spend. If the user declines consent or has no OpenRouter key, exits cleanly
 > with no output.
 >
 > **Why this matters for a Bedrock migration.** OpenRouter is a multi-provider
 > router: the app-code scan (`discover-app-code.md`) detects the OpenRouter
-> transport (`gateway_type: llm_router`) but often cannot tell WHICH models
+> transport (`gateways[].type: llm_router`) but often cannot tell WHICH models
 > actually carry the spend. `/activity` reports it directly — per model, per day,
 > with token counts and dollar cost — so Estimate can size the Bedrock target
 > against real volume instead of guessing.
@@ -663,76 +663,21 @@ account-wide one.
 
 ## Step 4: Merge into the AI Workload Profile (if it exists), Then Clean Up
 
-If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC
-discovery), update it — the API data is authoritative for OpenRouter spend and
-volume:
+If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC discovery), update it. The API data is authoritative for OpenRouter spend and volume:
 
-1. `metadata.sources_analyzed.openrouter_usage_api` = `true`.
-2. `current_costs` — provider-aware merge, the same rule as the OpenAI usage path:
-   - **No existing `current_costs`** → set
-     `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected":
-     ["OpenRouter"], "source": "openrouter_usage_api" }`.
-   - **Existing costs for a DIFFERENT provider** (e.g. a billing CSV captured
-     Vertex spend, or the OpenAI usage path captured OpenAI-direct spend) → SUM
-     the providers: `source: "mixed"`, and record the per-provider split in
-     `breakdown[]` (`{ "provider": "openrouter", "monthly_spend": X, "source":
-     "openrouter_usage_api" }`, plus the other provider's entry). OpenRouter is a
-     router — its spend already includes the upstream providers it fronts, so do
-     NOT also add a separate "openai via openrouter" line; that would double-count.
-   - **Existing costs from the SAME source window** → the API wins
-     (`source: "openrouter_usage_api"`); move the displaced figure into
-     `current_costs.conflicting_sources[]` — never silently resolved.
-3. Append to `detection_signals[]`:
-   `{ "method": "openrouter_usage_api", "pattern": "billed usage for <model>",
-   "confidence": 0.99, "evidence": "<N> requests, <X> tokens in last 30d" }` for
-   each of the top 5 models by usage. (`openrouter_usage_api` is a live-usage
-   detection method, parallel to `openai_usage_api`.)
-4. **These are two INDEPENDENT checks over every `usage_by_model` entry — run
-   both, even for a model that already satisfies one of them (e.g. from an
-   earlier run against a saved/retained `ai-workload-profile.json`).** Checking
-   workload presence only when the model was ALSO just added to `models[]`
-   misses the case where a prior run (or a resumed one reusing an existing
-   profile) already inserted the model row without its workload row, or where
-   a resume merges a retained profile that already has the model from a
-   DIFFERENT capture pass.
+1. **Observed cost → sidecar `observed_costs`.** Write to `$MIGRATION_DIR/ai-workload-sidecar.json`, creating it with `schema_version: 1`, `kind: "BMA_GCP_AI_SIDECAR"`, and `workloads: []` if absent. The merge rules are those in `schema-discover-ai.md` § Usage-API merge, with the OpenRouter specifics below:
+   - **No existing `observed_costs`** → `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected": ["OpenRouter"], "source": "openrouter_usage_api" }`.
+   - **Existing costs for a DIFFERENT provider** → SUM the providers. Set `source: "mixed"` and record the per-provider split in `breakdown[]`. OpenRouter is a router, and its spend already includes the upstream providers it fronts, so do NOT also add a separate line per upstream provider. That would double-count.
+   - **Existing costs from the SAME source window** → the API wins (`source: "openrouter_usage_api"`). Move the displaced figure into `observed_costs.conflicting_sources[]`, never silently resolved.
+2. **Discovery notes, not profile signals.** Record the top 5 models by usage as `"<model> billed usage: <N> requests, <X> tokens in last 30d"` in the discovery notes.
+3. **These are two INDEPENDENT checks over every `usage_by_model` entry. Run both, even for a model that already satisfies one of them** (for example, from an earlier run against a retained profile).
+   a. **Gateway upstream:** OpenRouter is a gateway, never an `ai_sources` entry. For any `usage_by_model` model absent from `gateways[].upstreams`, add it to the `openrouter` gateway. Take the upstream provider from the model's provider prefix (`anthropic/`, `openai/`, `google/`) and add it to `upstreams[]` with `model_families` (family, `model_evidence: "observed"`, `models`). Set `upstream_evidence` to `"observed"`. A model with no recognized prefix does not create an upstream. Leave `upstream_evidence: "unresolved"` with `upstreams: []` if no upstream can be named. Never invent an upstream. Code-derived entries always win on conflict. Usage-only entries tell Clarify what the code scan missed.
+   b. **Workload row (sidecar):** for any `usage_by_model` model with NO `workloads[]` entry whose `model_id` matches it AND `sdk_method: "usage_api"`, checked by model identity alone, append `{workload_id: "wl_" + sha256(model_id + "|usage_api|plain")[:6], model_id: "<model>", sdk_method: "usage_api", capability: "text_generation", capability_confidence: "low", structured_output: false, call_sites: [{"file": "<usage_api>", "line": 0}]}` (per `schema-discover-ai.md` § workloads[] "Usage-only workloads"). Before appending, confirm no existing `workloads[]` entry already has this exact `workload_id`. The sha256 is deterministic per model, so a second merge collides on it instead of duplicating.
+4. Do not change `ai_sources` for OpenRouter usage. The code scan owns the provider family.
 
-   a. **Model row:** for any `usage_by_model` model absent from `models[]`,
-      append `{ "model_id": "<model>", "service": "openrouter_api",
-      "detected_via": ["usage_api"], "evidence": [{ "source": "usage_api",
-      "pattern": "billed usage in last 30 days" }], "capabilities_used":
-      ["text_generation"], "usage_context": "Observed in OpenRouter usage data —
-      call sites not yet located in code" }`. Code-derived entries always win on
-      conflict; usage-only entries tell Clarify what the code scan missed (a
-      model routed at runtime but not literal in the source).
-   b. **Workload row:** for any `usage_by_model` model with NO `workloads[]`
-      entry whose `model_id` matches it AND `sdk_method: "usage_api"` — checked
-      by model identity alone, regardless of whether step (a) just inserted its
-      `models[]` row this pass or the row was already present from before —
-      append `{workload_id: "wl_" + sha256(model_id + "|usage_api|plain")[:6],
-      model_id: "<model>", sdk_method: "usage_api", capability:
-      "text_generation", capability_confidence: "low", structured_output: false,
-      call_sites: [{"file": "<usage_api>", "line": 0}]}` (per
-      `schema-discover-ai.md` § workloads[] "Usage-only workloads"). Without
-      this, the model can exist in `models[]` with no corresponding
-      `workloads[]` entry — Clarify's multi-workload confirmation table and
-      Design's per-workload iteration both read `workloads[]`, not `models[]`,
-      so a usage-only model present only in `models[]` is never surfaced for
-      confirmation and never gets a `design_block`. Before appending, confirm no
-      existing `workloads[]` entry already has this exact `workload_id` (the
-      sha256 is deterministic per model, so a second merge of the same model
-      naturally collides on it instead of duplicating).
+Run the gate after any change: `bma-runtime.py validate-profile --profile <profile> --sidecar <sidecar>` must exit 0.
 
-   Recompute `summary.total_models_detected` to include any (a) addition (it
-   counts `models[]` length, not just code-derived models).
-5. If `summary.ai_source` does not already reflect the OpenRouter-fronted
-   providers, leave it as the code scan set it — OpenRouter is a transport, and
-   `ai_source` is about the source SDK/provider family, which the code scan owns.
-
-If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read
-`openrouter-usage-profile.json` directly for spend and volumes — but it is a
-**supplement, not an anchor**: the run still needs at least one primary artifact
-(resource inventory, AI workload profile, or billing profile) to pass the Discover
-handoff gate.
+If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read `openrouter-usage-profile.json` directly for spend and volume. It is a **supplement, not an anchor**. The run still needs at least one primary artifact (resource inventory, AI workload profile, or billing profile) to pass the Discover handoff gate.
 
 **Clean up (default, not optional, but gated on BOTH rows being terminal):** before
 deleting anything, confirm the manifest's `/activity` entry is `ok` or `skipped` AND

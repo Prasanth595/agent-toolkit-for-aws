@@ -5,7 +5,7 @@
 > aggregate counts only, scoped to the OpenAI projects the user selects — as an
 > alternative to the user exporting billing CSVs by hand. Produces
 > `openai-usage-profile.json` and, when `ai-workload-profile.json` exists, fills
-> its `current_costs` section with real spend. If the user declines consent or
+> its `observed_costs` entry in the sidecar with real spend. If the user declines consent or
 > has no Admin API key, exits cleanly with no output.
 
 **Execute ALL steps in order. Do not skip or optimize.**
@@ -274,49 +274,20 @@ genuinely unused one (zero). Validate: valid JSON, `summary.monthly_cost_usd`
 equals the sum of `costs_by_line_item` (± rounding).
 
 ## Step 4: Merge into the AI Workload Profile (if it exists), Then Clean Up
+The usage API is authoritative for OpenAI spend and volume. Merge its results as follows.
 
-If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC
-discovery), update it — the API data is authoritative for OpenAI spend and
-volume:
+1. **Observed cost → sidecar `observed_costs`.** Write to `$MIGRATION_DIR/ai-workload-sidecar.json` (create it with `schema_version: 1`, `kind: "BMA_GCP_AI_SIDECAR"`, and `workloads: []` if it does not exist). The merge rules are those in `schema-discover-ai.md` § Usage-API merge:
+   - **No existing `observed_costs`** → `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected": [<distinct endpoint_type values, prefixed "OpenAI ">], "source": "openai_usage_api" }`.
+   - **Existing costs for a DIFFERENT provider** → SUM the providers. Set `source: "mixed"` with a per-provider `breakdown[]`. Preserve each provider's actual identity. In direct mode, never relabel it as GCP. Different providers are never resolved with `max()`.
+   - **Existing costs for the SAME provider** → the API wins (`source: "openai_usage_api"`). Move the displaced figure into `observed_costs.conflicting_sources[]`, never silently resolved.
+2. **Discovery notes, not profile signals.** Record the top 5 models by usage as `"<model> billed usage: <N> requests, <X> tokens in last 30d"` in the discovery notes. The #415 profile has no `detection_signals`.
+3. **Usage-only models → `ai_sources`.** For any `usage_by_model` model absent from `ai_sources[].models`, add it under the `(openai, openai_api)` entry. Create that entry if it does not exist, with `model_families` from the model family, `model_evidence: "observed"`, and one `model_observations` item with `raw_model` set to the usage row's model string and `evidence: [{"provenance": "usage_api", "confidence": "high"}]`. Code-derived entries always win on conflict.
+4. **Usage-only workloads → sidecar `workloads[]`.** Add a usage-only workload per the sentinel rules in `schema-discover-ai.md` (`sdk_method: "usage_api"`, `call_sites: [{"file": "<usage_api>", "line": 0}]`) for any usage-only model that has no workload row.
+5. Do not set any provider-label field from usage data. `ai_sources` already carries each provider separately, so a Gemini profile that gains OpenAI usage keeps both entries.
 
-1. `metadata.sources_analyzed.openai_usage_api` = `true`.
-2. `current_costs` — provider-aware merge. The API measures **OpenAI** spend. In direct mode, merge it with any different source-provider entries already present and retain each provider's actual identity; do not invent a GCP billing source. In delegated GCP mode, preserve the selected-base GCP/Vertex billing behavior below. Different providers are never resolved with max():
-   - **No existing `current_costs`** → set
-     `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected":
-     [<distinct endpoint_type values, prefixed "OpenAI ">], "source":
-     "openai_usage_api" }`.
-   - **Existing costs for a DIFFERENT provider** → SUM the providers. In delegated GCP mode this includes the selected-base Vertex billing case; in direct mode preserve the actual source provider and never relabel it as GCP:
-     `monthly_ai_spend` = the sum of provider entries, `source: "mixed"`, with a
-     per-provider split in `breakdown[]`, for example:
-     `[{ "provider": "openai", "monthly_spend": X, "source": "openai_usage_api" },
-     { "provider": "<actual-other-provider>", "monthly_spend": Y, "source": "<actual-source>" }]`.
-   - **Existing costs for the SAME provider** (a billing export that already
-     contains OpenAI spend, same window) → the API wins (`source:
-     "openai_usage_api"`); move the displaced figure into
-     `current_costs.conflicting_sources[]` — never silently resolved,
-     same rule as live-discovery drift.
-3. Append to `detection_signals[]`:
-   `{ "method": "openai_usage_api", "pattern": "billed usage for <model>",
-   "confidence": 0.99, "evidence": "<N> requests, <X> tokens in last 30d" }`
-   for each of the top 5 models by usage.
-4. For any `usage_by_model` model absent from `models[]`: append
-   `{ "model_id": "<model>", "service": "openai_api", "detected_via":
-   ["usage_api"], "evidence": [{ "source": "usage_api", "pattern": "billed
-   usage in last 30 days" }], "capabilities_used": [<from endpoint_type:
-   completions→"text_generation", embeddings→"embeddings",
-   images→"image_generation", audio_speeches→"speech_generation",
-   audio_transcriptions→"transcription">], "usage_context": "Observed in
-   OpenAI usage data — call sites not yet located in code" }`. Code-derived
-   entries always win on conflict; usage-only entries tell Clarify what code
-   analysis missed.
-5. If `summary.ai_source` is `"gemini"` and OpenAI usage was found, set it to
-   `"both"`.
+Run the gate after any change: `bma-runtime.py validate-profile --profile <profile> --sidecar <sidecar>` must exit 0.
 
-If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read
-`openai-usage-profile.json` directly for spend and volumes — but it is a
-supplement, not an anchor: the run still needs at least one primary artifact
-(resource inventory, AI workload profile, or billing profile) to pass the
-Discover handoff gate.
+If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read `openai-usage-profile.json` directly for spend and volumes. It is a supplement, not an anchor. The run still needs at least one primary artifact (resource inventory, AI workload profile, or billing profile) to pass the Discover handoff gate.
 
 **Clean up (default, not optional):** delete
 `$MIGRATION_DIR/.openai-admin-env` now — the key is no longer needed. Tell the

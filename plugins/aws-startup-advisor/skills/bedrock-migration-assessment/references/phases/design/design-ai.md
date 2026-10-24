@@ -1,6 +1,7 @@
 # Design Phase: AI Workloads (Bedrock)
 
 > Loaded by `design.md` when `ai-workload-profile.json` exists.
+> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
 
 **Execute ALL steps in order. Do not skip or optimize.**
 
@@ -8,41 +9,32 @@
 
 ## Step 0: Load Inputs
 
-Read `$MIGRATION_DIR/ai-workload-profile.json`:
+Read `$MIGRATION_DIR/ai-workload-profile.json` (#415) and `$MIGRATION_DIR/ai-workload-sidecar.json` after the input gate passes:
 
-- `summary.ai_source` — `"gemini"`, `"openai"`, `"anthropic"`, `"both"`, `"other"`
-- `models[]` — Detected AI models with service, capabilities, evidence
-- `integration` — SDK, frameworks, languages, gateway type, capability summary
-- `infrastructure[]` — Terraform resources related to AI (may be empty)
-- `current_costs` — Present only if billing data, OpenAI usage API data, or OpenRouter usage API data was provided (`source` field records which)
+- `ai_sources[]` — provider, `source_service`, `model_families`, `model_evidence`, and `models` for each AI source
+- `gateways[]` — gateway `product`, `type`, `upstream_evidence`, and `upstreams`
+- sidecar `integration_context` — SDK, frameworks, languages, `pattern`, and `capabilities_summary` (present when discovery recorded them)
+- sidecar `observed_costs` — present only if usage API or billing data was provided (`source` field records which)
+- sidecar `workloads[]`, `agentic_profile`, and `tool_manifest`
+
+**Derived label (output only):** `metadata.ai_source` in `aws-design-ai.json` is computed from the provider set: one `google` provider → `"gemini"`, one `openai` → `"openai"`, one `anthropic` → `"anthropic"`, more than one provider → `"both"`, no provider → `"other"`. Routing never reads this label. It reads the provider set.
 
 Read `$MIGRATION_DIR/preferences.json` → `ai_constraints` (if present). If absent: use defaults (prefer managed Bedrock, no latency constraint, no budget cap).
 
 **Region selection for AI workloads:** Direct mode uses compliance → one explicit supported/primary application region → Q4 latency preference → `us-east-1`; it never infers a source cloud. Delegated GCP mode preserves compliance → captured GCP region → Q4 → `us-east-1`. When a region was derived rather than explicitly chosen, verify the selected Bedrock models there with `aws___get_regional_availability` (AWS MCP Server). If unavailable, prefer the geographically closest supported AWS region.
 
-**Load source-specific design reference based on `ai_source`:**
+**Load source-specific design reference based on the provider set in `ai_sources[]`** (one entry per `(provider, source_service)` pair):
 
-- `"gemini"` → load `references/design-refs/ai-gemini-to-bedrock.md` and the canonical provider guide `references/vendored/ai/ai-gemini-to-bedrock.md`
-- `"openai"` → load `references/vendored/ai/ai-openai-to-bedrock.md` **and**
+- `google` (`source_service` `vertex_ai`) → load `references/design-refs/ai-gemini-to-bedrock.md` and the canonical provider guide `references/vendored/ai/ai-gemini-to-bedrock.md`
+- `openai` (`source_service` `openai_api`) → load `references/vendored/ai/ai-openai-to-bedrock.md` **and**
   `references/shared/openai-on-bedrock.md` (the fact base: model IDs, endpoint paths, region matrix, quotas,
   caching). OpenAI's proprietary GPT models run on Bedrock, so the source model is often itself the target — the
   mapping guide's Tier 0 path is the default, not a cross-family swap.
-- `"anthropic"` → load `references/vendored/ai/ai-anthropic-to-bedrock.md` (Anthropic SDK → Bedrock Converse API client swap; do NOT use ai-openai-to-bedrock.md for Anthropic SDK users)
-- `"both"` → `both` never means exactly "Gemini+OpenAI" — per
-  `discover-anthropic-api.md` Step 4.5, `both` is also reached when Anthropic
-  usage joins a Gemini-or-OpenAI codebase, so it can mean "Gemini+Anthropic"
-  or "OpenAI+Anthropic" too. Select guides from which providers are ACTUALLY
-  present in `models[]`/`summary` (checking `service` values —
-  `vertex_ai_generative`/`vertex_ai_embeddings` for Gemini,
-  `openai_api` for OpenAI, `anthropic_api` for Anthropic): load
-  `ai-gemini-to-bedrock.md` when a Gemini/Vertex model is present, load
-  `ai-openai-to-bedrock.md` when an OpenAI model is present, and, if an
-  Anthropic model is also present, also load `ai-anthropic-to-bedrock.md`
-  (mirroring Azure's existing conditional pattern for its own `"both"`
-  branch)
-- `"other"` or absent → load `references/design-refs/ai.md` (traditional ML rubric — Vision API, Speech API, Document AI, custom models only; do NOT use for Anthropic SDK users)
+- `anthropic` (`source_service` `anthropic_api`) → load `references/vendored/ai/ai-anthropic-to-bedrock.md` (Anthropic SDK → Bedrock Converse API client swap; do NOT use ai-openai-to-bedrock.md for Anthropic SDK users)
+- More than one provider → load every reference matching a provider that has at least one model with `model_evidence: "observed"`. Each provider is routed on its own, and the same model name through two services is routed per service.
+- No provider with observed models, or only traditional-ML evidence → load `references/design-refs/ai.md` (traditional ML rubric — Vision API, Speech API, Document AI, custom models only; do NOT use for Anthropic SDK users)
 
-**Additional load, independent of `ai_source` above:** If discovery records OpenRouter as `integration.gateway_type`, load `references/vendored/ai/ai-openrouter-to-bedrock.md` and preserve every upstream provider/family/exact-model association. If any entry in `workloads[]` (from `preferences.json`, falling back to `ai-workload-profile.json`) has `capability` equal to `document_extraction`, `image_analysis`, or `speech_transcription`, ALSO load `references/design-refs/ai.md` — even when a generative `ai_source` already selected a different ref above. A workload's non-generative capability is evaluated independently of the codebase's primary LLM provider; e.g. an `ai_source: "openai"` codebase that also calls `documentai.process_document` needs both `ai-openai-to-bedrock.md` (for its GPT workload) and `ai.md` (for its Document AI workload).
+**Additional load, independent of the provider routing above:** If `gateways[]` contains an OpenRouter gateway (`type: "llm_router"`), load `references/vendored/ai/ai-openrouter-to-bedrock.md` and preserve every upstream provider/family/exact-model association. If any entry in `workloads[]` (from `preferences.json`, falling back to `ai-workload-profile.json`) has `capability` equal to `document_extraction`, `image_analysis`, or `speech_transcription`, ALSO load `references/design-refs/ai.md` — even when a generative provider already selected a different ref above. A workload's non-generative capability is evaluated independently of the codebase's primary LLM provider; e.g. an `ai_source: "openai"` codebase that also calls `documentai.process_document` needs both `ai-openai-to-bedrock.md` (for its GPT workload) and `ai.md` (for its Document AI workload).
 
 ---
 
@@ -68,7 +60,7 @@ Call `aws___get_regional_availability` from the AWS MCP Server for:
 
 ## Step 0.6: Agentic Design Routing
 
-**Skip this step if `agentic_profile` is absent from `ai-workload-profile.json`.**
+**Skip this step if `agentic_profile` is absent from `ai-workload-sidecar.json`.**
 
 If `agentic_profile.is_agentic == true`:
 
@@ -190,17 +182,17 @@ For each `workloads[]` entry:
 
 5. **Preserve input order:** `design_blocks[]` order matches `workloads[]` order.
 
-6. **Empty workloads:** If `workloads[]` is empty, emit `aws-design-ai.json` with `"design_blocks": []` and proceed with the existing `models[]` path below as fallback.
+6. **Empty workloads:** If `workloads[]` is empty, emit `aws-design-ai.json` with `"design_blocks": []` and proceed with the existing `ai_sources[].models` path below as fallback.
 
 **Fallback (no `workloads[]` or single entry):** If `workloads[]` is absent or has exactly one entry, fall through to the existing per-model logic below (backward compatible).
 
 ---
 
-For each model in `models[]`, select the best-fit Bedrock model using the loaded design reference mapping tables. Do NOT use a hardcoded mapping — the design-ref files contain tier-organized tables with pricing and competitive analysis.
+For each model in `ai_sources[].models`, select the best-fit Bedrock model using the loaded design reference mapping tables. Do NOT use a hardcoded mapping — the design-ref files contain tier-organized tables with pricing and competitive analysis.
 
 Treat model mapping as compatibility-guided, not 1:1 parity. Before cutover, require validation of prompts, tool-calling behavior, and eval metrics for the selected Bedrock model.
 
-**If `models[]` is empty:** Skip per-model rows; output a short **placeholder strategy** (one representative Bedrock model family per `ai_source` rubric) and dependency on Clarify answers — do not fabricate `models[]` entries.
+**If `ai_sources[].models` is empty:** Skip per-model rows; output a short **placeholder strategy** (one representative Bedrock model family per provider rubric) and dependency on Clarify answers — do not fabricate `ai_sources[].models` entries.
 
 **Apply user preference overrides from `ai_constraints`:**
 
@@ -298,24 +290,24 @@ that can handle it at adequate quality — the AWS-native automation of the tier
 
 ## Part 1C: Multi-Model Coordination Warnings
 
-If `models[]` contains more than one model, check for coordination patterns and generate warnings. These help the user understand that migrating multiple models requires coordinated testing, not independent swaps.
+If `ai_sources[].models` contains more than one model, check for coordination patterns and generate warnings. These help the user understand that migrating multiple models requires coordinated testing, not independent swaps.
 
 **Check and warn:**
 
-1. **Embeddings + generation model detected** — If `models[]` contains both an embeddings model (capabilities_used includes `"embeddings"`) AND a text generation model:
+1. **Embeddings + generation model detected** — If the detected models include both an embeddings workload (a `workloads[]` entry with `capability: "embedding"`) AND a text generation model:
    > ⚠️ "Migrating the embedding model (e.g., text-embedding-3-small → Titan Embeddings v2) requires re-embedding all documents in your vector store. Plan for re-indexing time and temporary storage. Test retrieval quality with the new embeddings before switching generation model."
    > ⚠️ "Verify vector index dimension compatibility before cutover. OpenAI text-embedding-3-small outputs 1536 dimensions; Titan Embeddings v2 is configurable (256, 512, or 1024). A mismatch will cause insert failures at the vector store layer — your index must be rebuilt at the target dimension before any data is written."
 
-2. **Models at different price tiers** — If `models[]` contains both a mini/nano/lite model AND a flagship model (infer from model_id naming: `*-mini`, `*-nano`, `*-lite` vs flagship):
+2. **Models at different price tiers** — If `ai_sources[].models` contains both a mini/nano/lite model AND a flagship model (infer from model_id naming: `*-mini`, `*-nano`, `*-lite` vs flagship):
    > ⚠️ "These models appear to work as a cascade or routing pattern (cheap model for classification/filtering, expensive model for generation). Test the Bedrock replacement pair together — validate that the cheaper model's classification accuracy is preserved with its Bedrock equivalent before testing the expensive model."
 
-3. **More than 3 models** — If `models[]` count > 3:
+3. **More than 3 models** — If `ai_sources[].models` count > 3:
    > ⚠️ "Multiple models detected ([count]). Recommend a tiered migration strategy: migrate and validate one model at a time, starting with the lowest-risk (highest-volume, simplest task). See Part 1B for tiered routing recommendations."
 
-4. **Text generation + image generation** — If `models[]` contains both text generation AND image generation capabilities:
+4. **Text generation + image generation** — If `workloads[]` contains both text generation AND image generation capabilities:
    > ⚠️ "Image generation migration (e.g., DALL-E/gpt-image → Stability AI) requires separate evaluation. Image quality is subjective — plan for human evaluation alongside automated metrics. Default to Stable Image Core (cost-first) or Stable Image Ultra (quality-first); do not recommend Nova Canvas (past EOL 2026-09-30)."
 
-5. **Speech models** — If `models[]` contains speech-to-text or text-to-speech capabilities:
+5. **Speech models** — If `workloads[]` contains speech-to-text or text-to-speech capabilities:
    > ⚠️ "Speech model migration targets different AWS services (Whisper → Amazon Transcribe, TTS → Amazon Polly or Nova Sonic) with different pricing models and APIs. These are not Bedrock model swaps — they require separate integration work."
 
 Record all triggered warnings in `aws-design-ai.json` → `multi_model_warnings[]`. Each warning: `{"type": "embeddings_reindex|cascade_pair|multi_model_tiered|image_separate|speech_separate", "message": "..."}`.
@@ -324,7 +316,7 @@ Record all triggered warnings in `aws-design-ai.json` → `multi_model_warnings[
 
 ## Part 2: Feature Parity Validation
 
-For each capability in `integration.capabilities_summary` that is `true`, check Bedrock parity:
+For each capability in the sidecar's `integration_context.capabilities_summary` that is `true`, check Bedrock parity:
 
 | Capability        | Vertex AI               | Amazon Bedrock                   | Parity  |
 | ----------------- | ----------------------- | -------------------------------- | ------- |
@@ -344,7 +336,7 @@ Record `capability_gaps[]` for any Partial or None parity.
 
 ## Part 3: Analyze Detected Workloads
 
-For each model in `models[]`, record:
+For each model in `ai_sources[].models`, record:
 
 - **Workload type**: text generation, embeddings, vision, code generation, custom model
 - **Integration pattern mapping**:
@@ -367,7 +359,7 @@ Use source-provider/service terminology in direct mode. Preserve GCP labels only
 
 ## Part 4: Infrastructure Mapping
 
-Map source AI infrastructure to AWS equivalents. In direct mode, include only AI resources explicitly present in source evidence and use their actual provider/service names. In delegated GCP mode, preserve the following selected-base mappings:
+Under #415, BMA takes no source infrastructure input, so `ai_architecture.infrastructure` is `[]` unless the GCP run supplies its own infrastructure mapping outside this phase. Map source AI infrastructure to AWS equivalents (applies only when such evidence is present). In direct mode, include only AI resources explicitly present in source evidence and use their actual provider/service names. In delegated GCP mode, preserve the following selected-base mappings:
 
 | GCP Resource                              | AWS Equivalent                                  |
 | ----------------------------------------- | ----------------------------------------------- |
@@ -383,7 +375,7 @@ Service accounts with `role: "supports_ai"` → IAM role with Bedrock permission
 
 ## Part 5: Code Migration Plan
 
-For each detected `integration.pattern` and `ai_source`, generate before/after migration examples.
+For each detected `integration_context.pattern` and provider, generate before/after migration examples.
 
 **Patterns to include (matched to detected language and source):**
 
@@ -443,13 +435,13 @@ model/endpoint's quota rules. Astra runtime uses input TPM plus 10 times output 
 Astra Mantle quotas and cache exemptions must be verified independently; do not copy GPT-5.6's
 rules or promise runtime fallback for a model that has none.
 
-**gpt-oss migration path:** If `ai_source = "openai"` and the user wants OpenAI-architecture models on the Bedrock-native runtime surface, offer `gpt-oss` as an additional path. Unlike the proprietary GPT models, gpt-oss **does** support `bedrock-runtime` (Converse / InvokeModel), so it is the option when Guardrails or invocation logging are required and an OpenAI-lineage model is preferred. It sits a capability class below the GPT-5.x frontier tier. Record `migration_path: "gpt-oss"`.
+**gpt-oss migration path:** If the `openai` provider is present and the user wants OpenAI-architecture models on the Bedrock-native runtime surface, offer `gpt-oss` as an additional path. Unlike the proprietary GPT models, gpt-oss **does** support `bedrock-runtime` (Converse / InvokeModel), so it is the option when Guardrails or invocation logging are required and an OpenAI-lineage model is preferred. It sits a capability class below the GPT-5.x frontier tier. Record `migration_path: "gpt-oss"`.
 
 Generate concrete code examples using actual model IDs from the selected Bedrock models. Only include patterns matching the detected integration.
 
-**OpenRouter-specific guidance** (if `gateway_type == "llm_router"` AND `detection_signals` contains OpenRouter evidence):
+**OpenRouter-specific guidance** (if `gateways[]` contains an OpenRouter gateway with `type: "llm_router"`):
 
-OpenRouter is a hosted routing service (not self-hosted like LiteLLM). It adds a margin on top of provider pricing. **First check whether the underlying model is an OpenAI model with a Mantle target** (`ai_source == "openai"`, per the Mantle guidance above) — OpenRouter is a transport layer, not a different model, so an OpenAI model routed through OpenRouter is eligible for the same same-model Mantle path a direct-SDK OpenAI source gets. Present the options below to the user:
+OpenRouter is a hosted routing service (not self-hosted like LiteLLM). It adds a margin on top of provider pricing. **First check whether the underlying model is an OpenAI model with a Mantle target** (the `openai` provider is present, per the Mantle guidance above) — OpenRouter is a transport layer, not a different model, so an OpenAI model routed through OpenRouter is eligible for the same same-model Mantle path a direct-SDK OpenAI source gets. Present the options below to the user:
 
 > **If the startup was using OpenRouter primarily for cost-based routing within one model family**
 > (e.g., routing between Claude Haiku and Claude Sonnet, or Nova Lite and Nova Pro),
@@ -464,7 +456,7 @@ OpenRouter is a hosted routing service (not self-hosted like LiteLLM). It adds a
 | C) Self-hosted LiteLLM                                                     | Replace OpenRouter with LiteLLM proxy pointing to Bedrock                                 | 1–3 days  | Preserves router pattern; removes OpenRouter dependency; adds self-hosting                                                                                                                          |
 | D) Keep OpenRouter                                                         | Use OpenRouter with `amazon/` prefixed Bedrock models                                     | Hours     | Lowest effort; retains OpenRouter dependency and margin; this is a model switch, not a same-model move                                                                                              |
 
-Recommend **A** when `ai_source == "openai"` and a Mantle target exists (region gate passes per the Mantle guidance above); otherwise recommend **B** and present C/D as lower-effort alternatives. Record user's choice (or the recommended default if not asked) in `aws-design-ai.json` → `code_migration.openrouter_path`: `"same_model_mantle"` / `"direct"` / `"litellm"` / `"keep_openrouter"`.
+Recommend **A** when the `openai` provider is present and a Mantle target exists (region gate passes per the Mantle guidance above); otherwise recommend **B** and present C/D as lower-effort alternatives. Record user's choice (or the recommended default if not asked) in `aws-design-ai.json` → `code_migration.openrouter_path`: `"same_model_mantle"` / `"direct"` / `"litellm"` / `"keep_openrouter"`.
 
 ---
 
@@ -491,16 +483,16 @@ Write `aws-design-ai.json` to `$MIGRATION_DIR/`.
 
 ## Validation Checklist
 
-- [ ] `metadata.ai_source` matches `summary.ai_source` from input
-- [ ] Every model in `models[]` has a corresponding `bedrock_models` entry
+- [ ] `metadata.ai_source` matches the derived label from the provider set (Step 0)
+- [ ] Every model in `ai_sources[].models` has a corresponding `bedrock_models` entry
 - [ ] Every `bedrock_models[]` entry has pricing (`source_provider_price`, `bedrock_price`, `price_comparison`)
 - [ ] Every `design_blocks[]` entry with `capability` in {`document_extraction`, `image_analysis`, `speech_transcription`} has `target_bedrock_model: null`, a non-null `target_aws_service`, and `honest_assessment: "not_applicable"` — these are NOT included in `bedrock_models[]` and do NOT need pricing here. (Estimate phase currently excludes them from cost analysis entirely — see `estimate-ai.md` "Traditional-AI workloads" note. Per-page/per-image/per-minute cost modeling for Textract/Rekognition/Transcribe is a known follow-up, not yet implemented.)
-- [ ] `capability_mapping` covers every `true` capability from `capabilities_summary`
-- [ ] `code_migration.primary_pattern` matches `integration.pattern`
+- [ ] `capability_mapping` covers every `true` capability from `integration_context.capabilities_summary`
+- [ ] `code_migration.primary_pattern` matches `integration_context.pattern`
 - [ ] All model IDs use current Bedrock identifiers (Active status per `references/vendored/ai/ai-model-lifecycle.md`)
 - [ ] No Legacy model is used as `bedrock_models[].aws_model_id` unless no Active alternative exists (with EOL date noted)
 - [ ] `honest_assessment` logic is consistent (weakest model drives overall)
-- [ ] If `ai_source` includes `"openai"`: every model that `shared/openai-on-bedrock.md` lists as available on Bedrock, and whose target region carries it, is mapped to **itself** with `model_change: false` — not to a Claude/Nova substitute
+- [ ] If the `openai` provider is present: every model that `shared/openai-on-bedrock.md` lists as available on Bedrock, and whose target region carries it, is mapped to **itself** with `model_change: false` — not to a Claude/Nova substitute
 - [ ] If `honest_assessment == "recommend_stay"`: `honest_assessment_reason` names a non-cost blocker (cost parity alone is never sufficient for an OpenAI source)
 - [ ] No `bedrock_models[]` entry pairs **GPT-5.5 or GPT-5.4** with a Converse/`bedrock-runtime`
       migration path (those two models only — mantle-only, no CRIS). GPT-5.6 and GPT-6 models MAY

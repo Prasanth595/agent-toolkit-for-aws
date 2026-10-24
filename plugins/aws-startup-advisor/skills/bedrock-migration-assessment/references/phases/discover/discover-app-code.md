@@ -1,6 +1,6 @@
 # Discover Phase: App Code Discovery
 
-> Self-contained source-neutral application code discovery. Scans source and dependency manifests for AI providers, SDKs, frameworks, gateways, models, capabilities, and call sites. At AI confidence >= 70%, it writes `ai-workload-profile.json`. In delegated GCP mode only, the explicitly marked adapter sections may also preserve selected-base GCP SDK/resource evidence.
+> Self-contained source-neutral application code discovery. Scans source and dependency manifests for AI providers, SDKs, frameworks, gateways, models, capabilities, and call sites. At AI confidence >= 70%, it writes the #415 `ai-workload-profile.json` and the temporary `ai-workload-sidecar.json` (workloads, agentic profile, tool manifest). In delegated GCP mode only, the explicitly marked adapter sections may also preserve selected-base GCP SDK/resource evidence.
 > If no source code files are found, exits cleanly with no output.
 
 **Dead-end handling:** If this file exits without producing artifacts (no source code found, or AI confidence < 70%), report the signals found (if any) and confidence level. In direct mode, ask for supported application source/dependency evidence or explicit OpenAI, Anthropic, or OpenRouter provider-usage intent. In delegated GCP mode only, ask for Terraform files or billing exports.
@@ -198,7 +198,7 @@ Determine whether the codebase contains agentic workflows. Execute these rules i
 5. If ONLY 3B.9 (agent memory) detected WITHOUT an agent loop or framework → set `is_agentic: false`
 6. If NO agentic signals detected → set `is_agentic: false`
 
-**If multiple frameworks detected:** Set `framework` to the one with the most agent definitions. Record others in `detection_signals`.
+**If multiple frameworks detected:** Set `framework` to the one with the most agent definitions. Record the others in the discovery notes.
 
 **If `is_agentic: false`:** Skip Steps 5.5 and 6.5. Continue to Step 4.
 
@@ -234,7 +234,7 @@ Before finalizing AI detection, verify signals are genuine:
 
 **Exit gate:** If overall AI confidence < 70%:
 
-- **If** `$MIGRATION_DIR/ai-workload-profile.json` **already exists** with `metadata.profile_source` = `"iac_vertex"` (from `discover-iac.md` Step 7d — strong Vertex Terraform): **exit cleanly** without deleting or modifying that file. Report to the parent orchestrator: signals found, confidence below 70%, and that the **IaC-inferred AI profile is retained** for Clarify.
+- **If** `$MIGRATION_DIR/ai-workload-profile.json` **already exists** as an IaC-only #415 profile (every evidence entry has `provenance: "iac"`, from `discover-iac.md` Step 7d — strong Vertex Terraform): **exit cleanly** without deleting or modifying that file. Report to the parent orchestrator: signals found, confidence below 70%, and that the **IaC-inferred AI profile is retained** for Clarify.
 - **Otherwise:** Do **not** generate `ai-workload-profile.json`. Report signals found, confidence level, and reason for not generating the AI profile. In delegated GCP mode, inferred resources from Steps 1-2 remain available to GCP sub-discoverers and the parent may request Terraform files or billing exports. In direct mode, request supported application source/dependency evidence or explicit OpenAI, Anthropic, or OpenRouter provider-usage intent; do not request Terraform or billing inputs.
 
 **If confidence >= 70%**, continue to Steps 5-8 below.
@@ -255,8 +255,8 @@ Scan files that contained AI signals for specific model information:
   - `GenerativeModel("gemini-pro")` -> model_id: `"gemini-pro"`
   - `aiplatform.Model.list(filter='display_name="my-model"')` -> model_id: `"my-model"`
   - `TextEmbeddingModel.from_pretrained("text-embedding-004")` -> model_id: `"text-embedding-004"`
-  - Look for Gemini model string patterns: `gemini-pro`, `gemini-1.5-*`, `gemini-2.0-*`, `gemini-2.5-*`, `gemini-3-*`, `gemini-3.1-*` — including versioned variants like `gemini-2.5-flash-latest`, `gemini-2.5-flash-preview-*`, `gemini-2.5-flash-thinking`, `gemini-2.5-pro-preview-*`. Normalize all `gemini-2.5-flash-*` variants to `model_id: "gemini-2.5-flash"` (or `"gemini-2.5-flash-thinking"` if the thinking variant is explicit). Normalize all `gemini-2.5-pro-*` variants to `model_id: "gemini-2.5-pro"`. Record the raw string in `detection_signals` for reference.
-  - **Gemini 1.5 Legacy:** Normalize `gemini-1.5-flash*` → `model_id: "gemini-1.5-flash"` and `gemini-1.5-pro*` → `model_id: "gemini-1.5-pro"`. Set `lifecycle_status: "legacy"` and `eol_date: "2025-09-24"` on these model entries in `ai-workload-profile.json`. Surface in the AI Context Summary during Clarify: "⚠️ Gemini 1.5 Flash/Pro is past EOL (Sep 2025). Plan to upgrade the source model to 2.5 Flash/Pro as part of or before the AWS migration."
+  - Look for Gemini model string patterns: `gemini-pro`, `gemini-1.5-*`, `gemini-2.0-*`, `gemini-2.5-*`, `gemini-3-*`, `gemini-3.1-*` — including versioned variants like `gemini-2.5-flash-latest`, `gemini-2.5-flash-preview-*`, `gemini-2.5-flash-thinking`, `gemini-2.5-pro-preview-*`. Normalize all `gemini-2.5-flash-*` variants to `model_id: "gemini-2.5-flash"` (or `"gemini-2.5-flash-thinking"` if the thinking variant is explicit). Normalize all `gemini-2.5-pro-*` variants to `model_id: "gemini-2.5-pro"`. Record the raw string as that model's `raw_model` in `model_observations`.
+  - **Gemini 1.5 Legacy:** Normalize `gemini-1.5-flash*` → `model_id: "gemini-1.5-flash"` and `gemini-1.5-pro*` → `model_id: "gemini-1.5-pro"`. Keep the normalized `model_id` in `ai_sources[].models`. BMA treats `gemini-1.5-pro` as retired and leaves its pricing unavailable. Surface in the AI Context Summary during Clarify: "⚠️ Gemini 1.5 Flash/Pro is past EOL (Sep 2025). Plan to upgrade the source model to 2.5 Flash/Pro as part of or before the AWS migration."
 
   **OpenAI patterns:**
   - `client.chat.completions.create(model="gpt-4o")` -> model_id: `"gpt-4o"`
@@ -318,7 +318,7 @@ After extracting model details (Step 5), split the detected AI usage into distin
 
 5. **Generate workload_id** — deterministic hash: `"wl_" + sha256(model_id + "|" + sdk_method + "|" + ("structured" if structured_output else "plain"))[:6]`
 
-**Output:** Add a `workloads` array to the `ai-workload-profile.json` output alongside the existing `models[]` field.
+**Output:** Write the `workloads` array to the sidecar `ai-workload-sidecar.json`. It does not go into the #415 profile.
 
 ```json
 "workloads": [
@@ -362,7 +362,7 @@ After extracting model details (Step 5), split the detected AI usage into distin
 
 - `workloads[]` is an empty array when no AI call sites are detected
 - `call_sites[].file` uses repo-relative POSIX paths
-- Every model_id in `workloads[]` MUST also appear in `models[]` (backward compatibility)
+- Every model_id in `workloads[]` MUST also appear in some `ai_sources[].models` entry of the #415 profile
 - If a method is in the structured-output trio AND the model is multimodal (Gemini, GPT-4o, Claude) AND structured output is NOT detected → set `capability_confidence: "medium"` (ambiguous — Clarify will confirm)
 
 ---
@@ -455,7 +455,7 @@ Determine how the application integrates with AI services:
   - `rest_api` — Raw HTTP calls to Vertex AI or OpenAI endpoints
   - `mixed` — Combination of the above
 
-- **Gateway/router type** (`gateway_type`): Detect whether AI calls go through a gateway, router, or framework. This critically affects migration effort (gateway users can migrate in 1-3 days vs 1-3 weeks for direct SDK).
+- **Gateway/router type** (`gateways[].type`): Detect whether AI calls go through a gateway, router, or framework. This critically affects migration effort (gateway users can migrate in 1-3 days vs 1-3 weeks for direct SDK).
 
   Scan for these patterns and classify:
 
@@ -485,7 +485,7 @@ Determine how the application integrates with AI services:
 
   **Do NOT read secret values** — only check for the presence of the key name. Log: "Detected [KEY_NAME] in [file] — classified as llm_router (OpenRouter/LiteLLM)."
 
-  Set `gateway_type` to `null` if no AI signals were detected or detection is ambiguous.
+  Set `gateways[].type` to `null` (no gateway entry) if no AI signals were detected or detection is ambiguous.
 
 Build the **capabilities summary** — a flat boolean map of which AI capabilities are actively used across all detected models:
 
@@ -535,96 +535,74 @@ For each tool detected in Step 5.5 (from agent `tools` lists) or Step 3B.7 (tool
 
 ---
 
-## Step 7: Capture Supporting Infrastructure
+## Step 8: Generate the #415 profile and the sidecar
 
-**Only if Terraform files were found (IaC discovery also ran)**, extract AI-related infrastructure resources:
+Load `references/shared/schema-discover-ai.md` and write two files under `$MIGRATION_DIR`:
 
-- **AI resources**: `google_vertex_ai_endpoint`, `google_vertex_ai_model`, `google_vertex_ai_featurestore`, `google_vertex_ai_index`, `google_vertex_ai_tensorboard`, etc.
-- **Supporting resources** that serve AI primaries:
-  - Service accounts used by AI endpoints
-  - VPC connectors attached to AI services
-  - Secret Manager entries referenced by AI code (API keys, credentials)
-  - Cloud Storage buckets used for model artifacts or training data
+1. `ai-workload-profile.json` — the #415 document. Group the detected models into `ai_sources[]` by `(provider, source_service)`. Gemini/Vertex models map to `google`/`vertex_ai`, OpenAI SDK models to `openai`/`openai_api`, Azure OpenAI endpoints to `openai`/`azure_openai`, and Anthropic SDK models to `anthropic`/`anthropic_api`. Each entry has `model_families`, `model_evidence` (`observed` when a model was located, otherwise `not_observed` with empty `models` and `model_observations`), `models`, and one `model_observations` entry per model with `raw_model`, `model_family`, and at least one `evidence` item (`provenance` `code`, `confidence` from Step 4).
+2. `ai-workload-sidecar.json` — `schema_version` `1`, `kind` `"BMA_GCP_AI_SIDECAR"`, `workloads` (Step 5B, always present, empty when no call sites), and `agentic_profile` and `tool_manifest` only when Step 3.5 found agents.
 
-For each resource, capture: `address`, `type`, `file`, and relevant `config`.
+OpenRouter is never an `ai_sources` entry. Record it under `gateways[]` with `upstream_evidence: "observed"` and its upstreams only when code shows the upstream provider prefixes. Otherwise record `upstream_evidence: "unresolved"` with `upstreams: []`.
 
-If no Terraform files were provided, set `infrastructure: []`.
+Run the gate before reporting the phase complete:
 
----
+```
+python3 <skill root>/scripts/bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json
+```
 
-## Step 8: Generate ai-workload-profile.json
+Exit 0 is required. Exit 1 is a stop. Do not reshape the output to pass the gate.
 
-Load `references/shared/schema-discover-ai.md` and generate output following the `ai-workload-profile.json` schema.
+### Pre-existing IaC profile
 
-### Pre-existing IaC profile (`profile_source: "iac_vertex"`)
+If `$MIGRATION_DIR/ai-workload-profile.json` already exists as an IaC-only #415 profile (every evidence entry has `provenance: "iac"`):
 
-If `$MIGRATION_DIR/ai-workload-profile.json` **already exists** with `metadata.profile_source` = `"iac_vertex"`:
+1. Execute Steps 5–6 to build the code-derived content as usual.
+2. Merge into the final file. Code evidence (`provenance: "code"`) wins where code and IaC report the same `(provider, source_service)` pair. Keep an IaC-only pair only when code found nothing for it, and keep its `iac` evidence.
+3. Re-run the gate on the merged file.
 
-1. Execute Steps 5–7 to build the **code-derived** profile content as usual.
-2. **Merge** into the final file written to `$MIGRATION_DIR/ai-workload-profile.json`:
-   - Set `metadata.profile_source` to **`"merged"`**.
-   - Set `metadata.sources_analyzed.terraform` to **`true`** when Terraform was present in the project (IaC discovery ran).
-   - Set `metadata.sources_analyzed.application_code` to **`true`**.
-   - **Code wins on conflict** for `models[]`, `integration`, `summary.ai_source`, `summary.overall_confidence`, `summary.confidence_level`, and `detection_signals` (code-derived signals take precedence; you may append non-duplicate Terraform `detection_signals` entries).
-   - **`infrastructure[]`:** Union by resource `address`. Include all Vertex-related entries from the IaC profile plus any from Step 7; where the same `address` appears, prefer the entry with richer `config` (typically Step 7 after code).
-   - Set `summary.inferred_from_iac` to **`false`** when Step 5–6 populated models or integration from code; if `models[]` is still empty after code analysis, keep `inferred_from_iac` consistent with whether Clarify still needs to disambiguate (default **`false`** once code path ran at ≥70% confidence).
-3. If no pre-existing `iac_vertex` file, generate a fresh profile with `metadata.profile_source` = **`"application_code"`**.
+If no pre-existing IaC profile exists, generate a fresh profile from code.
 
 **CRITICAL field names** — use EXACTLY these keys:
 
-- `model_id` (not model_name, name)
-- `service` (not service_type, gcp_service)
-- `detected_via` (not detection_method, source)
-- `capabilities_used` (not capabilities, features)
-- `usage_context` (not description, purpose)
-- `pattern` in integration (not integration_type, method)
-- `gateway_type` in integration (not gateway, router_type)
-- `capabilities_summary` (not capabilities, feature_flags)
-- `ai_source` in summary (not provider, source_provider)
+- `ai_sources[].provider` and `source_service` (not `ai_source`, `service`, `provider_name`)
+- `model_families`, `model_evidence`, `models`, `model_observations` (not `models[].model_id`, `detected_via`)
+- `model_observations[].normalized_model`, `raw_model`, `model_family`, `evidence` (not `model_name`, `capabilities_used`)
+- `evidence[].provenance` — one of `code`, `iac`, `live_api`, `usage_api`, `user_confirmed` (not `source`, `detected_via`)
+- `evidence[].confidence` — one of `confirmed`, `high`, `medium`, `low`
+- `gateways[].product`, `type`, `upstream_evidence`, `upstreams` (not `gateway_type`, `router_type`)
 
-**Determining `ai_source`:**
+**Determining `provider`:**
 
-- `"gemini"` — Only Gemini/Vertex AI generative models detected (patterns 2.3)
-- `"openai"` — Only OpenAI SDK/models detected (patterns 2.4)
-- `"anthropic"` — Only Anthropic SDK detected (pattern 2.5, `anthropic` package, `claude-*` model strings) with no Gemini or OpenAI signals
-- `"both"` — Both Gemini and OpenAI detected in the same codebase; or Anthropic + any other provider
-- `"other"` — Traditional ML only (custom models, Vision API, Speech API, Document AI) with no LLM SDK detected
+- `google` — Gemini/Vertex AI generative models (patterns 2.3)
+- `openai` — OpenAI SDK or Azure OpenAI models (patterns 2.4); `source_service` tells direct from Azure
+- `anthropic` — Anthropic SDK and `claude-*` model strings (pattern 2.5)
+- Traditional ML only (Vision, Speech, Document AI, custom models) does not produce an `ai_sources` entry. Route it to the traditional-AI rubric in `design-refs/ai.md`.
 
-**Note:** Anthropic SDK users are migrating to Bedrock-hosted Claude models, not to SageMaker. Setting `ai_source: "anthropic"` ensures Design routes to the correct Bedrock migration path rather than the traditional ML rubric.
+A provider may appear more than once through different `source_service` values. Two entries with the same `(provider, source_service)` pair are invalid.
 
-**Conditional sections:**
+**Conditional sections (sidecar only):**
 
-- `current_costs` — Include ONLY if billing data was provided (billing discovery ran). Omit entirely if no billing data.
-- `infrastructure` — Set to `[]` if no Terraform files were provided (IaC discovery did not run).
-- `agentic_profile` — Include ONLY if `is_agentic: true` from Step 3.5. Omit entirely if not agentic.
+- `agentic_profile` — Include ONLY if `is_agentic: true` from Step 3.5. Omit otherwise.
 - `tool_manifest` — Include ONLY if `agentic_profile` exists. Set to `[]` if agentic but no tools detected in Step 6.5.
 
-After generating the output file, the parent `discover.md` handles the phase status update — do not update `.phase-status.json` here.
+After writing the files, the parent `discover.md` handles the phase status update. Do not update `.phase-status.json` here.
 
 ---
 
-## Output Validation Checklist — ai-workload-profile.json
+## Output Validation Checklist — ai-workload-profile.json and sidecar
 
-- `metadata.profile_source` is one of: `"application_code"`, `"iac_vertex"`, `"merged"`
-- `metadata.sources_analyzed` reflects which data sources were actually provided
-- `summary.overall_confidence` matches the detection confidence from Step 4
-- `summary.total_models_detected` matches the length of `models` array
-- `summary.ai_source` is set correctly: `"gemini"`, `"openai"`, `"anthropic"`, `"both"`, or `"other"` based on detected LLM SDKs
-- Every entry in `models` has `model_id`, `service`, `detected_via`, `evidence`, `capabilities_used`, and `usage_context`
-- `models[].detected_via` only contains sources that were actually analyzed (`"code"`, `"terraform"`, `"billing"`)
-- `models[].evidence` array has at least one entry per source listed in `detected_via`
-- `models[].capabilities_used` only lists capabilities with evidence from code analysis
-- `integration.capabilities_summary` is consistent with the union of all `models[].capabilities_used`
-- `integration.gateway_type` is set: one of `"llm_router"`, `"api_gateway"`, `"voice_platform"`, `"framework"`, `"direct"`, or `null`
-- `infrastructure` is empty array `[]` if no Terraform was provided
-- `current_costs` section is present ONLY if billing data was provided; omitted entirely otherwise
-- `detection_signals` matches the signals found in Step 3
-- All field names use EXACT required keys
-- `workloads[]` is present (empty array if no AI call sites; one entry per distinct `(model_id, sdk_method, structured_output)` tuple)
-- Every `workloads[].model_id` also appears in `models[].model_id`
+- `schema_version` is `"1.0"` and the profile has only `schema_version`, `ai_sources`, and `gateways`
+- `validate-profile` exits 0 with the sidecar
+- Every `ai_sources` pair `(provider, source_service)` is unique, and no provider is `both`, `unknown`, or `openrouter`
+- `model_evidence` is `observed` only when `models` and `model_observations` are non-empty
+- `model_observations` corresponds exactly to `models`, and each `model_family` is in `model_families`
+- Every `provenance` value is in the #415 enum, and every `evidence` entry has a `confidence`
+- OpenRouter appears only under `gateways[]`, and `upstream_evidence: "unresolved"` has `upstreams: []`
+- `workloads[]` is present in the sidecar (empty array if no AI call sites; one entry per distinct `(model_id, sdk_method, structured_output)` tuple)
+- Every `workloads[].model_id` also appears in some `ai_sources[].models` entry
 - `workloads[].capability_confidence` is one of: `"high"`, `"medium"`, `"low"`
 - `workloads[].workload_id` matches pattern `wl_[0-9a-f]{6}`
-- If `is_agentic: true`: `agentic_profile` section exists with all required fields
+- If `is_agentic: true`: `agentic_profile` exists in the sidecar with all required fields
 - If `is_agentic: true`: `agentic_profile.agent_count` equals length of `agentic_profile.agents[]`
 - If `is_agentic: true`: `agentic_profile.tool_count` equals length of `tool_manifest[]` (deduplicated)
 - If `is_agentic: true`: `agentic_profile.framework` is one of: `"langgraph"`, `"crewai"`, `"autogen"`, `"openai_agents"`, `"strands"`, `"pydantic_ai"`, `"agno"`, `"custom"`, `"none"`
@@ -632,24 +610,20 @@ After generating the output file, the parent `discover.md` handles the phase sta
 - If `is_agentic: true`: every `agent_id` in `tool_manifest[].used_by_agents` exists in `agentic_profile.agents[].agent_id`
 - If `is_agentic: true`: `tool_manifest[].transport` is one of: `"function"`, `"api"`, `"mcp"`, `"unknown"`
 - If `is_agentic: true`: `tool_manifest[].auth_hint` is one of: `"none"`, `"api_key"`, `"oauth"`, `"iam"`, `"unknown"`
-- If `is_agentic: false`: `agentic_profile` and `tool_manifest` are ABSENT from output (not present with null/false values)
+- If `is_agentic: false`: `agentic_profile` and `tool_manifest` are ABSENT from the sidecar (not present with null/false values)
 
 ---
 
-## Design Phase Integration
+## Downstream Consumption
 
-The Design phase (`references/phases/design/design.md`) uses `ai-workload-profile.json`:
+Design (`references/phases/design/design.md`) reads the two files this way:
 
-1. **`summary.ai_source`** — Routes to the correct design reference: `"gemini"` → `design-refs/ai-gemini-to-bedrock.md`, `"openai"` → `vendored/ai/ai-openai-to-bedrock.md`, `"anthropic"` → `vendored/ai/ai-anthropic-to-bedrock.md` (Anthropic SDK → Bedrock Converse API client swap), `"both"` → load both Gemini and OpenAI refs, `"other"` → `design-refs/ai.md` (traditional ML / Vision API / Speech API only)
-2. **`models`** — Determines which Bedrock models to recommend via the model selection decision tree
-3. **`integration.capabilities_summary`** — Validates Bedrock feature parity (e.g., if `function_calling` is `true`, selected Bedrock model must support tool use)
-4. **`integration.pattern`** and **`integration.primary_sdk`** — Determines code migration guidance (direct SDK swap vs framework provider swap vs REST endpoint change)
-5. **`integration.gateway_type`** — Determines migration effort and approach: `"llm_router"` or `"framework"` → config change (1-3 days); `"direct"` → full SDK swap (1-3 weeks)
-6. **`integration.frameworks`** — If LangChain is used, migration may be simpler (swap provider, keep chains)
-7. **`infrastructure`** — Identifies supporting AWS resources needed (IAM roles, VPC config)
-8. **`current_costs.monthly_ai_spend`** — Baseline for cost comparison in estimate phase
-9. **`agentic_profile`** (if present) — Routes to agentic design path: determines migration approach (retarget / Harness / Strands), maps tools to AgentCore Gateway targets, configures AgentCore Memory
-10. **`tool_manifest`** (if present) — Inventories tools for AgentCore Gateway or Harness tool configuration
+1. **`ai_sources[].provider` and `source_service`** — Route to the design reference. `google` → `design-refs/ai-gemini-to-bedrock.md`, `openai`/`openai_api` → `vendored/ai/ai-openai-to-bedrock.md`, `anthropic` → `vendored/ai/ai-anthropic-to-bedrock.md`, `openai`/`azure_openai` → the Azure OpenAI reference. More than one source loads each matching reference.
+2. **`ai_sources[].models`** — Determines which Bedrock models to recommend. Retired models are flagged, not priced.
+3. **`gateways[]`** — An OpenRouter gateway loads `vendored/ai/ai-openrouter-to-bedrock.md`.
+4. **Sidecar `workloads[]`** — One Bedrock recommendation per workload.
+5. **Sidecar `agentic_profile` and `tool_manifest`** — Route to the agentic design path and AgentCore tool configuration.
+6. **Sidecar `observed_costs` and `integration_context`** — Observed spend and integration context. Present when discovery recorded them.
 
 ---
 

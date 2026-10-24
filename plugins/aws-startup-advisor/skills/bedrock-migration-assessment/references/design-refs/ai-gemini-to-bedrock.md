@@ -2,7 +2,7 @@
 
 **Applies to:** Vertex AI Generative AI (Gemini models) → Amazon Bedrock
 
-This file is loaded by `design-ai.md` when `ai-workload-profile.json` has `summary.ai_source` = `"gemini"` or `"both"`. It provides model mapping tables with pricing and honest competitive analysis for Gemini → Bedrock migration decisions.
+This file is loaded by `design-ai.md` when `ai-workload-profile.json` has a `google` provider in `ai_sources[]`. It provides model mapping tables with pricing and honest competitive analysis for Gemini → Bedrock migration decisions.
 
 Verify source-provider pricing against `references/shared/pricing-cache.md` and Bedrock pricing against `references/vendored/ai/bedrock-pricing-cache.md`.
 

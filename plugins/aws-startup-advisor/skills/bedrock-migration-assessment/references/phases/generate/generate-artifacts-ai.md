@@ -1,6 +1,7 @@
 # Generate Phase: AI Artifact Generation
 
 > Loaded by generate.md when generation-ai.json and aws-design-ai.json exist.
+> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
 
 **Execute ALL steps in order. Do not skip or optimize.**
 
@@ -43,7 +44,7 @@ Read from `$MIGRATION_DIR/`:
 
 If any required file is missing: **STOP**. Output: "Missing required artifact: [filename]. Complete the prior phase that produces it."
 
-**Sparse / IaC-only profile:** If `ai-workload-profile.json` has empty `models[]` or `metadata.profile_source` is `iac_vertex`, use `aws-design-ai.json` for Bedrock targets and example prompts; do **not** fail solely because discovery did not list model IDs.
+**Sparse / IaC-only profile:** If `ai-workload-profile.json` has empty `ai_sources[].models` or every evidence entry in `ai-workload-profile.json` is `provenance: "iac"`, use `aws-design-ai.json` for Bedrock targets and example prompts; do **not** fail solely because discovery did not list model IDs.
 
 ---
 
@@ -70,7 +71,7 @@ foundation-model resources; do not interpolate the ARN into another ARN.
 
 **Step 3F runs for ALL paths** (direct, mantle, gpt-oss, gateway, harness, strands) — generate `bedrock_monitoring.tf` regardless of migration path.
 
-**Determine language** (direct SDK users only): Read `ai-workload-profile.json` → `integration.languages` array. Use the first entry: `"python"` → `.py`, `"javascript"`/`"typescript"` → `.js`, `"go"` → `.go`, other/unknown → `.py`.
+**Determine language** (direct SDK users only): Read the sidecar `ai-workload-sidecar.json` → `integration_context.languages` array. Use the first entry: `"python"` → `.py`, `"javascript"`/`"typescript"` → `.js`, `"go"` → `.go`, other/unknown → `.py`.
 
 ---
 
@@ -115,11 +116,11 @@ Generate `ai-migration/provider_adapter.{py,js,go}` — an abstraction layer tha
 **Requirements:**
 
 - Read `AI_PROVIDER` env var to select provider: `vertex_ai` (current), `bedrock` (target), `shadow` (both — return source response, log Bedrock response)
-- Expose only the methods matching capabilities in `ai-workload-profile.json` → `integration.capabilities_summary`:
+- Expose only the methods matching capabilities in `ai-workload-sidecar.json` → `integration_context.capabilities_summary`:
   - `text_generation: true` → `generate(prompt) → str`
   - `streaming: true` → `generate_stream(prompt) → Iterator[str]`
   - `embeddings: true` → `embed(text) → list[float]`
-- **Source provider class**: Use SDK imports from `ai-workload-profile.json` → `integration.sdk_imports`. Use model IDs from `ai-workload-profile.json` → `models[].model_id`.
+- **Source provider class**: Use SDK imports from `ai-workload-sidecar.json` → `integration_context.sdk_imports`. Use model IDs from `ai-workload-profile.json` → `ai_sources[].models`.
 - **Bedrock provider class**: For a Converse plan, use `boto3` (`converse` for generate, `converse_stream` for streaming, `invoke_model` for separately selected Titan embeddings). For `runtime_openai_cris`, preserve the runtime API selected in the design: Converse uses this adapter shape; an OpenAI-compatible Chat/Responses selection uses the OpenAI SDK at `https://bedrock-runtime.{region}.amazonaws.com/openai/v1` with Bedrock credentials and the exact CRIS ID. Never send a bare Astra ID to runtime or replace a validated `global.` profile with `us.`. Use an application inference profile only when the selected model/API supports it; otherwise retain `aws-design-ai.json` → `ai_architecture.bedrock_models[].aws_model_id`. Use region from `preferences.json` → `design_constraints.target_region`.
 
   ```python
@@ -151,7 +152,7 @@ Generate `ai-migration/test_comparison.py` — always Python regardless of adapt
 - Compute summary statistics: p50/p95/mean latency per provider, quality score (trait matching against expected traits), pass/fail criteria
 - Pass criteria: Bedrock latency ≤ 2x source latency, mean quality score ≥ 0.9
 - Output structured JSON to `--output` (default: `comparison_results.json`)
-- Built-in test prompts: include 3-5 prompts based on `ai-workload-profile.json` → `models[].usage_context` covering the primary use case
+- Built-in test prompts: include 3-5 prompts based on `ai-workload-sidecar.json` → `workloads[]` covering the primary use case
 - **Adapter paths** (`direct`, `converse`, `gpt-oss`, or a gateway subroute that emits an adapter): use `from provider_adapter import get_provider` from the emitted provider adapter.
 - **Mantle / runtime CRIS / `same_model_mantle` paths:** do not import `provider_adapter` because Step 0 intentionally skips it. Call the source using its recorded SDK and call the target directly with the selected Mantle API. Use this target function for proprietary GPT plans, substituting the saved design values:
 
@@ -230,7 +231,7 @@ Skip if `ai_framework` = `"direct"` or absent. Read `preferences.json` → `ai_c
 - Include embedding model entry if embeddings are used
 - Note required env vars: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
 
-**`"llm_router"` + OpenRouter detected** (evidence: `base_url` containing `openrouter.ai` in `ai-workload-profile.json` → `detection_signals`):
+**`"llm_router"` + OpenRouter detected** (evidence: an OpenRouter gateway in `ai-workload-profile.json` → `gateways[]`):
 
 Check `aws-design-ai.json` → `code_migration.openrouter_path` (set in Design Part 5):
 
@@ -253,7 +254,7 @@ Check `aws-design-ai.json` → `code_migration.openrouter_path` (set in Design P
 
 **`"framework"`** → Generate `gateway_config.py`:
 
-- Show before/after import swap for the detected framework (`ai-workload-profile.json` → `integration.sdk_imports`)
+- Show before/after import swap for the detected framework (`ai-workload-sidecar.json` → `integration_context.sdk_imports`)
 - LangChain: `langchain_google_vertexai` → `langchain_aws.ChatBedrock` (or `langchain_openai` → `langchain_aws.ChatBedrock`)
 - LlamaIndex: `llama_index.llms.vertex` → `llama_index.llms.bedrock_converse`
 - Include pip install note for the AWS package
@@ -436,7 +437,7 @@ echo "=== Migration Complete ==="
 
 Skip if the user did not opt into model evaluation in `generate-ai.md` Part 0.
 
-**`eval-prompts.jsonl`**: Generate 10-20 domain-specific prompts in JSONL format (`{"prompt": "...", "referenceResponse": "", "category": "..."}`). Base prompts on `ai-workload-profile.json` → `models[].usage_context`. Include function-calling prompts if `capabilities_summary.function_calling` is true, retrieval prompts if RAG patterns were detected. Include 2-3 edge case prompts.
+**`eval-prompts.jsonl`**: Generate 10-20 domain-specific prompts in JSONL format (`{"prompt": "...", "referenceResponse": "", "category": "..."}`). Base prompts on `ai-workload-sidecar.json` → `workloads[]`. Include function-calling prompts if `capabilities_summary.function_calling` is true, retrieval prompts if RAG patterns were detected. Include 2-3 edge case prompts.
 
 **`run-evaluation.sh`**: Dry-run by default. Creates S3 bucket, uploads prompts, calls `aws bedrock create-evaluation-job` with model IDs from `aws-design-ai.json`, downloads results. Use the same model IDs and region as `setup_bedrock.sh`.
 
@@ -809,9 +810,9 @@ output "bedrock_inference_profile_arns" {
 Verify all generated artifacts:
 
 - [ ] Provider adapter (or gateway config) uses actual model IDs from `aws-design-ai.json` — no placeholders
-- [ ] Only capabilities present in `capabilities_summary` have methods/tests generated
+- [ ] Only capabilities present in `integration_context.capabilities_summary` have methods/tests generated
 - [ ] Feature flag (`AI_PROVIDER` env var) controls provider selection in adapter
-- [ ] Test harness includes domain-specific prompts from `usage_context`
+- [ ] Test harness includes domain-specific prompts from the sidecar `workloads[]` and their capabilities
 - [ ] Test harness produces structured JSON output with latency and quality metrics
 - [ ] Setup script has correct region from `preferences.json`
 - [ ] Setup script IAM role follows least privilege

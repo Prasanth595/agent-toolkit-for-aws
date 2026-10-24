@@ -31,8 +31,9 @@ def test_both_branch_selects_guides_from_actual_provider_presence() -> None:
     assert "ai-anthropic-to-bedrock.md" in text, (
         "GCP design-ai.md's 'both' branch never loads the Anthropic guide"
     )
-    both_section_start = text.index('- `"both"`')
-    both_section = text[both_section_start:both_section_start + 1200]
+    # #415 routing: guides follow the provider set in ai_sources[], not an ai_source label.
+    both_section_start = text.index("**Load source-specific design reference based on the provider set")
+    both_section = text[both_section_start:both_section_start + 2000]
     assert "ai-gemini-to-bedrock.md" in both_section, (
         "GCP design-ai.md's 'both' branch no longer references the Gemini guide"
     )
@@ -43,7 +44,7 @@ def test_both_branch_selects_guides_from_actual_provider_presence() -> None:
         "GCP design-ai.md's 'both' branch no longer references the Anthropic "
         "guide in its own selection logic (not just elsewhere in the file)"
     )
-    assert "ACTUALLY" in both_section, (
-        "GCP design-ai.md's 'both' branch no longer explains it selects "
-        "guides based on actual provider presence rather than a fixed pair"
+    assert "observed" in both_section, (
+        "GCP design-ai.md's multi-provider branch no longer selects guides "
+        "from actual provider presence (model_evidence observed) rather than a fixed pair"
     )

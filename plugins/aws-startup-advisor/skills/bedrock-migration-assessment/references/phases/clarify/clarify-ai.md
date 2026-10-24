@@ -14,6 +14,7 @@ _contributes:
 > `clarify-assemble.md` presents them. (The "ask me everything" Full Flow variant in
 > `clarify.md` presents these questions directly in batches — see that file — because the
 > user explicitly opted out of the sheet-first wizard.)
+> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
 
 _Fire when:_ `ai-workload-profile.json` exists in `$MIGRATION_DIR/`.
 
@@ -22,7 +23,7 @@ closely parallel but independently-maintained question set for the same reason
 `clarify-ai-only.md` on both skills does: AI/Bedrock model selection, capability matching,
 and agentic-framework questions are close in shape between GCP and Azure sources, but every
 answer option and consequence line here was authored against GCP-sourced signals
-(`ai-workload-profile.json`'s `integration.pattern`/`gateway_type`, Vertex/Gemini detection).
+(the sidecar's `integration_context.pattern`, `gateways[].type`, and Vertex/Gemini provider detection in `ai_sources`).
 Unifying this category into a shared file is future scope, not part of this restructure —
 see `references/vendored/clarify/` for the categories that already are shared (region,
 compliance, availability, cost-appetite, multi-cloud).
@@ -34,13 +35,13 @@ compliance, availability, cost-appetite, multi-cloud).
 Before presenting questions, show:
 
 > **AI Context Summary:**
-> **AI source:** [from `summary.ai_source`: "Gemini", "OpenAI", "Both", or "Other"]
-> **Profile origin:** [from `metadata.profile_source`: if `iac_vertex` or `summary.inferred_from_iac` is true, state that Terraform was the primary signal and application code did not fully characterize the workload]
-> **Models detected:** [from `models[].model_id`; if empty, say **None inferred from code or IaC** — the following questions will pin down models and frameworks]
-> **Capabilities in use:** [from `integration.capabilities_summary` where true; if all false or pattern is `unknown`, say **Not inferred — confirm below**]
-> **Integration pattern:** [from `integration.pattern`; if `unknown`, say **Unknown (IaC-only)**] via [from `integration.primary_sdk`, or **not determined**]
-> **Gateway/router:** [from `integration.gateway_type`, or "None (direct SDK)"]
-> **Frameworks:** [from `integration.frameworks`, or "None"]
+> **AI source:** [from `ai_sources[].provider`: "Gemini" for `google`, "OpenAI" for `openai`, "Anthropic" for `anthropic`, "Both" when more than one provider, or "Other" when none]
+> **Profile origin:** [from evidence `provenance`: if every evidence entry is `iac`, state that Terraform was the primary signal and application code did not fully characterize the workload]
+> **Models detected:** [from `ai_sources[].models`; if empty, say **None inferred from code or IaC** — the following questions will pin down models and frameworks]
+> **Capabilities in use:** [from the sidecar's `integration_context.capabilities_summary` where true; if all false or pattern is `unknown`, say **Not inferred — confirm below**]
+> **Integration pattern:** [from the sidecar's `integration_context.pattern`; if `unknown`, say **Unknown (IaC-only)**] via [from `integration_context.primary_sdk`, or **not determined**]
+> **Gateway/router:** [from `gateways[].type`, or "None (direct SDK)"]
+> **Frameworks:** [from the sidecar's `integration_context.frameworks`, or "None"]
 
 ---
 
@@ -52,7 +53,7 @@ Before presenting questions, show:
 
 ## Multi-Workload Confirmation Table (if `workloads[]` has ≥ 2 entries)
 
-**Fire when:** `ai-workload-profile.json` contains a non-empty `workloads[]` array with 2 or more entries. This replaces the per-workload Q16–Q22 loop with a single confirmation table.
+**Fire when:** `ai-workload-sidecar.json` contains a non-empty `workloads[]` array with 2 or more entries. This replaces the per-workload Q16–Q22 loop with a single confirmation table.
 
 Before presenting Q16–Q22, show the detected workloads and proposed Bedrock targets:
 
@@ -204,7 +205,7 @@ Interpret → `ai_framework` array (multiple selections → array of all selecte
 
 ## Q15 — Approximately how much are you spending on your AI/LLM providers per month?
 
-**Personalize the wording:** substitute the detected provider names from `ai-workload-profile.json` → `models[].provider` when available (e.g. "on OpenAI" or "on OpenAI and Gemini, per your detected usage"). Do not assume providers the profile did not detect.
+**Personalize the wording:** substitute the detected provider names from `ai-workload-profile.json` → `ai_sources[].provider` when available (e.g. "on OpenAI" or "on OpenAI and Gemini, per your detected usage"). Do not assume providers the profile did not detect.
 
 > 1. < $500/month
 > 2. $500–$2,000/month
@@ -299,7 +300,7 @@ Interpret → `ai_token_volume`: 1 → `"low"`, 2 → `"medium"`, 3 → `"high"`
 
 ## Q19 — Which Gemini or OpenAI model are you currently using?
 
-**Auto-detect signal:** If `ai-workload-profile.json` exists and `models[0].model_id` is set with detection confidence ≥ 0.8, map to the matching Q19 answer and **skip Q19**. Set `ai_model_baseline` with `chosen_by: "extracted"`. If multiple models detected with similar confidence, ask Q19. If `openai-usage-profile.json`, `openrouter-usage-profile.json`, and/or `anthropic-usage-profile.json` exists, prefer the top model by token volume across ALL profiles combined (normalizing OpenRouter's `prompt_tokens`/`completion_tokens` before ranking, and summing Anthropic's `input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens` — including the cache fields, which are additional volume, not a sub-accounting of `input_tokens` — do not rank by `usage_by_model[0]` from just one profile when more than one exists, since that profile's own #1 may not be the combined #1) as the baseline — billed usage is stronger evidence than code detection — and mention the runner-up models to the user rather than re-asking.
+**Auto-detect signal:** If `ai-workload-profile.json` exists and the first `ai_sources[].models` entry has evidence confidence `high` or `confirmed`, map to the matching Q19 answer and **skip Q19**. Set `ai_model_baseline` with `chosen_by: "extracted"`. If multiple models detected with similar confidence, ask Q19. If `openai-usage-profile.json`, `openrouter-usage-profile.json`, and/or `anthropic-usage-profile.json` exists, prefer the top model by token volume across ALL profiles combined (normalizing OpenRouter's `prompt_tokens`/`completion_tokens` before ranking, and summing Anthropic's `input_tokens + cache_read_tokens + cache_creation_tokens + output_tokens` — including the cache fields, which are additional volume, not a sub-accounting of `input_tokens` — do not rank by `usage_by_model[0]` from just one profile when more than one exists, since that profile's own #1 may not be the combined #1) as the baseline — billed usage is stronger evidence than code detection — and mention the runner-up models to the user rather than re-asking.
 
 _Skip when:_ Primary model fully resolved from discovery. Use detected value with `chosen_by: "extracted"`.
 
@@ -375,7 +376,7 @@ Interpret → `ai_model_baseline`. Default: auto-detect from code, fallback Q16 
 
 ## Q20 — What input types must the model accept: text only, images (vision), or audio/video?
 
-**Auto-detect signal:** Read `integration.capabilities_summary`:
+**Auto-detect signal:** Read the sidecar's `integration_context.capabilities_summary`:
 
 | Signal                                           | Extract                                                                    | Skip Q20?                      |
 | ------------------------------------------------ | -------------------------------------------------------------------------- | ------------------------------ |
@@ -384,7 +385,7 @@ Interpret → `ai_model_baseline`. Default: auto-detect from code, fallback Q16 
 | all false / text only                            | `ai_vision: "text-only"`                                                   | Yes                            |
 | `image_generation: true` and `vision: false`     | note in `ai_capabilities_required`; skip Q20 (image output ≠ vision input) | Yes                            |
 
-_Skip when:_ Modalities fully resolved from `capabilities_summary`. Use detected value with `chosen_by: "extracted"`.
+_Skip when:_ Modalities fully resolved from `integration_context.capabilities_summary`. Use detected value with `chosen_by: "extracted"`.
 
 > 1. Text only
 > 2. Vision required — model must process images
@@ -436,11 +437,11 @@ Interpret → `ai_complexity`. Default: 2 → `"moderate"`.
 
 ---
 
-## Category G — Agentic Workflows (If `agentic_profile` exists in `ai-workload-profile.json`)
+## Category G — Agentic Workflows (If `agentic_profile` exists in `ai-workload-sidecar.json`)
 
-_Fire when:_ `ai-workload-profile.json` contains `agentic_profile` with `is_agentic: true`.
+_Fire when:_ `ai-workload-sidecar.json` contains `agentic_profile` with `is_agentic: true`.
 
-_Skip entirely when:_ `agentic_profile` is absent from `ai-workload-profile.json`.
+_Skip entirely when:_ `agentic_profile` is absent from `ai-workload-sidecar.json`.
 
 ---
 
@@ -462,8 +463,8 @@ Before presenting Category G questions, show:
 
 **Auto-detect signals** — recommend default based on `agentic_profile.framework`:
 
-- `gateway_type` is `"llm_router"` and evidence is **LiteLLM** → Default to **1 (retarget)**. Already abstracted from the model provider — migration is a config change (swap model IDs), not a code rewrite. Set `migration_approach: "retarget"` automatically and skip Q23 unless the user explicitly asks to evaluate Harness or Strands.
-- `gateway_type` is `"llm_router"` and evidence is **OpenRouter** → Default to **1 (retarget)** only when the underlying model is an OpenAI model with a Mantle target (same-model Mantle move, per `design-ai.md`'s OpenRouter guidance). Otherwise surface the full option set — an OpenRouter → Mantle move changes the base URL, credential type, and model-ID format, so it is not the same one-line change LiteLLM users get. Set `migration_approach: "retarget"` with `chosen_by: "extracted"` only in the Mantle-eligible case; otherwise ask Q23.
+- `gateways[].type` is `"llm_router"` and evidence is **LiteLLM** → Default to **1 (retarget)**. Already abstracted from the model provider — migration is a config change (swap model IDs), not a code rewrite. Set `migration_approach: "retarget"` automatically and skip Q23 unless the user explicitly asks to evaluate Harness or Strands.
+- `gateways[].type` is `"llm_router"` and evidence is **OpenRouter** → Default to **1 (retarget)** only when the underlying model is an OpenAI model with a Mantle target (same-model Mantle move, per `design-ai.md`'s OpenRouter guidance). Otherwise surface the full option set — an OpenRouter → Mantle move changes the base URL, credential type, and model-ID format, so it is not the same one-line change LiteLLM users get. Set `migration_approach: "retarget"` with `chosen_by: "extracted"` only in the Mantle-eligible case; otherwise ask Q23.
 - `langgraph`, `crewai`, `autogen` → Default to 1 (retarget). These frameworks support Bedrock as a model provider with minimal code changes.
 - `openai_agents` → Surface all options. OpenAI Agents SDK is tightly coupled to OpenAI API; retarget is harder. Note partial retarget (HTTP-compatible routing to Bedrock) as a bridge.
 - `strands` → Already AWS-native. Recommend 2 (Harness) for managed deployment or note "already on target framework."

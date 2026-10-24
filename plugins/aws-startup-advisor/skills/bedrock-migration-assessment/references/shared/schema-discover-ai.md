@@ -1,193 +1,138 @@
 # AI Discovery Schema
 
-**Mode boundary:** Direct BMA records actual provider/source-service/gateway provenance and never invents GCP billing, `live_gcloud`, or infrastructure evidence. GCP examples and legacy names below apply only when source evidence is actually GCP/Vertex or execution is delegated from GCP; the artifact shape remains unchanged.
+**Mode boundary:** Direct BMA records actual provider/source-service/gateway provenance and never invents GCP billing, `live_gcloud`, or infrastructure evidence. GCP examples below apply only when source evidence is actually GCP/Vertex or execution is delegated from GCP.
 
-Schema for `ai-workload-profile.json`. Produced by:
+BMA has one AI input contract: the **#415 AI workload profile**, `ai-workload-profile.json`. Its vendored schema is `references/contracts/ai-workload-profile.schema.json` (byte-identical to the canonical file). Every AI phase that reads the profile runs this gate first:
 
-- **`discover-app-code.md`** when application-code AI confidence >= 70%, or
-- **`discover-iac.md`** when **Vertex-strong** Terraform evidence is present (see that file’s Step 7d), producing a minimal **IaC-inferred** profile so Clarify Category F can run without app code.
+```
+python3 <skill root>/scripts/bma-runtime.py validate-profile --profile <run>/ai-workload-profile.json [--sidecar <run>/ai-workload-sidecar.json]
+```
 
-**Convention**: Values shown as `X|Y` in examples indicate allowed alternatives — use exactly one value per field, not the literal pipe character.
+Exit 0 means the input is valid and the phase may continue. Exit 1 means stop. A legacy-shaped document fails with `BmaLegacyProfileRejected`, which names the first legacy field. BMA has no fallback for legacy input. Do not reshape a legacy profile by hand. Direct discovery writes #415 directly, and delegated runs receive a #415 document from the GCP boundary adapter.
+
+Convention: values shown as `X|Y` in examples mean one allowed value, not a literal pipe.
 
 ---
 
-## ai-workload-profile.json (Phase 1 output)
-
-Focused profile of AI/ML workloads including models, capabilities, integration patterns, and supporting infrastructure.
+## ai-workload-profile.json (#415, Phase 1 output)
 
 ```json
 {
-  "metadata": {
-    "report_date": "2026-02-26",
-    "project_directory": "/path/to/project",
-    "profile_source": "application_code|iac_vertex|merged",
-    "sources_analyzed": {
-      "terraform": true,
-      "application_code": true,
-      "billing_data": false,
-      "openai_usage_api": false,
-      "openrouter_usage_api": false,
-      "anthropic_usage_api": false
-    }
-  },
-
-  "summary": {
-    "overall_confidence": 0.95,
-    "confidence_level": "very_high",
-    "total_models_detected": 2,
-    "languages_found": ["python"],
-    "ai_source": "gemini|openai|anthropic|both|other",
-    "inferred_from_iac": false
-  },
-
-  "models": [
+  "schema_version": "1.0",
+  "ai_sources": [
     {
-      "model_id": "gemini-pro",
-      "service": "vertex_ai_generative",
-      "detected_via": ["code", "terraform"],
-      "evidence": [
+      "provider": "google",
+      "source_service": "vertex_ai",
+      "model_families": ["gemini"],
+      "model_evidence": "observed",
+      "models": ["gemini-2.5-pro"],
+      "model_observations": [
         {
-          "source": "code",
-          "file": "src/ai/client.py",
-          "line": 12,
-          "pattern": "GenerativeModel(\"gemini-pro\")"
-        },
-        {
-          "source": "terraform",
-          "file": "vertex.tf",
-          "resource": "google_vertex_ai_endpoint.main",
-          "pattern": "Vertex AI endpoint resource"
+          "normalized_model": "gemini-2.5-pro",
+          "raw_model": "gemini-2.5-pro",
+          "model_family": "gemini",
+          "evidence": [
+            {"provenance": "code", "confidence": "high", "detail": "src/ai/client.py:12"}
+          ]
         }
-      ],
-      "capabilities_used": ["text_generation", "streaming"],
-      "usage_context": "Recommendation engine - generates product recommendations from user profiles"
+      ]
     },
     {
-      "model_id": "text-embedding-004",
-      "service": "vertex_ai_embeddings",
-      "detected_via": ["code"],
-      "evidence": [
-        {
-          "source": "code",
-          "file": "src/embeddings/indexer.py",
-          "line": 5,
-          "pattern": "VertexAIEmbeddings()"
-        }
-      ],
-      "capabilities_used": ["embeddings"],
-      "usage_context": "Document indexing for semantic search"
+      "provider": "openai",
+      "source_service": "openai_api",
+      "model_families": ["gpt"],
+      "model_evidence": "not_observed",
+      "models": [],
+      "model_observations": []
     }
   ],
-
-  "integration": {
-    "primary_sdk": "google-cloud-aiplatform",
-    "sdk_version": "1.38.0",
-    "frameworks": ["langchain"],
-    "languages": ["python"],
-    "pattern": "direct_sdk",
-    "gateway_type": "llm_router|api_gateway|voice_platform|framework|direct|null",
-    "capabilities_summary": {
-      "text_generation": true,
-      "streaming": true,
-      "function_calling": false,
-      "vision": false,
-      "embeddings": true,
-      "batch_processing": false
-    }
-  },
-
-  "infrastructure": [
+  "gateways": [
     {
-      "address": "google_vertex_ai_endpoint.main",
-      "type": "google_vertex_ai_endpoint",
-      "file": "vertex.tf",
-      "config": {
-        "display_name": "recommendation-endpoint",
-        "location": "us-central1"
-      }
-    },
-    {
-      "address": "google_service_account.vertex_sa",
-      "type": "google_service_account",
-      "file": "iam.tf",
-      "role": "supports_ai",
-      "config": {
-        "account_id": "vertex-ai-sa"
-      }
-    }
-  ],
-
-  "current_costs": {
-    "monthly_ai_spend": 450,
-    "services_detected": ["Vertex AI Predictions", "Generative AI API"],
-    "source": "billing_data|openai_usage_api|openrouter_usage_api|anthropic_usage_api|mixed",
-    "breakdown": [
-      { "provider": "openai", "monthly_spend": 105, "source": "openai_usage_api" },
-      { "provider": "openrouter", "monthly_spend": 60, "source": "openrouter_usage_api" },
-      { "provider": "anthropic", "monthly_spend": 40, "source": "anthropic_usage_api" },
-      { "provider": "gcp", "monthly_spend": 345, "source": "billing_data" }
-    ],
-    "conflicting_sources": []
-  },
-
-  "detection_signals": [
-    {
-      "method": "terraform",
-      "pattern": "google_vertex_ai_endpoint resource",
-      "confidence": 0.95,
-      "evidence": "Found resource 'main' in vertex.tf"
-    },
-    {
-      "method": "code",
-      "pattern": "google.cloud.aiplatform import",
-      "confidence": 0.95,
-      "evidence": "Found in src/ai/client.py line 3"
+      "product": "openrouter",
+      "type": "llm_router",
+      "upstream_evidence": "unresolved",
+      "upstreams": []
     }
   ]
 }
 ```
 
-**Profile source and IaC inference:**
+**Top level (closed, `additionalProperties: false`):** `schema_version` (const `"1.0"`), `ai_sources[]`, and `gateways[]`. Any other top-level key is invalid. Metadata, summaries, infrastructure, costs, and integration context are not part of this document.
 
-- `metadata.profile_source` — `"application_code"` (full profile from code path), `"iac_vertex"` (minimal profile from Terraform Vertex-strong discovery only), or `"merged"` (code + pre-existing IaC profile combined in `discover-app-code.md`).
-- `summary.inferred_from_iac` — `true` when the profile was produced or substantially completed without application code analysis (IaC-only or unknown integration until Clarify). `false` when code analysis drove model/SDK detection.
+**`ai_sources[]`** — one entry per provider and source_service pair. Duplicate or overlapping pairs are invalid. One provider through distinct services is valid, for example `openai/openai_api` and `openai/azure_openai`.
 
-**CRITICAL Field Names** (use EXACTLY these keys):
+- `provider` — Extensible identity. It must not be `both`, `unknown`, or `openrouter`. OpenRouter is a gateway, never a provider.
+- `source_service` — The service the calls go through, for example `openai_api`, `azure_openai`, `anthropic_api`, `vertex_ai`.
+- `model_families` — Non-empty, unique list of families such as `claude`, `gemini`, `gpt`.
+- `model_evidence` — `observed` (models are present, `models` and `model_observations` each have at least one entry) or `not_observed` (both arrays are empty).
+- `models` — Unique normalized model IDs.
+- `model_observations[]` — One entry per entry in `models`, with `normalized_model`, `raw_model` (the verbatim observed string), `model_family` (one of `model_families`), and a non-empty `evidence` list. Validation checks that these correspond exactly to `models`.
 
-- `model_id` — Model identifier string (NOT `model_name`, `name`)
-- `service` — GCP service category (NOT `service_type`, `gcp_service`)
-- `detected_via` — Array of detection sources (NOT `detection_method`, `source`)
-- `capabilities_used` — Array of capability strings per model (NOT `capabilities`, `features`)
-- `usage_context` — Human-readable description of what the model does (NOT `description`, `purpose`)
-- `pattern` — Integration pattern in `integration` object: `direct_sdk`, `framework`, `rest_api`, `mixed`, or `unknown` when not inferable (typical for IaC-only profiles) (NOT `integration_type`, `method`)
-- `gateway_type` — Gateway/router type in `integration` object: `"llm_router"`, `"api_gateway"`, `"voice_platform"`, `"framework"`, `"direct"`, or `null`
-- `capabilities_summary` — Boolean map in `integration` object (NOT `capabilities`, `feature_flags`)
-- `ai_source` — Source AI provider in `summary` object: `"gemini"`, `"openai"`, `"anthropic"`, `"both"`, or `"other"`
+**Evidence:** `provenance` is one of `code`, `iac`, `live_api`, `usage_api`, `user_confirmed`. `confidence` is one of `confirmed`, `high`, `medium`, `low`. `detail` is optional. `confirmed` comes only from a user answer.
 
-**Key Fields:**
+**`gateways[]`** — gateways independent of direct providers. OpenRouter appears only here.
 
-- `metadata.sources_analyzed` — Which data sources were provided (affects which sections are populated)
-- `summary.overall_confidence` — Combined detection confidence from all signals
-- `models[]` — Each distinct AI model/service detected, with evidence and capabilities. **May be empty** for `profile_source: "iac_vertex"` when no model IDs can be inferred from Terraform alone; Clarify and Design must not assume non-empty.
-- `integration.pattern` — How the app connects to AI (`direct_sdk`, `framework`, `rest_api`, `mixed`, or `unknown` for IaC-only)
-- `integration.capabilities_summary` — Union of all capabilities across all models
-- `infrastructure[]` — Terraform resources related to AI (empty array if no Terraform provided)
-- `current_costs` — Present ONLY if billing data OR OpenAI usage API data OR OpenRouter usage API data OR Anthropic usage API data was provided; omitted entirely otherwise. `source` records provenance. Merge is provider-aware: billing CSVs measure GCP/Vertex spend, the OpenAI usage API measures OpenAI-direct spend, the OpenRouter usage API measures OpenRouter (router) spend, the Anthropic usage API measures Anthropic-direct spend — when sources exist for DIFFERENT providers, `monthly_ai_spend` is their SUM with `source: "mixed"` and the per-provider split in `breakdown[]` (never max/pick-one — that drops a provider). Same-provider overlap: the usage API wins and the displaced figure lands in `conflicting_sources[]` (never silently resolved). `breakdown` is present only for `source: "mixed"`. **`partial_window`/`cost_status` provenance (finding 14):** the Anthropic usage-API merge (`discover-anthropic-api.md` Step 4, both the single-provider and `mixed` cases) stamps that provider's own `metadata.partial_window` and `metadata.cost_status` onto its `current_costs`/`breakdown[]` entry at merge time, mirroring Azure's identical fix. Unlike Azure, neither of GCP's own Clarify files (`clarify-ai.md`'s full-flow Q15, `clarify-ai-only.md`'s Q3) auto-resolves `ai_monthly_spend` from `current_costs.monthly_ai_spend` at all today — both just ask the question with a plain default, with no shortcut that could trust a merged figure without checking it — so GCP has no equivalent of finding 14's bug to fix; the stamped fields exist here for forward compatibility if GCP's Clarify later adds the same auto-resolve shortcut Azure has. GCP's OpenAI/OpenRouter merges (`discover-openai-api.md`, `discover-openrouter-api.md`) do not yet stamp these fields — out of scope for finding 14, same as Azure's OpenRouter merge. A billing-only entry (no usage API contributed) has no `partial_window`/`cost_status` of its own — billing exports are always full-window, complete figures by construction.
-- `detection_signals[]` — Raw signals from AI detection for transparency. `method` values include `terraform`, `code`, `live_gcloud`, `openai_usage_api`, `openrouter_usage_api`, and `anthropic_usage_api`.
+- `product` — Gateway identity, for example `openrouter`.
+- `type` — Gateway type, for example `llm_router`.
+- `upstream_evidence` — `observed` (at least one upstream) or `unresolved` (`upstreams` is empty; upstreams must not be invented).
+- `upstreams[]` — Each entry has `provider`, optional `source_service`, and `model_families[]` with `family`, `model_evidence`, and `models`. Provider identities follow the same rules as `ai_sources[]`.
 
-**Conditional sections:**
-
-- `current_costs` — Include ONLY if billing data was provided (billing discovery ran), OpenAI usage API discovery ran (`discover-openai-api.md`), OpenRouter usage API discovery ran (`discover-openrouter-api.md`), or Anthropic usage API discovery ran (`discover-anthropic-api.md`). Omit entirely if none.
-- `infrastructure` — Set to `[]` if no Terraform files were provided (IaC discovery did not run).
-- `agentic_profile` — Include ONLY if agentic signals detected (`is_agentic: true`). Omit entirely otherwise.
-- `tool_manifest` — Include ONLY if `agentic_profile` exists. Set to `[]` if agentic but no tools detected.
-- `workloads` — Always present. Empty array `[]` if no AI call sites detected.
+**Derived routing:** BMA routes by `provider` and `source_service`. There is no `ai_source` enum. A profile that mixes direct providers and Azure OpenAI routes each `ai_sources[]` entry on its own. An OpenRouter gateway routes its upstreams through the BYOK path.
 
 ---
 
-## workloads[] (per-workload disambiguation)
+## ai-workload-sidecar.json (temporary GCP sidecar)
 
-Generated by `discover-app-code.md` Step 5B. Splits the detected AI usage into distinct workloads — one per unique `(model_id, sdk_method, structured_output)` tuple. Enables downstream phases to produce one Bedrock recommendation per workload.
+Workloads, the agentic profile, and the tool manifest have no #415 slot yet. Observed spend and integration context also live here, not in #415. They travel next to the #415 document in a separate sidecar file. The sidecar is **temporary**. A follow-up will fold it into #415 under a new schema version. BMA never reads these fields from `ai-workload-profile.json`.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "BMA_GCP_AI_SIDECAR",
+  "workloads": [],
+  "agentic_profile": {"is_agentic": false},
+  "tool_manifest": [],
+  "observed_costs": {
+    "monthly_ai_spend": 450,
+    "services_detected": ["Vertex AI Predictions"],
+    "source": "billing_data"
+  },
+  "integration_context": {
+    "pattern": "direct_sdk",
+    "frameworks": ["langchain"],
+    "languages": ["python"],
+    "capabilities_summary": {"text_generation": true, "streaming": true, "embeddings": true}
+  }
+}
+```
+
+- `schema_version` must be `1` and `kind` must be `"BMA_GCP_AI_SIDECAR"`. Keys outside the sidecar set are rejected.
+- `workloads` is required and is an array. Its shape is defined below.
+- `agentic_profile` and `tool_manifest` are optional and follow the agentic sections below.
+- `observed_costs` is optional. It holds the observed monthly AI spend from billing or usage APIs, with the merge rules in § Usage-API merge below. Its shape is the former `current_costs` object.
+- `integration_context` is optional. It holds the SDK, frameworks, languages, pattern, and capability summary that Design and Clarify read. Each key is also optional.
+- In delegated GCP runs the sidecar is written by the GCP boundary and carries the GCP cost and integration context. In direct runs BMA writes it.
+
+The sidecar is validated with `validate-profile --sidecar`. Any BMA phase that uses workloads, agentic routing, observed costs, or integration context requires the sidecar to pass.
+
+---
+
+## Usage-API merge (sidecar `observed_costs`)
+
+Usage APIs (OpenAI, Anthropic, OpenRouter) and billing exports write spend into `observed_costs`. Rules, applied by the discover phase for each usage API:
+
+- **No existing `observed_costs`** → set `{ "monthly_ai_spend", "services_detected", "source" }` from that API.
+- **Existing costs for a different provider** → sum the providers, set `source: "mixed"`, and keep a per-provider `breakdown[]`. Each provider keeps its own identity. Never resolve with `max()`.
+- **Existing costs for the same provider and window** → the API wins. The displaced figure goes into `observed_costs.conflicting_sources[]`, never silently resolved.
+- Partial-window and cost-status stamping (`partial_window`, `cost_status`) is kept per provider where the provider's discovery doc specifies it.
+
+**Discovery paths:** `application_code` (full profile from the code path), IaC-only (Terraform Vertex-strong discovery only, where `models` may be empty and every evidence entry has `provenance: "iac"`), or `merged` (code plus a prior IaC-only profile). None of these labels is a #415 field. The provenance lives in `evidence[].provenance`.
+
+---
+
+## workloads[] (sidecar, per-workload disambiguation)
+
+Generated by `discover-app-code.md` Step 5B. Splits the detected AI usage into distinct workloads, one per unique `(model_id, sdk_method, structured_output)` tuple. Enables downstream phases to produce one Bedrock recommendation per workload.
 
 ```json
 {
@@ -221,7 +166,7 @@ Generated by `discover-app-code.md` Step 5B. Splits the detected AI usage into d
 **CRITICAL Field Names** (use EXACTLY these keys):
 
 - `workload_id` — Deterministic hash: `"wl_" + sha256(model_id + "|" + sdk_method + "|" + structured_flag)[:6]` (NOT `id`, `name`)
-- `model_id` — Same model_id as in `models[]` (NOT `model_name`, `source_model`)
+- `model_id` — Same normalized model as in `ai_sources[].models` (NOT `model_name`, `source_model`)
 - `sdk_method` — Fully qualified SDK method name (NOT `method`, `api_call`)
 - `capability` — Inferred capability: `"text_generation"`, `"structured_output"`, `"image_generation"`, `"embedding"`, `"speech_to_text"`, `"text_to_speech"`, `"document_extraction"`, `"image_analysis"`, `"speech_transcription"`, `"unknown"` (NOT `capability_inferred`, `type`)
 - `capability_confidence` — `"high"`, `"medium"`, or `"low"` (NOT `confidence`, `confidence_level`)
@@ -235,22 +180,22 @@ Generated by `discover-app-code.md` Step 5B. Splits the detected AI usage into d
 | Methods in `sdk-capability-map.json` (not structured-output trio) | Map value                                                          | `high`     | Direct map lookup                                                                                               |
 | Structured-output trio + structured indicators present            | `structured_output`                                                | `high`     | Argument inspection overrides map                                                                               |
 | Structured-output trio + no structured indicators                 | `text_generation`                                                  | `medium`   | Ambiguous — Clarify confirms                                                                                    |
-| `documentai.*` / `vision.*` / `speech.*` methods in map           | `document_extraction`, `image_analysis`, or `speech_transcription` | `high`     | GCP non-generative AI service call — routes to Design's traditional-AI rubric, not the LLM model mapping tables |
+| `documentai.*` / `vision.*` / `speech.*` methods in map           | `document_extraction`, `image_analysis`, or `speech_transcription` | `high`     | Non-generative AI service call — routes to Design's traditional-AI rubric, not the LLM model mapping tables     |
 | Method not in map                                                 | `unknown`                                                          | `low`      | Clarify fallback                                                                                                |
 
 **Validation rules:**
 
-- `workloads[]` is always present (empty array if no AI detected)
-- Every `workloads[].model_id` MUST exist in `models[].model_id`
+- `workloads[]` is always present in the sidecar (empty array if no AI detected)
+- Every `workloads[].model_id` MUST exist in some `ai_sources[].models`
 - `workload_id` is unique within the array and deterministic across re-runs
 - `call_sites` is non-empty for every workload entry — EXCEPT a usage-only workload (see below), where the sentinel form satisfies "non-empty" without inventing a location that was never observed
 - `call_sites[].file` uses repo-relative POSIX paths (forward slashes, no absolute paths) — EXCEPT the usage-only sentinel `"<usage_api>"`, which is not a real path and must not be treated as one
 
-**Usage-only workloads (a model billed via a usage API but never located in code — e.g. `discover-openrouter-api.md` Step 4).** A usage-only model has no call site to report; do NOT invent one (a fabricated `{file, line}` would misattribute the finding to code that doesn't call that model). Instead: `sdk_method: "usage_api"`, `structured_output: false`, `capability_confidence: "low"` (never located in code, so capability is a guess from usage volume alone — `"text_generation"` unless the usage API's own data names something more specific), and `call_sites: [{"file": "<usage_api>", "line": 0}]` — a fixed sentinel, not a real path, satisfying the non-empty-`call_sites` rule above without fabricating a location. Every consumer of `call_sites[].file` (there are none downstream today — Design reads only `workload_id`/`model_id`/`capability`/`capability_confidence`, per `design-ai.md`) must treat this sentinel as "no location," not as a literal file to open.
+**Usage-only workloads (a model billed via a usage API but never located in code — e.g. `discover-openrouter-api.md` Step 4).** A usage-only model has no call site to report; do NOT invent one. Instead: `sdk_method: "usage_api"`, `structured_output: false`, `capability_confidence: "low"` (`"text_generation"` unless the usage API's own data names something more specific), and `call_sites: [{"file": "<usage_api>", "line": 0}]` — a fixed sentinel, not a real path. Every consumer of `call_sites[].file` must treat this sentinel as "no location," not as a literal file to open.
 
 ---
 
-## agentic_profile (conditional — present only when agentic signals detected)
+## agentic_profile (sidecar, conditional — present only when agentic signals detected)
 
 Generated by `discover-app-code.md` Step 3.5 when agentic framework signals are found. Captures agent architecture, orchestration patterns, and memory usage.
 
@@ -268,20 +213,11 @@ Generated by `discover-app-code.md` Step 3.5 when agentic framework signals are 
         "tools": ["web_search", "document_reader"],
         "memory_type": "conversation_buffer|rag|none|unknown",
         "role": "Researches topics and gathers information"
-      },
-      {
-        "agent_id": "writer-agent",
-        "file": "src/agents/writer.py",
-        "line": 22,
-        "model_id": "gpt-4o-mini",
-        "tools": ["file_write"],
-        "memory_type": "none",
-        "role": "Writes reports from research output"
       }
     ],
     "orchestration_pattern": "hierarchical",
-    "agent_count": 2,
-    "tool_count": 3,
+    "agent_count": 1,
+    "tool_count": 2,
     "has_human_in_loop": false,
     "has_memory": true,
     "memory_backend": "in_memory"
@@ -328,7 +264,7 @@ Generated by `discover-app-code.md` Step 3.5 when agentic framework signals are 
 
 ---
 
-## tool_manifest (conditional — present only when agentic_profile exists)
+## tool_manifest (sidecar, conditional — present only when agentic_profile exists)
 
 Generated by `discover-app-code.md` Step 6.5. Inventories tool definitions found in agent code. This is discovery only — no migration recommendations.
 
@@ -342,22 +278,6 @@ Generated by `discover-app-code.md` Step 6.5. Inventories tool definitions found
       "transport": "api",
       "auth_hint": "api_key",
       "used_by_agents": ["research-agent"]
-    },
-    {
-      "name": "document_reader",
-      "file": "src/tools/reader.py",
-      "line": 5,
-      "transport": "function",
-      "auth_hint": "none",
-      "used_by_agents": ["research-agent"]
-    },
-    {
-      "name": "file_write",
-      "file": "src/tools/writer.py",
-      "line": 8,
-      "transport": "function",
-      "auth_hint": "none",
-      "used_by_agents": ["writer-agent"]
     }
   ]
 }

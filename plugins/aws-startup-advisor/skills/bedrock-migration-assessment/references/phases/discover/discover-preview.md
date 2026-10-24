@@ -40,11 +40,11 @@ Read from `ai-workload-profile.json`:
 
 | Input                     | Source                     | Key                                                                                |
 | ------------------------- | -------------------------- | ---------------------------------------------------------------------------------- |
-| `model_count`             | `ai-workload-profile.json` | Count of distinct entries in `models[]`                                            |
-| `is_agentic`              | `ai-workload-profile.json` | `agentic_profile.is_agentic == true`                                               |
-| `has_multi_model_routing` | `ai-workload-profile.json` | `integration.gateway_type` is `"openrouter"`, `"litellm"`, `"kong"`, `"apigee"`, or `"llm_router"` |
-| `has_multiple_providers`  | `ai-workload-profile.json` | `summary.ai_source == "both"` or distinct provider values across `models[]` > 1    |
-| `capability_count`        | `ai-workload-profile.json` | Count of `true` values in `integration.capabilities_summary`                       |
+| `model_count`             | `ai-workload-profile.json` | Count of distinct models across `ai_sources[].models`                                            |
+| `is_agentic`              | `ai-workload-sidecar.json` | `agentic_profile.is_agentic == true`                                               |
+| `has_multi_model_routing` | `ai-workload-profile.json` | `gateways[]` is non-empty |
+| `has_multiple_providers`  | `ai-workload-profile.json` | distinct `ai_sources[].provider` values > 1    |
+| `capability_count`        | `ai-workload-profile.json` | Count of `true` values in sidecar `integration_context.capabilities_summary`                       |
 
 **Classify (first match wins, top to bottom):**
 
@@ -81,7 +81,7 @@ price is higher, lower, or roughly equivalent. Do NOT compute a monthly dollar t
 usage volume is unknown at Discover time and will be collected in Clarify (AI-only Q3
 for spend, AI-only Q7 for usage volume).
 
-For each model in `models[]` of `ai-workload-profile.json`, map to the closest Bedrock
+For each model in `ai_sources[].models` of `ai-workload-profile.json`, map to the closest Bedrock
 equivalent using the table below, then look up both source and Bedrock per-token prices
 from `references/shared/pricing-cache.md` (Source Provider Pricing) and `references/vendored/ai/bedrock-pricing-cache.md` (Bedrock Models).
 
@@ -163,7 +163,7 @@ Generate 2-4 bullets based on what was detected in `ai-workload-profile.json`:
 | `is_agentic == true`                 | "Agentic migration path (retarget / AgentCore Harness / Strands)"               |
 | `has_multi_model_routing == true`    | "Multi-model routing strategy on Bedrock (LiteLLM adapter vs native routing)"   |
 | `has_multiple_providers == true`     | "Re-embedding requirements and cascade pair testing across providers"           |
-| `integration.pattern == "streaming"` | "Streaming transport layer (Bedrock streaming vs current SDK)"                  |
+| `integration_context.pattern == "streaming"` | "Streaming transport layer (Bedrock streaming vs current SDK)"                  |
 
 Cap at 4 bullets.
 
@@ -291,7 +291,7 @@ Read from available discovery artifacts:
 | `has_database`           | `gcp-resource-inventory.json`                           | Any resource type matching `google_sql_*`, `google_spanner_*`, `google_redis_*` |
 | `has_bigquery`           | `gcp-resource-inventory.json` or `billing-profile.json` | Any `google_bigquery_*` resource or BigQuery billing SKU                        |
 | `has_ai_profile`         | File presence                                           | `ai-workload-profile.json` exists                                               |
-| `is_agentic`             | `ai-workload-profile.json`                              | `agentic_profile.is_agentic == true` (if file exists)                           |
+| `is_agentic`             | `ai-workload-profile.json`                              | `agentic_profile.is_agentic == true` in the sidecar (if file exists)                           |
 | `billing_monthly_usd`    | `billing-profile.json`                                  | `summary.total_monthly_spend` (`null` if absent **or if the profile is a skip record** — empty `services[]` + non-empty `warnings[]`; a skip record's `0` is "nothing parsed," not "zero spend") |
 
 **Classify (first match wins, top to bottom):**
@@ -331,11 +331,11 @@ eligible_for_clarify_simple_path =
 
 ```
 IF agentic_profile.is_agentic == true
-   OR integration.frameworks is non-empty (LangChain, CrewAI, etc.)
+   OR integration_context.frameworks is non-empty (LangChain, CrewAI, etc.)
    OR models.length > 3
 THEN ai_complexity_signal = "standard"
 
-ELSE IF integration.pattern in ("direct_sdk", "direct")
+ELSE IF integration_context.pattern in ("direct_sdk", "direct")
    AND models.length <= 2
    AND agentic_profile is absent
 THEN ai_complexity_signal = "likely_simple"

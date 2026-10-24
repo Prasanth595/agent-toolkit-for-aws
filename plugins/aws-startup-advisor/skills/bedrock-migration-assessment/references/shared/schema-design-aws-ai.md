@@ -25,7 +25,7 @@
     // split across the top level and `metadata` the way Azure's parallel shape does.
     "phase": "design",
     "focus": "ai",
-    "ai_source": "gemini", // "gemini" | "openai" | "anthropic" | "both" | "other" — summary.ai_source from the profile
+    "ai_source": "gemini", // "gemini" | "openai" | "anthropic" | "both" | "other" — derived output label from the ai_sources provider set (not an input)
     "bedrock_models_selected": [], // aws_model_id strings chosen (Bedrock targets only)
     "timestamp": "<ISO 8601>",
     "regional_validation": "checked" // checked | fallback_static — ONLY present when the fallback-static path fires (design-ai.md Step 0.5); absent on the normal checked path
@@ -82,7 +82,7 @@ Traditional-AI capabilities (AWS AI service, not Bedrock): `document_extraction`
 
 ## Validation Checklist
 
-- [ ] `metadata.ai_source` matches `summary.ai_source` from `ai-workload-profile.json`.
+- [ ] `metadata.ai_source` matches the label derived from the `ai_sources[].provider` set.
 - [ ] Every `design_blocks[]` row has exactly one of `target_bedrock_model` /
       `target_aws_service` non-null (XOR).
 - [ ] Every traditional-AI row (`document_extraction`/`image_analysis`/`speech_transcription`)

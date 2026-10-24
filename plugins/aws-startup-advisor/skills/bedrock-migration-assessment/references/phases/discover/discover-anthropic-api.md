@@ -4,7 +4,7 @@
 > token-usage data directly from the Anthropic Admin API — read-only,
 > consent-gated — as an alternative to the user exporting billing CSVs by
 > hand. Produces `anthropic-usage-profile.json` and, when
-> `ai-workload-profile.json` exists, fills its `current_costs` section with
+> `ai-workload-profile.json` exists, fills its sidecar `observed_costs` entry with
 > real spend. Scoped to Claude Console / Claude Platform (API) organizations
 > only — Claude Enterprise (claude.ai) orgs use a different Analytics API and
 > are out of scope (see Step 1 org-type check). If the user declines consent
@@ -418,74 +418,21 @@ of `costs_by_description[].monthly_cost_usd` (± rounding).
 
 ## Step 4: Merge into the AI Workload Profile (if it exists), Then Clean Up
 
-If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC
-discovery), update it — the API data is authoritative for Anthropic spend and
-volume:
+If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC discovery), update it. The API data is authoritative for Anthropic spend and volume:
 
-1. `metadata.sources_analyzed.anthropic_usage_api` = `true`.
-2. `current_costs` — provider-aware merge. The API measures **Anthropic** spend. In direct mode, merge it with any different source-provider entries already present and retain each provider's actual identity; do not invent a GCP billing source. In delegated GCP mode, preserve the selected-base GCP/Vertex billing behavior below. Different providers are never resolved with max():
-   - **No existing `current_costs`** → set
-     `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected":
-     ["Anthropic Claude API"], "source": "anthropic_usage_api", "partial_window":
-     <this profile's metadata.partial_window>, "cost_status": <this profile's
-     metadata.cost_status> }` — stamp both fields here even in the single-provider
-     case, so Clarify's Q3 (`clarify-ai-only.md`) can check them without re-opening
-     the usage-profile file itself.
-   - **Existing costs for a DIFFERENT provider** → SUM the providers. In delegated GCP mode this includes the selected-base Vertex billing case; in direct mode preserve the actual source provider and never relabel it as GCP:
-     `monthly_ai_spend` = the sum of provider entries, `source: "mixed"`, with a
-     per-provider split in `breakdown[]`. The Anthropic row is
-     `{ "provider": "anthropic", "monthly_spend": X, "source": "anthropic_usage_api",
-     "partial_window": <this profile's metadata.partial_window>, "cost_status": <this
-     profile's metadata.cost_status> }`
-     alongside the other providers' existing entries (each retaining its own identity and
-     `partial_window`/`cost_status` where applicable).
-   - **Existing costs for the SAME provider** (a billing export that already
-     contains Anthropic spend, same window) → the API wins (`source:
-     "anthropic_usage_api"`); move the displaced figure into
-     `current_costs.conflicting_sources[]` — never silently resolved, same
-     rule as the other usage-API sources.
-3. Append to `detection_signals[]`:
-   `{ "method": "anthropic_usage_api", "pattern": "billed usage for <model>",
-   "confidence": 0.99, "evidence": "<N> requests, <X> tokens in last 30d" }`
-   for each of the top 5 models by usage.
-4. **These are two INDEPENDENT checks over every `usage_by_model` entry — run
-   both:**
+1. **Observed cost → sidecar `observed_costs`.** Write to `$MIGRATION_DIR/ai-workload-sidecar.json`, creating it with `schema_version: 1`, `kind: "BMA_GCP_AI_SIDECAR"`, and `workloads: []` if absent. The merge rules are those in `schema-discover-ai.md` § Usage-API merge, with the Anthropic-specific stamping below:
+   - **No existing `observed_costs`** → `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected": ["Anthropic Claude API"], "source": "anthropic_usage_api", "partial_window": <this profile's metadata.partial_window>, "cost_status": <this profile's metadata.cost_status> }`. Stamp both fields even in the single-provider case, so Clarify's Q3 (`clarify-ai-only.md`) can check them without re-opening the usage-profile file.
+   - **Existing costs for a DIFFERENT provider** → SUM the providers. Set `source: "mixed"` with a per-provider `breakdown[]`. The Anthropic row is `{ "provider": "anthropic", "monthly_spend": X, "source": "anthropic_usage_api", "partial_window": ..., "cost_status": ... }`, alongside the other providers' entries. Each provider keeps its own identity and `partial_window`/`cost_status` where applicable. In direct mode, never relabel a provider as GCP.
+   - **Existing costs for the SAME provider** → the API wins (`source: "anthropic_usage_api"`). Move the displaced figure into `observed_costs.conflicting_sources[]`, never silently resolved.
+2. **Discovery notes, not profile signals.** Record the top 5 models by usage as `"<model> billed usage: <N> requests, <X> tokens in last 30d"` in the discovery notes. The #415 profile has no `detection_signals`.
+3. **These are two INDEPENDENT checks over every `usage_by_model` entry. Run both.**
+   a. **Model entry:** for any `usage_by_model` model absent from `ai_sources[].models`, add it under the `(anthropic, anthropic_api)` entry. Create that entry if absent, with `model_families` from the model family and `model_evidence: "observed"`. Add one `model_observations` item with `raw_model` set to the usage row's model string and `evidence: [{"provenance": "usage_api", "confidence": "high"}]`. Anthropic's Messages API is text/multimodal generation only, so the capability is always `text_generation`. Code-derived entries always win on conflict.
+   b. **Workload row (sidecar):** for any `usage_by_model` model with NO `workloads[]` entry whose `model_id` matches it (any `sdk_method`), append `{workload_id: "wl_" + sha256(model_id + "|usage_api|plain")[:6], model_id: "<model>", sdk_method: "usage_api", capability: "text_generation", capability_confidence: "low", structured_output: false, call_sites: [{"file": "<usage_api>", "line": 0}]}` (per `schema-discover-ai.md` § workloads[] "Usage-only workloads"). Without this, Clarify's multi-workload table and Design's per-workload iteration both miss the model. Before appending, confirm no existing `workloads[]` entry already has this exact `workload_id`. The sha256 is deterministic per model, so a second merge collides on it instead of duplicating.
+4. Do not set any provider-label field from usage data. `ai_sources` already carries each provider separately.
 
-   a. **Model row:** for any `usage_by_model` model absent from `models[]`,
-      append `{ "model_id": "<model>", "service": "anthropic_api",
-      "detected_via": ["usage_api"], "evidence": [{ "source": "usage_api",
-      "pattern": "billed usage in last 30 days" }], "capabilities_used":
-      ["text_generation"], "usage_context": "Observed in Anthropic usage
-      data — call sites not yet located in code" }` (Anthropic's Messages API
-      is text/multimodal generation only — no embeddings/image/audio endpoint
-      types to branch on, so this is always `text_generation`). Code-derived
-      entries always win on conflict; usage-only entries tell Clarify what
-      code analysis missed.
-   b. **Workload row:** for any `usage_by_model` model with NO `workloads[]`
-      entry whose `model_id` matches it (any `sdk_method`) — append
-      `{workload_id: "wl_" + sha256(model_id + "|usage_api|plain")[:6],
-      model_id: "<model>", sdk_method: "usage_api", capability:
-      "text_generation", capability_confidence: "low", structured_output:
-      false, call_sites: [{"file": "<usage_api>", "line": 0}]}` (per
-      `schema-discover-ai.md` § workloads[] "Usage-only workloads"). Without
-      this, the model can exist in `models[]` with no corresponding
-      `workloads[]` entry — Clarify's multi-workload confirmation table and
-      Design's per-workload iteration both read `workloads[]`, not
-      `models[]`. Before appending, confirm no existing `workloads[]` entry
-      already has this exact `workload_id` (the sha256 is deterministic per
-      model, so a second merge of the same model naturally collides on it
-      instead of duplicating).
+Run the gate after any change: `bma-runtime.py validate-profile --profile <profile> --sidecar <sidecar>` must exit 0.
 
-   Recompute `summary.total_models_detected` to include any (a) addition.
-5. If `summary.ai_source` is `"gemini"` or `"openai"` and Anthropic usage was
-   found, set it to `"both"` (there is no three-way enum; the schema's
-   `ai_source` enum is `gemini|openai|anthropic|both|other`).
-
-If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read
-`anthropic-usage-profile.json` directly for spend and volumes — but it is a
-supplement, not an anchor: the run still needs at least one primary artifact
-(resource inventory, AI workload profile, or billing profile) to pass the
-Discover handoff gate.
+If `ai-workload-profile.json` does NOT exist, Clarify and Estimate read `anthropic-usage-profile.json` directly for spend and volumes. It is a supplement, not an anchor. The run still needs at least one primary artifact (resource inventory, AI workload profile, or billing profile) to pass the Discover handoff gate.
 
 **Clean up (default, not optional):** delete
 `$MIGRATION_DIR/.anthropic-admin-env` now — the key is no longer needed. Tell
