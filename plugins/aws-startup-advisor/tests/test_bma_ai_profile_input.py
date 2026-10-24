@@ -201,6 +201,16 @@ def test_runtime_schema_subset_covers_every_keyword_in_the_vendored_schema() -> 
     assert _schema_keywords(schema) <= RUNTIME_SUBSET_KEYWORDS
 
 
+def test_sidecar_accepts_infrastructure_and_model_context_only_as_arrays() -> None:
+    valid = {"schema_version": 1, "kind": "BMA_GCP_AI_SIDECAR", "workloads": [],
+             "infrastructure": [{"address": "x"}], "model_context": [{"model_id": "gpt-4o", "capabilities_used": ["embeddings"]}]}
+    assert runtime.validate_ai_sidecar(valid) is valid
+    with pytest.raises(ValueError, match="ai_sidecar_invalid"):
+        runtime.validate_ai_sidecar({**valid, "infrastructure": {"address": "x"}})
+    with pytest.raises(ValueError, match="ai_sidecar_invalid"):
+        runtime.validate_ai_sidecar({**valid, "model_context": "embeddings"})
+
+
 def test_bma_never_imports_or_invokes_gcp_to_aws() -> None:
     """BMA is the target-side contract: no code or path under it may reach into the GCP shim."""
     forbidden = ("gcp-to-aws/scripts", "gcp_ai_profile_adapter", "from gcp", "import gcp")

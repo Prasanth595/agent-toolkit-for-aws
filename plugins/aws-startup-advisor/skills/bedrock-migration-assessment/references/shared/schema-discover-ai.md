@@ -111,7 +111,10 @@ Workloads, the agentic profile, and the tool manifest have no #415 slot yet. Obs
 - `agentic_profile` and `tool_manifest` are optional and follow the agentic sections below.
 - `observed_costs` is optional. It holds the observed monthly AI spend from billing or usage APIs, with the merge rules in § Usage-API merge below. Its shape is the former `current_costs` object.
 - `integration_context` is optional. It holds the SDK, frameworks, languages, pattern, and capability summary that Design and Clarify read. Each key is also optional.
-- In delegated GCP runs the sidecar is written by the GCP boundary and carries the GCP cost and integration context. In direct runs BMA writes it.
+- `infrastructure` is optional. It is an array of source AI infrastructure resources (the former legacy `infrastructure[]`) that Design Part 4 maps to AWS equivalents. Delegated GCP runs only.
+- `model_context` is optional. It is an array of `{service, model_id, capabilities_used, usage_context}` objects, one per model that had those fields. Design matches them to `ai_sources[].models` by `model_id`. Only the fields present are kept.
+- In delegated GCP runs the sidecar is written by the GCP boundary conversion step and carries the GCP cost, integration, infrastructure, and per-model context. In direct runs BMA writes it.
+- **Follow-up:** this sidecar is temporary. A follow-up will fold `observed_costs`, `integration_context`, `infrastructure`, and `model_context` into #415 under a new schema version, and retire this file.
 
 The sidecar is validated with `validate-profile --sidecar`. Any BMA phase that uses workloads, agentic routing, observed costs, or integration context requires the sidecar to pass.
 

@@ -236,11 +236,12 @@ LEGACY_PROFILE_KEYS = (
     "detection_signals", "workloads", "agentic_profile", "tool_manifest",
 )
 LEGACY_SOURCE_KEYS = ("service", "detected_via", "evidence", "model_id", "capabilities_used", "usage_context")
-# Temporary sidecar: workloads, agentic_profile, tool_manifest, observed costs, and integration context have no #415 slot yet.
-# Its folding into #415 under a new schema version is a follow-up.
+# Temporary sidecar: workloads, agentic_profile, tool_manifest, observed costs, integration context,
+# infrastructure, and per-model context have no #415 slot yet. Folding them into #415 under a new schema
+# version is a follow-up (tracked against issue #389).
 AI_SIDECAR_KEYS = {
     "schema_version", "kind", "workloads", "agentic_profile", "tool_manifest",
-    "observed_costs", "integration_context",
+    "observed_costs", "integration_context", "infrastructure", "model_context",
 }
 AI_SIDECAR_KIND = "BMA_GCP_AI_SIDECAR"
 
@@ -346,6 +347,7 @@ def validate_ai_sidecar(value: Any) -> dict[str, Any]:
     for optional, expected in (
         ("agentic_profile", dict), ("tool_manifest", list),
         ("observed_costs", dict), ("integration_context", dict),
+        ("infrastructure", list), ("model_context", list),
     ):
         if optional in value and not isinstance(value[optional], expected):
             raise ValueError("ai_sidecar_invalid")

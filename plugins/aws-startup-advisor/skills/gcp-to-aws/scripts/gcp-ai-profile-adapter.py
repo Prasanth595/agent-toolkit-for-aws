@@ -39,6 +39,7 @@ NORMALIZED_MODEL = re.compile(r"^(?!(?:both|unknown)$)[a-z0-9][a-z0-9._:/-]*$")
 SIDECAR_KIND = "BMA_GCP_AI_SIDECAR"
 # Legacy integration keys carried into the sidecar integration_context. Other keys are not carried.
 SIDECAR_INTEGRATION_KEYS = ("pattern", "primary_sdk", "frameworks", "languages", "capabilities_summary")
+MODEL_CONTEXT_KEYS = ("service", "model_id", "capabilities_used", "usage_context")
 
 
 class GcpProfileNotRepresentable(ValueError):
@@ -320,6 +321,20 @@ def convert_legacy_sidecar(legacy: dict[str, Any], existing: Any = None) -> dict
     context = {key: integration[key] for key in SIDECAR_INTEGRATION_KEYS if key in integration}
     if context:
         carried["integration_context"] = context
+    infrastructure = legacy.get("infrastructure")
+    if infrastructure is not None:
+        if not isinstance(infrastructure, list):
+            raise _fail("LEGACY_SHAPE_UNEXPECTED", "$.infrastructure", "infrastructure must be an array")
+        if infrastructure:
+            carried["infrastructure"] = copy.deepcopy(infrastructure)
+    # Per-model capabilities and usage context have no #415 slot. They travel as model_context, keyed by
+    # the legacy service and model_id so BMA can match them to the #415 model observations.
+    model_context = [
+        {key: model[key] for key in MODEL_CONTEXT_KEYS if key in model}
+        for model in legacy["models"] if "capabilities_used" in model or "usage_context" in model
+    ]
+    if model_context:
+        carried["model_context"] = model_context
     if not carried and existing is None:
         return None
     sidecar = copy.deepcopy(existing) if existing is not None else {"schema_version": 1, "kind": SIDECAR_KIND, "workloads": []}

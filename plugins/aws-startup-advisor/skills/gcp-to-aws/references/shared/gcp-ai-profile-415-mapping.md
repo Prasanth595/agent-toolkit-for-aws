@@ -21,8 +21,8 @@ The mapping is deterministic. The same legacy input always produces the same #41
 | `openrouter_api` model ids of the form `<prefix>/<model>` | `gateways[].upstreams[]` | `anthropic/` gives `anthropic` / `anthropic_api`. `openai/` gives `openai` / `openai_api`. `google/` gives `google` / `vertex_ai`, matching the merged #415 fixture. Grouped by provider, source_service, then family. | none for resolved ids |
 | Any `openrouter_api` model id without a known `<prefix>/` | `gateways[].upstream_evidence: unresolved`, `upstreams: []` | The whole gateway is unresolved when any upstream prefix is missing or unknown. No upstream is invented. | none |
 | `integration.pattern`, `primary_sdk`, `frameworks`, `languages`, `capabilities_summary` | `ai-workload-sidecar.json` → `integration_context` (same keys) | Not representable in #415. Copied verbatim into the GCP-owned sidecar when `integration` has any of these keys. `sdk_version` and `gateway_type` are not carried. `gateway_type` is validated against the gateway rows instead. | none |
-| `models[].capabilities_used`, `models[].usage_context` | none | Not representable in #415. | none |
-| `infrastructure[]` | none | Not representable in #415. | none |
+| `models[].service`, `models[].model_id`, `models[].capabilities_used`, `models[].usage_context` (for models with either capability or usage field) | `ai-workload-sidecar.json` → `model_context[]` | Not representable in #415. Copied per model as `{service, model_id, capabilities_used, usage_context}`, keeping only the fields present. | none |
+| `infrastructure[]` | `ai-workload-sidecar.json` → `infrastructure[]` | Not representable in #415. Copied verbatim when non-empty. Must be an array, otherwise `LEGACY_SHAPE_UNEXPECTED`. | `LEGACY_SHAPE_UNEXPECTED` |
 | `current_costs` | `ai-workload-sidecar.json` → `observed_costs` | Not representable in #415. Copied verbatim into the GCP-owned sidecar. Must be an object, otherwise `LEGACY_SHAPE_UNEXPECTED`. | `LEGACY_SHAPE_UNEXPECTED` |
 | `metadata.*`, `detection_signals` as a whole | none | Provenance only, beyond the rows above. | none |
 | Any non-object `models[]` entry, or `summary`, `integration`, `detection_signals` of the wrong type | none | Input shape check. | `LEGACY_SHAPE_UNEXPECTED` |
@@ -34,10 +34,12 @@ The mapping is deterministic. The same legacy input always produces the same #41
 - `upstream_evidence` is `observed` only when every OpenRouter model id carries a known provider prefix. Otherwise it is `unresolved` with no upstreams.
 - OpenRouter models are never written as a direct `ai_sources` entry. The #415 gateway object has no evidence field, so per-model legacy evidence for OpenRouter upstreams is not carried.
 
-## Open items
+## Decisions
 
-- `infrastructure[]`, `models[].capabilities_used`, `models[].usage_context`, and `metadata` are not carried yet. Their handling (fail closed or carry through the sidecar) is pending a product decision, so the table above still lists them as not representable.
+- Nothing populated fails closed for sidecar-carried fields. Those values go through the temporary sidecar so GCP outputs stay the same.
+- `metadata` is provenance only and is not carried. BMA derives IaC-only handling from #415 evidence provenance (`provenance: "iac"`), not from `metadata.profile_source`.
 - The converted document is written to `bma-input/ai-workload-profile.json`. The public GCP `ai-workload-profile.json` keeps its legacy content.
+- Follow-up: the temporary sidecar (`observed_costs`, `integration_context`, `infrastructure`, `model_context`) folds into #415 under a new schema version. See `schema-discover-ai.md` in bedrock-migration-assessment.
 
 ## Error codes
 

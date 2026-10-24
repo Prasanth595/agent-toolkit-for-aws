@@ -15,6 +15,8 @@ Read `$AI_PROFILE` (#415) and `$MIGRATION_DIR/ai-workload-sidecar.json` after th
 - `gateways[]` — gateway `product`, `type`, `upstream_evidence`, and `upstreams`
 - sidecar `integration_context` — SDK, frameworks, languages, `pattern`, and `capabilities_summary` (present when discovery recorded them)
 - sidecar `observed_costs` — present only if usage API or billing data was provided (`source` field records which)
+- sidecar `infrastructure[]` — source AI infrastructure resources (Terraform, delegated GCP runs only; may be absent or empty)
+- sidecar `model_context[]` — per-model `capabilities_used` and `usage_context`, matched to `ai_sources[].models` by `model_id`
 - sidecar `workloads[]`, `agentic_profile`, and `tool_manifest`
 
 **Derived label (output only):** `metadata.ai_source` in `aws-design-ai.json` is computed from the provider set: one `google` provider → `"gemini"`, one `openai` → `"openai"`, one `anthropic` → `"anthropic"`, more than one provider → `"both"`, no provider → `"other"`. Routing never reads this label. It reads the provider set.
@@ -294,7 +296,7 @@ If `ai_sources[].models` contains more than one model, check for coordination pa
 
 **Check and warn:**
 
-1. **Embeddings + generation model detected** — If the detected models include both an embeddings workload (a `workloads[]` entry with `capability: "embedding"`) AND a text generation model:
+1. **Embeddings + generation model detected** — If the detected models include both an embeddings workload (a `workloads[]` entry with `capability: "embedding"`, or a sidecar `model_context[]` entry whose `capabilities_used` includes `"embeddings"`) AND a text generation model:
    > ⚠️ "Migrating the embedding model (e.g., text-embedding-3-small → Titan Embeddings v2) requires re-embedding all documents in your vector store. Plan for re-indexing time and temporary storage. Test retrieval quality with the new embeddings before switching generation model."
    > ⚠️ "Verify vector index dimension compatibility before cutover. OpenAI text-embedding-3-small outputs 1536 dimensions; Titan Embeddings v2 is configurable (256, 512, or 1024). A mismatch will cause insert failures at the vector store layer — your index must be rebuilt at the target dimension before any data is written."
 
@@ -359,7 +361,7 @@ Use source-provider/service terminology in direct mode. Preserve GCP labels only
 
 ## Part 4: Infrastructure Mapping
 
-Under #415, BMA takes no source infrastructure input, so `ai_architecture.infrastructure` is `[]` unless the GCP run supplies its own infrastructure mapping outside this phase. Map source AI infrastructure to AWS equivalents (applies only when such evidence is present). In direct mode, include only AI resources explicitly present in source evidence and use their actual provider/service names. In delegated GCP mode, preserve the following selected-base mappings:
+The source AI infrastructure evidence is the sidecar `infrastructure[]`, which only the delegated GCP run writes. Direct runs have none, so `ai_architecture.infrastructure` is `[]`. Map source AI infrastructure to AWS equivalents (applies only when such evidence is present). In direct mode, include only AI resources explicitly present in source evidence and use their actual provider/service names. In delegated GCP mode, preserve the following selected-base mappings:
 
 | GCP Resource                              | AWS Equivalent                                  |
 | ----------------------------------------- | ----------------------------------------------- |

@@ -66,6 +66,10 @@ SIDECAR_EXPECTED = {
     "workloads": [],
     "observed_costs": LEGACY_SAMPLE["current_costs"],
     "integration_context": {"pattern": "direct_sdk", "primary_sdk": "anthropic", "languages": ["python"]},
+    "model_context": [
+        {"service": "anthropic_api", "model_id": "claude-3-5-sonnet-20240620", "capabilities_used": ["text_generation"], "usage_context": "Summarization"},
+        {"service": "openai_api", "model_id": "gpt-4o", "capabilities_used": ["text_generation"], "usage_context": "Classification"},
+    ],
 }
 def _legacy(mutate=None) -> dict:
     doc = copy.deepcopy(LEGACY_SAMPLE)
@@ -192,10 +196,26 @@ def test_schema_gate_fails_closed_when_the_converted_document_is_invalid(monkeyp
     assert info.value.field_path == "$.schema_version"
 def test_sidecar_carries_gcp_observed_costs_and_integration_context():
     assert adapter.convert_legacy_sidecar(_legacy()) == SIDECAR_EXPECTED
+def test_sidecar_carries_populated_infrastructure_verbatim():
+    resources = [{"address": "google_vertex_ai_endpoint.chat", "type": "google_vertex_ai_endpoint", "provider": "google"}]
+    sidecar = adapter.convert_legacy_sidecar(_legacy(_set("infrastructure", resources)))
+    assert sidecar["infrastructure"] == resources
+    assert "infrastructure" not in adapter.convert_legacy_sidecar(_legacy())
+
+
+def test_non_array_infrastructure_fails_closed():
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_sidecar(_legacy(_set("infrastructure", {"address": "x"})))
+    assert (info.value.code, info.value.field_path) == ("LEGACY_SHAPE_UNEXPECTED", "$.infrastructure")
+
+
 def test_sidecar_is_not_written_when_there_is_nothing_to_carry():
     def bare(doc):
         doc.pop("current_costs")
         doc.pop("integration")
+        for model in doc["models"]:
+            model.pop("capabilities_used")
+            model.pop("usage_context")
     assert adapter.convert_legacy_sidecar(_legacy(bare)) is None
 def test_sidecar_keeps_existing_app_code_workloads_and_replaces_only_gcp_keys():
     existing = {

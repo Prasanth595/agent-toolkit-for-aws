@@ -141,7 +141,7 @@ When Harness path is selected, write this to `aws-design-ai.json`:
 - `harness_config.model_id` — The Bedrock model ID selected in Part 1 (e.g., `us.anthropic.claude-sonnet-5`)
 - `harness_config.system_prompt` — Extracted from agent code if available; otherwise `"[TODO: Add system prompt from your agent definition]"`
 - `harness_config.tools` — Mapped from `tool_manifest[]` using the tool mapping decision tree above
-- `harness_config.source_model_provider` — `"open_ai"` or `"google"` based on the #415 `ai_sources[].provider` of the workload's source (`openai` → `"open_ai"`, `google` → `"google"`)
+- `harness_config.source_model_provider` — `"open_ai"` or `"google"` based on `summary.ai_source`
 - `harness_config.source_model_id` — Original model ID from `models[0].model_id`
 - `harness_config.policy_recommended` — Set to `true` when `tool_manifest[]` contains tools with write operations (database mutations, API calls, file writes). Recommend AgentCore Policy for tool-call guardrails.
 - `regional_fit` — Result of Step 0.5 regional check for AgentCore Harness in target region. Harness is GA in all commercial regions — this should almost always be `"available"`.

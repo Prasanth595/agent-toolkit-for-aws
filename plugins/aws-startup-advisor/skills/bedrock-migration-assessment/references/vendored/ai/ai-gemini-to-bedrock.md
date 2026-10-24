@@ -10,7 +10,7 @@
 
 **Applies to:** Gemini SDK / Gemini (Vertex AI Generative AI) usage detected in applications hosted on any source cloud → Amazon Bedrock
 
-This file is loaded by `design-ai.md` when the #415 profile has an `ai_sources[]` entry with `provider` `google` (direct or through an OpenRouter upstream). It provides model mapping tables with pricing and honest competitive analysis for Gemini → Bedrock migration decisions.
+This file is loaded by `design-ai.md` when `ai-workload-profile.json` has `summary.ai_source` = `"gemini"` or `"both"` (or, in the normalized profile, when a `google` AI source is present). It provides model mapping tables with pricing and honest competitive analysis for Gemini → Bedrock migration decisions.
 
 Verify Bedrock pricing against `references/vendored/ai/bedrock-pricing-cache.md`. Source-provider (Gemini) pricing is owned by the consuming skill's source-pricing cache where the source cloud's IaC/live evidence is provider-specific; the figures in this guide's Gemini columns are provided as a current-as-of reference for the mapping decision, not as a live source lookup.
 
