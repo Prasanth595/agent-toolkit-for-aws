@@ -38,8 +38,8 @@ SELECTED_BASE_SOURCE = [
 
 def test_exact_closed_runtime_manifest() -> None:
     value = json.loads((BMA / "references/runtime/closure.json").read_text())
-    assert len(value["entries"]) == 65
-    assert len({entry["destination"] for entry in value["entries"]}) == 65
+    assert len(value["entries"]) == 66
+    assert len({entry["destination"] for entry in value["entries"]}) == 66
     assert all(entry["origin"] in {"bma-native", "selected-base-source", "canonical-shared", "canonical-plugin"} for entry in value["entries"])
     assert all("telemetry" not in entry["destination"] and "billing" not in entry["destination"] for entry in value["entries"])
     assert all("source_path" not in entry for entry in value["entries"] if entry["origin"] == "bma-native")
@@ -57,7 +57,7 @@ def test_builder_check_and_isolated_copy(tmp_path: Path) -> None:
     shutil.copyfile(BMA / "references/runtime/closure.json", closure)
     preflight = subprocess.run([sys.executable, "-B", str(isolated / "scripts/bma-route-classifier.py"), "preflight", "--bma-base", str(isolated)], text=True, capture_output=True)
     assert preflight.returncode == 0, preflight.stdout + preflight.stderr
-    assert json.loads(preflight.stdout)["closure_entries"] == 65
+    assert json.loads(preflight.stdout)["closure_entries"] == 66
 
 
 def test_selected_base_pins_agree_and_are_consistent() -> None:

@@ -377,7 +377,7 @@ def test_semantic_trace_rejects_unknown_source_model() -> None:
 
 def test_runtime_calls_production_closure_preflight() -> None:
     result = runtime.closure_preflight(ROOT / "skills/bedrock-migration-assessment")
-    assert result["closure_entries"] == 65 and result["mutation_count"] == 0
+    assert result["closure_entries"] == 66 and result["mutation_count"] == 0
 
 
 def test_complete_state_resume_decisions() -> None:

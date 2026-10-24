@@ -42,7 +42,7 @@
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
-      "sha256": "65f43ceeaaf282c9f6655225bfd4ca0504d623048b0a6df7af985e6bb86185a2",
+      "sha256": "a7d0cb7db236909fc041d361ef752e417e90e6a8ee9c0bbe32172d85109801e7",
       "type": "script"
     },
     {
@@ -55,13 +55,24 @@
         "references/runtime/bma-input-patterns.json",
         "scripts/bma-route-classifier.py"
       ],
-      "sha256": "30fe27896d61eb415281bfcb0415814fc9d1d64b476d572bc53b2fa34bcd43ac",
+      "sha256": "ffdfb2887793306ea4f8eafea8231008e876150a409ae7f9311dfadf2f964ca4",
       "type": "script"
+    },
+    {
+      "canonical_owner": "scripts/contracts/ai-workload-profile.schema.json",
+      "destination": "references/contracts/ai-workload-profile.schema.json",
+      "logical_id": "bma.runtime.05",
+      "origin": "canonical-plugin",
+      "parity": "byte-identical",
+      "runtime_references": [],
+      "sha256": "7a85b9fdca92306066490c4eca4c241bee86c05c138190cb40a63eae41e17933",
+      "source_path": "scripts/contracts/ai-workload-profile.schema.json",
+      "type": "data"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/design-refs/ai-gemini-to-bedrock.md",
-      "logical_id": "bma.runtime.05",
+      "logical_id": "bma.runtime.06",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -69,54 +80,54 @@
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "f4dc37a79cf36e2d9cdee84e1c7bdda69e151380c54e819a793f68f7a9ee7db3",
+      "sha256": "be23137c374c487d3c711dcdc4996835d0c11837158281e4ba1ce69d8e6042ae",
       "source_path": "skills/gcp-to-aws/references/design-refs/ai-gemini-to-bedrock.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/design-refs/ai.md",
-      "logical_id": "bma.runtime.06",
+      "logical_id": "bma.runtime.07",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
         "references/design-refs/ai-gemini-to-bedrock.md",
         "references/vendored/ai/ai-openai-to-bedrock.md"
       ],
-      "sha256": "e11f12c39f364711532ac08abe0e61a338781563105a4605bceee6b11774a024",
+      "sha256": "273338a72152a48f44d4652bb24242cc8094e359500e702849d1344b9de552fc",
       "source_path": "skills/gcp-to-aws/references/design-refs/ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/clarify/clarify-ai-only.md",
-      "logical_id": "bma.runtime.07",
-      "origin": "selected-base-source",
-      "parity": "adapted",
-      "runtime_references": [
-        "references/shared/openai-on-bedrock.md"
-      ],
-      "sha256": "0ccf01b95a331a0f1af61dd25f68dbd1e7e85155e5c04cbfcf509b30ae6f0d29",
-      "source_path": "skills/gcp-to-aws/references/phases/clarify/clarify-ai-only.md",
-      "type": "instruction"
-    },
-    {
-      "canonical_owner": "bedrock-migration-assessment",
-      "destination": "references/phases/clarify/clarify-ai.md",
       "logical_id": "bma.runtime.08",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
         "references/shared/openai-on-bedrock.md"
       ],
-      "sha256": "6fe8795f0e877401de0f5fbb68703ec39c93da4cd26a7cfffbf216927cde3b1a",
+      "sha256": "87cd3b56a0fd32a03226816e8d4f62fdcf9528aeb6c44daec337511f79c0d38a",
+      "source_path": "skills/gcp-to-aws/references/phases/clarify/clarify-ai-only.md",
+      "type": "instruction"
+    },
+    {
+      "canonical_owner": "bedrock-migration-assessment",
+      "destination": "references/phases/clarify/clarify-ai.md",
+      "logical_id": "bma.runtime.09",
+      "origin": "selected-base-source",
+      "parity": "adapted",
+      "runtime_references": [
+        "references/shared/openai-on-bedrock.md"
+      ],
+      "sha256": "feb54288cc134f9bb46415234f0c5445f2b5a5b9882ab753fb252d2299c4f3c5",
       "source_path": "skills/gcp-to-aws/references/phases/clarify/clarify-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/design/design-ai.md",
-      "logical_id": "bma.runtime.09",
+      "logical_id": "bma.runtime.10",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -135,25 +146,25 @@
         "references/vendored/ai/design-ref-agentic-to-agentcore.md",
         "references/vendored/ai/design-ref-harness.md"
       ],
-      "sha256": "e4b320e0f333cf58454d5736bfa97d7a21c9344ed96b95dda574d9a9fcc0807a",
+      "sha256": "cd142e3ac555efd544eda313616e74441484c1fd9482f5398e83b4619d0e1876",
       "source_path": "skills/gcp-to-aws/references/phases/design/design-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover-anthropic-api.md",
-      "logical_id": "bma.runtime.10",
+      "logical_id": "bma.runtime.11",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
-      "sha256": "3d478438cd299ee4f9d12ef25e47ccc19c11f7eb51bcd45389864eb97f3b34f6",
+      "sha256": "966f2164a770d892b2e32faa2a54a506ff64e08736220317a28c113aac08b3df",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover-app-code.md",
-      "logical_id": "bma.runtime.11",
+      "logical_id": "bma.runtime.12",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -161,36 +172,36 @@
         "references/shared/schema-discover-ai.md",
         "references/vendored/ai/sdk-capability-map.json"
       ],
-      "sha256": "c9c71829704b8b2414d6772a0cba91239448fa62f3bf852387b8bd6f98443c6a",
+      "sha256": "a56facf53411d87c6e33e2c0bf6d30e5790c69aee915643b539242d002c9f01c",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-app-code.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover-openai-api.md",
-      "logical_id": "bma.runtime.12",
+      "logical_id": "bma.runtime.13",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
-      "sha256": "a67a43022e0a94f036a3380d5548f13ae210ee4dd4b6224eb5d7cd729b83139c",
+      "sha256": "2dcd383050b9e55802a29272eb811dc18bebff0bc12953a3f96eefe23fff953a",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-openai-api.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover-openrouter-api.md",
-      "logical_id": "bma.runtime.13",
+      "logical_id": "bma.runtime.14",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
-      "sha256": "af597ac5bc44a5f4a105b8955cdd2eefd4970f3ca1cfb688256f73ad9a860dd0",
+      "sha256": "ab44abc5730b1f27e057b2680e7fed9e2bef2bd3f33ef601084e887423ea1a61",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-openrouter-api.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover-preview.md",
-      "logical_id": "bma.runtime.14",
+      "logical_id": "bma.runtime.15",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -198,52 +209,52 @@
         "references/shared/pricing-cache.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "9b9c88e5a61da18d2ad6933aa0bf843f395a60db8b745f91b04720627671651f",
+      "sha256": "856c36f515776f7bc57b9ad9f42c4276195645f30d86f6b8853cec43a44cf4cf",
       "source_path": "skills/gcp-to-aws/references/phases/discover/discover-preview.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/estimate/estimate-ai.md",
-      "logical_id": "bma.runtime.15",
+      "logical_id": "bma.runtime.16",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
         "references/vendored/ai/ai-model-lifecycle.md",
         "references/vendored/ai/bedrock-pricing-cache.md"
       ],
-      "sha256": "e5aaf253891062b691af42ff9b0e3ba2334f9bb457bc2508ece1bf0d717176a4",
+      "sha256": "b4e1e017440f242cca565b235689db7acd1ab4493cb145a16c6e6c100f12f0c0",
       "source_path": "skills/gcp-to-aws/references/phases/estimate/estimate-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/generate/generate-ai.md",
-      "logical_id": "bma.runtime.16",
+      "logical_id": "bma.runtime.17",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
         "scripts/validate-startup-program-artifacts.py"
       ],
-      "sha256": "139b11dd34b8246bf7057251dc8ac53eaada360b62997fa82357714bbae9242a",
+      "sha256": "4b4678c40cc843efcdfc08c12c87432a52b316127b3ebb75aa786598b611ac58",
       "source_path": "skills/gcp-to-aws/references/phases/generate/generate-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/generate/generate-artifacts-ai.md",
-      "logical_id": "bma.runtime.17",
+      "logical_id": "bma.runtime.18",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
-      "sha256": "5ad5511fc7815d28275c601ad867873ef152690624d64bba96ec47e76a35d42a",
+      "sha256": "e18aa94f662f0d7bbcfb15191bc3c61052b5849000261a724745cff256296d3a",
       "source_path": "skills/gcp-to-aws/references/phases/generate/generate-artifacts-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/handoff-gates.md",
-      "logical_id": "bma.runtime.18",
+      "logical_id": "bma.runtime.19",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -254,7 +265,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/migration-complexity.md",
-      "logical_id": "bma.runtime.19",
+      "logical_id": "bma.runtime.20",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -265,7 +276,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/openai-on-bedrock.md",
-      "logical_id": "bma.runtime.20",
+      "logical_id": "bma.runtime.21",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -278,7 +289,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/pricing-cache.md",
-      "logical_id": "bma.runtime.21",
+      "logical_id": "bma.runtime.22",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -291,7 +302,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/pricing-fallback.md",
-      "logical_id": "bma.runtime.22",
+      "logical_id": "bma.runtime.23",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
@@ -305,7 +316,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/retarget-gotchas.md",
-      "logical_id": "bma.runtime.23",
+      "logical_id": "bma.runtime.24",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -316,31 +327,32 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/schema-design-aws-ai.md",
-      "logical_id": "bma.runtime.24",
+      "logical_id": "bma.runtime.25",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
-      "sha256": "0f405b3422d66afe58f0f26068fc136a59715781670b9dc2d0fdde2168d64e70",
+      "sha256": "b0102c4376535ecc8373c078f2387f8b01951180947fa038fe889b0f924be205",
       "source_path": "skills/gcp-to-aws/references/shared/schema-design-aws-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/schema-discover-ai.md",
-      "logical_id": "bma.runtime.25",
+      "logical_id": "bma.runtime.26",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [
+        "references/contracts/ai-workload-profile.schema.json",
         "references/vendored/ai/sdk-capability-map.json"
       ],
-      "sha256": "fdb5a5e4cdf7084665d59bb4a0aaa041bbed279c816ae4dcf51a032274839184",
+      "sha256": "f79ed842802c3aaed3cc890c371f33a0671ec41781df301380ed2308af8e4859",
       "source_path": "skills/gcp-to-aws/references/shared/schema-discover-ai.md",
       "type": "instruction"
     },
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/schema-phase-status.md",
-      "logical_id": "bma.runtime.26",
+      "logical_id": "bma.runtime.27",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -351,7 +363,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/schema-preferences.md",
-      "logical_id": "bma.runtime.27",
+      "logical_id": "bma.runtime.28",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -362,7 +374,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/validate-artifacts.md",
-      "logical_id": "bma.runtime.28",
+      "logical_id": "bma.runtime.29",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -373,7 +385,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/validate-migration-report.md",
-      "logical_id": "bma.runtime.29",
+      "logical_id": "bma.runtime.30",
       "origin": "selected-base-source",
       "parity": "adapted",
       "runtime_references": [],
@@ -384,7 +396,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-anthropic-to-bedrock.md",
       "destination": "references/vendored/ai/ai-anthropic-to-bedrock.md",
-      "logical_id": "bma.runtime.30",
+      "logical_id": "bma.runtime.31",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -399,7 +411,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-gemini-to-bedrock.md",
       "destination": "references/vendored/ai/ai-gemini-to-bedrock.md",
-      "logical_id": "bma.runtime.31",
+      "logical_id": "bma.runtime.32",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -414,7 +426,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-migration-guardrails.md",
       "destination": "references/vendored/ai/ai-migration-guardrails.md",
-      "logical_id": "bma.runtime.32",
+      "logical_id": "bma.runtime.33",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -431,7 +443,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-model-lifecycle.md",
       "destination": "references/vendored/ai/ai-model-lifecycle.md",
-      "logical_id": "bma.runtime.33",
+      "logical_id": "bma.runtime.34",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -444,7 +456,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-openai-to-bedrock.md",
       "destination": "references/vendored/ai/ai-openai-to-bedrock.md",
-      "logical_id": "bma.runtime.34",
+      "logical_id": "bma.runtime.35",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -460,7 +472,7 @@
     {
       "canonical_owner": "skills/shared/ai/ai-openrouter-to-bedrock.md",
       "destination": "references/vendored/ai/ai-openrouter-to-bedrock.md",
-      "logical_id": "bma.runtime.35",
+      "logical_id": "bma.runtime.36",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -479,7 +491,7 @@
     {
       "canonical_owner": "skills/shared/ai/bedrock-pricing-cache.md",
       "destination": "references/vendored/ai/bedrock-pricing-cache.md",
-      "logical_id": "bma.runtime.36",
+      "logical_id": "bma.runtime.37",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -492,7 +504,7 @@
     {
       "canonical_owner": "skills/shared/ai/bedrock-quotas.md",
       "destination": "references/vendored/ai/bedrock-quotas.md",
-      "logical_id": "bma.runtime.37",
+      "logical_id": "bma.runtime.38",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -505,7 +517,7 @@
     {
       "canonical_owner": "skills/shared/ai/design-ref-agentic-to-agentcore.md",
       "destination": "references/vendored/ai/design-ref-agentic-to-agentcore.md",
-      "logical_id": "bma.runtime.38",
+      "logical_id": "bma.runtime.39",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -519,7 +531,7 @@
     {
       "canonical_owner": "skills/shared/ai/design-ref-harness.md",
       "destination": "references/vendored/ai/design-ref-harness.md",
-      "logical_id": "bma.runtime.39",
+      "logical_id": "bma.runtime.40",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -533,7 +545,7 @@
     {
       "canonical_owner": "skills/shared/ai/sdk-capability-map.json",
       "destination": "references/vendored/ai/sdk-capability-map.json",
-      "logical_id": "bma.runtime.40",
+      "logical_id": "bma.runtime.41",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [],
@@ -544,7 +556,7 @@
     {
       "canonical_owner": "skills/shared/clarify/clarify-availability.md",
       "destination": "references/vendored/clarify/clarify-availability.md",
-      "logical_id": "bma.runtime.41",
+      "logical_id": "bma.runtime.42",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -557,7 +569,7 @@
     {
       "canonical_owner": "skills/shared/clarify/clarify-compliance.md",
       "destination": "references/vendored/clarify/clarify-compliance.md",
-      "logical_id": "bma.runtime.42",
+      "logical_id": "bma.runtime.43",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -570,7 +582,7 @@
     {
       "canonical_owner": "skills/shared/clarify/clarify-cost-appetite.md",
       "destination": "references/vendored/clarify/clarify-cost-appetite.md",
-      "logical_id": "bma.runtime.43",
+      "logical_id": "bma.runtime.44",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -583,7 +595,7 @@
     {
       "canonical_owner": "skills/shared/clarify/clarify-multicloud.md",
       "destination": "references/vendored/clarify/clarify-multicloud.md",
-      "logical_id": "bma.runtime.44",
+      "logical_id": "bma.runtime.45",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -596,7 +608,7 @@
     {
       "canonical_owner": "skills/shared/clarify/clarify-region.md",
       "destination": "references/vendored/clarify/clarify-region.md",
-      "logical_id": "bma.runtime.45",
+      "logical_id": "bma.runtime.46",
       "origin": "canonical-shared",
       "parity": "byte-identical",
       "runtime_references": [
@@ -609,7 +621,7 @@
     {
       "canonical_owner": "scripts/emit-plan-json.py",
       "destination": "scripts/emit-plan-json.py",
-      "logical_id": "bma.runtime.46",
+      "logical_id": "bma.runtime.47",
       "origin": "canonical-plugin",
       "parity": "byte-identical",
       "runtime_references": [],
@@ -620,7 +632,7 @@
     {
       "canonical_owner": "scripts/validate-migration-report.py",
       "destination": "scripts/validate-migration-report.py",
-      "logical_id": "bma.runtime.47",
+      "logical_id": "bma.runtime.48",
       "origin": "canonical-plugin",
       "parity": "byte-identical",
       "runtime_references": [],
@@ -631,7 +643,7 @@
     {
       "canonical_owner": "scripts/validate-startup-program-artifacts.py",
       "destination": "scripts/validate-startup-program-artifacts.py",
-      "logical_id": "bma.runtime.48",
+      "logical_id": "bma.runtime.49",
       "origin": "canonical-plugin",
       "parity": "byte-identical",
       "runtime_references": [],
@@ -642,7 +654,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/assemblers/decision-report.md",
-      "logical_id": "bma.runtime.49",
+      "logical_id": "bma.runtime.50",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -656,7 +668,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/assemblers/migration-docs.md",
-      "logical_id": "bma.runtime.50",
+      "logical_id": "bma.runtime.51",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -669,7 +681,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/assemblers/migration-report.md",
-      "logical_id": "bma.runtime.51",
+      "logical_id": "bma.runtime.52",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -682,7 +694,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/clarify/clarify.md",
-      "logical_id": "bma.runtime.52",
+      "logical_id": "bma.runtime.53",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -704,7 +716,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/design/design.md",
-      "logical_id": "bma.runtime.53",
+      "logical_id": "bma.runtime.54",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -717,7 +729,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/discover/discover.md",
-      "logical_id": "bma.runtime.54",
+      "logical_id": "bma.runtime.55",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -733,7 +745,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/estimate/estimate.md",
-      "logical_id": "bma.runtime.55",
+      "logical_id": "bma.runtime.56",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -746,7 +758,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/phases/generate/generate.md",
-      "logical_id": "bma.runtime.56",
+      "logical_id": "bma.runtime.57",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [
@@ -765,7 +777,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/report-sections/ai-decision-report.md",
-      "logical_id": "bma.runtime.57",
+      "logical_id": "bma.runtime.58",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -775,7 +787,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/report-sections/ai-guide.md",
-      "logical_id": "bma.runtime.58",
+      "logical_id": "bma.runtime.59",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -785,7 +797,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/report-sections/ai-migration-report.md",
-      "logical_id": "bma.runtime.59",
+      "logical_id": "bma.runtime.60",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -795,7 +807,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/report-sections/ai-readme.md",
-      "logical_id": "bma.runtime.60",
+      "logical_id": "bma.runtime.61",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -805,7 +817,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/runtime/bedrock-region-map.json",
-      "logical_id": "bma.runtime.61",
+      "logical_id": "bma.runtime.62",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -815,7 +827,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/runtime/bma-ai-clarify-result.schema.json",
-      "logical_id": "bma.runtime.62",
+      "logical_id": "bma.runtime.63",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -825,7 +837,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/runtime/content-contribution.schema.json",
-      "logical_id": "bma.runtime.63",
+      "logical_id": "bma.runtime.64",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -835,7 +847,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/runtime/plugin.json",
-      "logical_id": "bma.runtime.64",
+      "logical_id": "bma.runtime.65",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -845,7 +857,7 @@
     {
       "canonical_owner": "bedrock-migration-assessment",
       "destination": "references/shared/bma-ai-clarify-result.md",
-      "logical_id": "bma.runtime.65",
+      "logical_id": "bma.runtime.66",
       "origin": "bma-native",
       "parity": "native",
       "runtime_references": [],
@@ -879,5 +891,5 @@
   ],
   "schema_version": 1,
   "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
-  "self_hash": "92074c84c7317589e2ecb4402abd4a4baacc3f441a69bc382c023cc28873a6b2"
+  "self_hash": "b14d0800926d7d0b219f21596fc483e546c780676c1158522ee36ef93e16a907"
 }

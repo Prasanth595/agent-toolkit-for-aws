@@ -70,7 +70,7 @@ def paired(project: Path, provider: str = "none", resume: Path | None = None) ->
     assert second.returncode == 0, second.stderr
     assert second_argv[-2:] == ["--bma-base", str(BMA)]
     assert second_value["exact_sibling"] == str(BMA.resolve())
-    assert second_value["closure_entries"] == 65
+    assert second_value["closure_entries"] == 66
     assert second_value["closure_audit_complete"] is True
     closure = json.loads((BMA / "references/runtime/closure.json").read_text())
     expected = [("lstat", str((BMA / "SKILL.md").resolve())), ("read", str((BMA / "SKILL.md").resolve())),
@@ -342,7 +342,7 @@ def test_copied_layout_preserves_module_and_second_pass_contract(tmp_path: Path)
     first, value, _, _ = invoke(project, gcp=gcp)
     assert first.returncode == 0 and value["inventory"]["module_directories"] == ["nested/modules/m/"]
     second, value, argv, hashes = invoke(project, bma=bma, gcp=gcp)
-    assert second.returncode == 0 and value["closure_entries"] == 65
+    assert second.returncode == 0 and value["closure_entries"] == 66
     assert argv[-1] == str(bma) and hashes["before"] == hashes["after"]
 
 

@@ -340,7 +340,7 @@ def validate_closure(base: Path, events: list[dict[str, str]], expected_sha256: 
     if closure["destination_root"] != DESTINATION_ROOT or closure["entrypoints"] != ENTRYPOINTS or closure["runtime_exclusions"] != RUNTIME_EXCLUSIONS:
         raise ValueError("BMA_STANDALONE_CLOSURE_INVALID")
     entries = closure["entries"]
-    if not isinstance(entries, list) or len(entries) != 65:
+    if not isinstance(entries, list) or len(entries) != 66:
         raise ValueError("BMA_STANDALONE_CLOSURE_INVALID")
     destinations: list[str] = []
     logical_ids: list[str] = []
@@ -370,7 +370,7 @@ def validate_closure(base: Path, events: list[dict[str, str]], expected_sha256: 
                 raise ValueError("BMA_STANDALONE_CLOSURE_INVALID")
         destinations.append(destination)
         logical_ids.append(entry["logical_id"])
-    if len(set(destinations)) != 65 or len(set(logical_ids)) != 65:
+    if len(set(destinations)) != 66 or len(set(logical_ids)) != 66:
         raise ValueError("BMA_STANDALONE_CLOSURE_INVALID")
     known = set(destinations)
     if set(ENTRYPOINTS) - known:

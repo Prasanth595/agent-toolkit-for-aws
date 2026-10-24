@@ -43,6 +43,7 @@ COPIES = {
     "references/shared/schema-phase-status.md": "skills/gcp-to-aws/references/shared/schema-phase-status.md",
     "references/shared/validate-artifacts.md": "skills/gcp-to-aws/references/shared/validate-artifacts.md",
     "references/shared/validate-migration-report.md": "skills/gcp-to-aws/references/shared/validate-migration-report.md",
+    "references/contracts/ai-workload-profile.schema.json": "scripts/contracts/ai-workload-profile.schema.json",
 }
 for name in (
     "ai-anthropic-to-bedrock.md", "ai-gemini-to-bedrock.md", "ai-migration-guardrails.md",
@@ -76,7 +77,7 @@ NATIVE = {
 
 SPECIAL = {"scripts/bma-runtime.py", "scripts/bma-route-classifier.py", "references/runtime/bma-input-patterns.json"}
 DESTINATIONS = ["SKILL.md", *sorted(SPECIAL), *sorted(key for key in COPIES if key != "SKILL.md"), *sorted(NATIVE)]
-assert len(DESTINATIONS) == 65, len(DESTINATIONS)
+assert len(DESTINATIONS) == 66, len(DESTINATIONS)
 TOKEN = re.compile(r"`((?:scripts|references)/[A-Za-z0-9_.\-/]+\.(?:md|json|py))`")
 
 
@@ -157,7 +158,7 @@ def main() -> int:
         errors.append("closure stale")
     if errors:
         print("FAIL — " + "; ".join(errors)); return 1
-    print(f"PASS — exact BMA closure entries=65 sha256={sha(closure_path)}")
+    print(f"PASS — exact BMA closure entries=66 sha256={sha(closure_path)}")
     return 0
 
 
