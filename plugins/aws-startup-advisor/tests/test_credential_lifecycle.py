@@ -28,7 +28,7 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 ANTHROPIC_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "discover" / "discover-anthropic-api.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "discover" / "discover-anthropic-api.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "discover" / "discover-anthropic-api.md",
 ]
 

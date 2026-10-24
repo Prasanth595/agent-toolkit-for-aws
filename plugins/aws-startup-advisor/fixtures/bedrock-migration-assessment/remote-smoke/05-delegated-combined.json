@@ -1,0 +1,1 @@
+{"scenario_id":"delegated-gcp-combined","mode":"delegated","tracks":["infrastructure","ai"],"run_id":"00000000-0000-4000-8000-000000000001","question":"State run count, outer and neutral owners, and final preferences/report write cardinality."}

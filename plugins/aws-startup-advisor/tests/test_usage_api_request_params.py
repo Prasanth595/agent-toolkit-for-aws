@@ -37,7 +37,7 @@ AZURE_OPENAI_FILE = (
 ANTHROPIC_FILES = [
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"

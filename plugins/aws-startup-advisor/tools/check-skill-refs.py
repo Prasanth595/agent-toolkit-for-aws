@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import types
 import re
 import sys
 from dataclasses import dataclass
@@ -126,6 +127,8 @@ def _candidates(prefix: str, path: str, source: Path, plugin: Path) -> List[Path
     p = prefix
     if "PLUGIN_ROOT" in p:
         cands.append(plugin / path)
+    elif "BMA_BASE" in p:
+        cands.append(plugin / "skills" / "bedrock-migration-assessment" / path)
     elif "GCP_BASE" in p:
         cands.append(plugin / "skills" / "gcp-to-aws" / path)
     elif "SKILL_BASE" in p or "SKILL_DIR" in p:
@@ -257,6 +260,23 @@ def scan(plugin: Path) -> List[Ref]:
     return out
 
 
+def bma_closure_errors(plugin: Path) -> List[str]:
+    """Consume the production closure preflight when BMA is installed."""
+    bma = plugin / "skills" / "bedrock-migration-assessment"
+    classifier = bma / "scripts" / "bma-route-classifier.py"
+    if not bma.is_dir():
+        return []
+    if not classifier.is_file():
+        return ["BMA closure validator is missing"]
+    try:
+        module = types.ModuleType("skill_refs_bma_classifier")
+        exec(compile(classifier.read_text(encoding="utf-8"), str(classifier), "exec"), module.__dict__)
+        module.validate_closure(bma, [])
+    except Exception as error:
+        return [f"BMA standalone closure invalid: {error}"]
+    return []
+
+
 def _rel(p: Path) -> str:
     try:
         return str(p.resolve().relative_to(REPO_ROOT))
@@ -310,6 +330,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     missing = [r for r in refs if r.resolved is None]
+    closure_errors = bma_closure_errors(args.plugin)
     stale: List[Dict] = []
     baselined: List[Ref] = []
     if not args.no_baseline and args.baseline.exists():
@@ -321,6 +342,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "missing": [{"source": _rel(r.source), "line": r.line, "ref": r.raw, "skill": r.skill} for r in missing],
             "baselined": [{"source": _rel(r.source), "line": r.line, "ref": r.raw} for r in baselined],
             "stale_baseline_entries": stale,
+            "closure_errors": closure_errors,
         }, indent=2))
     else:
         for r in missing:
@@ -329,10 +351,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"ERROR  STALE_BASELINE  entry matched nothing — remove it: {json.dumps(e)}")
         if baselined:
             print(f"baselined (known dead references, explained in {_rel(args.baseline)}): {len(baselined)}")
-        ok = not missing and not stale
+        for e in closure_errors:
+            print(f"ERROR  BMA_CLOSURE  {e}")
+        ok = not missing and not stale and not closure_errors
         print(f"\n{'PASS' if ok else 'FAIL'} — {len(refs)} reference(s) checked, "
               f"{len(missing)} missing, {len(baselined)} baselined, {len(stale)} stale baseline entr{'y' if len(stale) == 1 else 'ies'}")
-    return 0 if (not missing and not stale) else 1
+    return 0 if (not missing and not stale and not closure_errors) else 1
 
 
 if __name__ == "__main__":

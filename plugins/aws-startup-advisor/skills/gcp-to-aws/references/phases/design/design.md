@@ -1,5 +1,9 @@
 # Phase 3: Design AWS Architecture (Orchestrator)
 
+## BMA delegation boundary
+
+When the AI route is active, pass the existing `$MIGRATION_DIR` through the restricted `design-ai.md` shim to the exact preflighted BMA sibling. BMA is the sole `aws-design-ai.json` writer; GCP retains infrastructure/billing routing, outer state, and handoff emission.
+
 ## Telemetry boundary
 
 Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including

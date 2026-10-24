@@ -293,7 +293,7 @@ def test_committed_anthropic_and_azure_openai_files_have_their_method_detected()
     files (not an empty set silently treated as GET-only)."""
     mod = _load()
     for rel in (
-        "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md",
+        "skills/bedrock-migration-assessment/references/phases/discover/discover-anthropic-api.md",
         "skills/azure-to-aws/references/phases/discover/discover-anthropic-api.md",
         "skills/azure-to-aws/references/phases/discover/discover-openai-api.md",
     ):
@@ -311,8 +311,10 @@ def test_all_six_committed_discovery_files_return_a_nonempty_method_set() -> Non
     files = sorted(
         PLUGIN_ROOT.glob("skills/*/references/phases/discover/discover-*-api.md")
     )
-    assert len(files) == 6, f"expected 6 discovery sub-files, found {len(files)}"
-    for path in files:
+    assert len(files) == 9, f"expected 9 discovery sub-files including 3 shims, found {len(files)}"
+    runtime_files = [path for path in files if "Compatibility shim" not in path.read_text(encoding="utf-8")]
+    assert len(runtime_files) == 6
+    for path in runtime_files:
         text = path.read_text(encoding="utf-8")
         methods, unrecognized = mod._methods_in_capture_section(text)
         assert methods, f"{path}: no HTTP method read (unrecognized={unrecognized})"
@@ -343,7 +345,7 @@ def test_mutating_the_real_anthropic_header_to_post_is_caught(tmp_path: Path) ->
     the real committed Anthropic file, flip its header cell from GET to
     POST, change nothing else, and confirm the audit now fails instead of
     exiting 0."""
-    rel = "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md"
+    rel = "skills/bedrock-migration-assessment/references/phases/discover/discover-anthropic-api.md"
     real_text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
     assert "Endpoint (GET, `https://api.anthropic.com`)" in real_text
     mutated = real_text.replace(
@@ -754,7 +756,7 @@ def test_real_post_header_row_is_still_caught_after_column_scoping(tmp_path: Pat
     """The column-scoping fix must not blind the script to a real header-cell
     method declaration — only prose outside the actual header row is
     excluded."""
-    rel = "skills/gcp-to-aws/references/phases/discover/discover-anthropic-api.md"
+    rel = "skills/bedrock-migration-assessment/references/phases/discover/discover-anthropic-api.md"
     real_text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
     mutated = real_text.replace(
         "Endpoint (GET, `https://api.anthropic.com`)",

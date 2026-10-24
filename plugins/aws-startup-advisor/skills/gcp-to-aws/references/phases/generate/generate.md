@@ -1,5 +1,9 @@
 # Phase 5: Generate Migration Artifacts (Orchestrator)
 
+## BMA delegation boundary
+
+When the AI route is active after explicit Generate consent, pass the existing `$MIGRATION_DIR` through the restricted AI shims to the exact preflighted BMA sibling. BMA alone writes `generation-ai.json` and `ai-migration/**`. GCP remains the sole outer dirty-state, combined documentation/report, phase-state, telemetry, and handoff owner.
+
 ## Telemetry boundary
 
 Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including

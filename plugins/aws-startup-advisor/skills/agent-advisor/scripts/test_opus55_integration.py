@@ -319,7 +319,7 @@ def test_pricing_and_selection_share_the_verified_profile_region_matrix():
     assert mr.load_openai_catalog()["models"]["anthropic_claude_opus_5_5"]["inference_profiles"] == expected
 
 
-@pytest.mark.parametrize("cloud", ["gcp-to-aws", "azure-to-aws"])
+@pytest.mark.parametrize("cloud", ["bedrock-migration-assessment", "azure-to-aws"])
 def test_long_context_estimates_do_not_apply_the_legacy_claude_surcharge(cloud):
     text = (SKILLS / cloud / "references/phases/estimate/estimate-ai.md").read_text()
     assert "**Long-context surcharge:**" not in text
@@ -399,7 +399,7 @@ def test_london_runtime_preflight_iam_and_price_agree_on_the_selected_path(monke
     assert "runtime-in-region" in price["note"]
 
 
-@pytest.mark.parametrize("cloud", ["gcp-to-aws", "azure-to-aws"])
+@pytest.mark.parametrize("cloud", ["bedrock-migration-assessment", "azure-to-aws"])
 def test_assessment_eligibility_precedes_same_model_shortcuts(cloud):
     text = (SKILLS / cloud / "references/phases/design/design-ai.md").read_text()
     selection = text.split("## Part 1:", 1)[1]
@@ -421,7 +421,7 @@ def test_assessment_eligibility_precedes_same_model_shortcuts(cloud):
     assert "model_change: false" in assessment
 
 
-@pytest.mark.parametrize("cloud", ["gcp-to-aws", "azure-to-aws"])
+@pytest.mark.parametrize("cloud", ["bedrock-migration-assessment", "azure-to-aws"])
 def test_assessment_same_model_pricing_keeps_opus_flat_and_gpt_tiers_scoped(cloud):
     text = (SKILLS / cloud / "references/phases/design/design-ai.md").read_text()
     assessment = text.split("**Stay-or-migrate", 1)[1].split("**Quota risk", 1)[0]

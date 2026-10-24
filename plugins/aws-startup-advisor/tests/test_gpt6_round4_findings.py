@@ -24,25 +24,25 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 AZURE_DESIGN_MD = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "design" / "design.md"
 AZURE_GENERATE_MD = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "generate" / "generate.md"
 
-GCP_GENERATE_AI_MD = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-ai.md"
+GCP_GENERATE_AI_MD = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-ai.md"
 GCP_GENERATE_ARTIFACTS_AI_MD = (
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-artifacts-ai.md"
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-artifacts-ai.md"
 )
 
 GUARDRAILS_CANONICAL = PLUGIN_ROOT / "skills" / "shared" / "ai" / "ai-migration-guardrails.md"
 GUARDRAILS_VENDORED = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "vendored" / "ai" / "ai-migration-guardrails.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "vendored" / "ai" / "ai-migration-guardrails.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "vendored" / "ai" / "ai-migration-guardrails.md",
 ]
 
 OPENAI_GUIDE_CANONICAL = PLUGIN_ROOT / "skills" / "shared" / "ai" / "ai-openai-to-bedrock.md"
 OPENAI_GUIDE_VENDORED = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "vendored" / "ai" / "ai-openai-to-bedrock.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "vendored" / "ai" / "ai-openai-to-bedrock.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "vendored" / "ai" / "ai-openai-to-bedrock.md",
 ]
 
 ESTIMATE_AI_FILES = [
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "estimate" / "estimate-ai.md",
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "estimate" / "estimate-ai.md",
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "estimate" / "estimate-ai.md",
 ]
 

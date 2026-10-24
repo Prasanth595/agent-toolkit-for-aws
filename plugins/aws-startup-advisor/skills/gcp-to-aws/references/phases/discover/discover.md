@@ -7,13 +7,34 @@ Lightweight orchestrator that delegates to domain-specific discoverers. Each sub
 
 - **discover-iac.md** → `gcp-resource-inventory.json` + `gcp-resource-clusters.json` (if Terraform found); may also write `ai-workload-profile.json` when **Vertex-strong** (see `discover-iac.md` Step 7d)
 - **discover-live.md** → `gcp-resource-inventory.json` + `gcp-resource-clusters.json` from the user's authenticated `gcloud` CLI (read-only, consent-gated); merges into the IaC inventory with drift when both run
-- **discover-app-code.md** → `ai-workload-profile.json` when AI confidence ≥ 70% (may **merge** with an existing `iac_vertex` profile)
+- **discover-app-graviton.md** → `graviton_profile` entries with `source: "app_code"` in GCP discovery metadata (if source code or manifests found; GCP-owned, not delegated)
+- **discover-app-code.md** → `ai-workload-profile.json` when AI confidence ≥ 70% (may **merge** with an existing `iac_vertex` profile); loaded only when preflight returned `AI_CANDIDATE: true`
 - **discover-billing.md** → `billing-profile.json` (if billing data found)
 - **discover-openai-api.md** → `openai-usage-profile.json` from the OpenAI Admin API (read-only, consent-gated); fills `ai-workload-profile.json` → `current_costs` with real spend when that profile exists
 - **discover-openrouter-api.md** → `openrouter-usage-profile.json` from the OpenRouter API (read-only, consent-gated, provisioning key); per-model usage + spend for an OpenRouter-fronted workload; fills `ai-workload-profile.json` → `current_costs` when that profile exists
 - **discover-anthropic-api.md** → `anthropic-usage-profile.json` from the Anthropic Admin API (read-only, consent-gated); per-model usage + spend for an Anthropic-direct workload; fills `ai-workload-profile.json` → `current_costs` when that profile exists
 
 Multiple artifacts can be produced in a single run — they are not mutually exclusive.
+
+## AI profile boundary (delegated BMA input)
+
+`ai-workload-profile.json` in `$MIGRATION_DIR` stays the public GCP artifact in the legacy GCP shape. BMA never reads it. After the sub-discoveries finish and before any BMA AI phase runs, convert it when it exists:
+
+```
+python3 <GCP skill root>/scripts/gcp-ai-profile-adapter.py convert --legacy $MIGRATION_DIR/ai-workload-profile.json --out $MIGRATION_DIR/bma-input/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json
+```
+
+Exit 0 means `bma-input/ai-workload-profile.json` holds a #415 document. The same run writes the GCP-owned `ai-workload-sidecar.json` with `observed_costs` (from `current_costs`) and `integration_context` (from `integration`) when either exists, keeping any existing `workloads`. Delegated BMA AI phases gate on that path (`$AI_PROFILE`). Exit 1 prints a `GcpProfileNotRepresentable` error that names the legacy field path. Stop the AI route with that error, do not invoke BMA, and do not write `bma-input/`. The mapping is in `references/shared/gcp-ai-profile-415-mapping.md`.
+
+## Preflight: select resume read-only, then classify before mutation
+
+Before classification or Step 0 mutation, inspect `.migration/` read-only. If existing runs are present, list them with phase status and ask the Step 0 Resume/Fresh/Cancel question now. Hold the answer only in invocation memory: for Resume, set `$SELECTED_RESUME_DIR` to the exact selected existing run; for Fresh, leave it empty; for Cancel, stop. Do not create a directory, persist consent, reconstruct or rewrite state, retire stale artifacts, reconcile telemetry, checkpoint, or write any artifact during this selection.
+
+Invoke `scripts/bma-route-classifier.py classify` with the GCP-local `references/runtime/bma-input-patterns.json`, `references/runtime/bma-bootstrap-manifest.json`, pinned manifest SHA `254c8335cce2faab25aa055b438ef24abd59c85db87822e435683cd12aa295b5`, explicit provider intent, project root, and `--resume-dir "$SELECTED_RESUME_DIR"` when Resume was selected. Do not pass or resolve a BMA path on this first pass. `AI_CANDIDATE` is true only with AI evidence: an `ai_signals` match in source or manifest files (provider SDK import or dependency, AI endpoint host, provider env var name, or model identifier), explicit provider intent, Vertex-strong IaC, or a durable AI route; `SOURCE_CONTAINING` alone is informational. If `AI_CANDIDATE` is false, continue without any BMA operation. If true, resolve exactly `<GCP_BASE>/../bedrock-migration-assessment`, rerun the exact same command and resume argument with that `--bma-base`, and require the complete 66-entry closure audit, exact sibling, unchanged before/after trees, and `mutation_count: 0` before Step 0. This preflight is read-only and precedes migration-directory creation, consent persistence, state reconstruction, stale retirement, telemetry reconciliation, checkpoint, or artifact write. A source-free durable AI resume therefore cannot continue unless its selected run was classified and the exact BMA sibling closure passed.
+
+If the bootstrap check returns `ok: false`, stop before any state, telemetry, or artifact write. Report the exact `reason` value returned by the classifier, and do not fall back to a different route. The likely cause is line-ending normalization (for example, Git `core.autocrlf=true` on Windows) or a stale checkout. Fix it with a fresh checkout that uses LF line endings, or by reinstalling the plugin.
+
+Keep the selected-base Discover order after successful preflight: GCP IaC/Vertex seed → BMA app scan → GCP billing/live → BMA OpenAI/OpenRouter/Anthropic → GCP preview. Source-containing input below the AI confidence threshold writes no new AI profile and does not activate downstream AI unless an `iac_vertex` profile was retained. Every BMA write is submitted as one complete request to the production runtime boundary. When BMA enriches a GCP Vertex seed or an existing profile/capture, include the SHA-256 of the exact prior bytes as `expected_sha256`; arbitrary owners, unknown paths, stale hashes, and partial publication are rejected before any durable write.
 
 ## Step 0: Initialize Migration State
 
@@ -23,12 +44,8 @@ Multiple artifacts can be produced in a single run — they are not mutually exc
 
    Do not pad it, restate it later, or block on it — continue directly into discovery in the same turn.
 
-1. Check for existing `.migration/` directory at the project root.
-   - **If existing runs found:** List them with their phase status and ask:
-     - `[A] Resume: Continue with [latest run]`
-     - `[B] Fresh: Create new migration run`
-     - `[C] Cancel`
-   - **If resuming:** Set `$MIGRATION_DIR` to the selected run's directory. Read its `.phase-status.json` and skip to the appropriate phase per the State Machine in SKILL.md.
+1. Apply the read-only selection already made before preflight.
+   - **If resuming:** Set `$MIGRATION_DIR` to `$SELECTED_RESUME_DIR`. Read its `.phase-status.json` and skip to the appropriate phase per the State Machine in SKILL.md. Do not ask the Resume/Fresh/Cancel question again.
    - **If fresh or no existing runs:** Continue to step 2.
 2. Create `.migration/[MMDD-HHMM]/` directory (e.g., `.migration/0226-1430/`) using current timestamp (MMDD = month/day, HHMM = hour/minute). Set `$MIGRATION_DIR` to this new directory.
 3. Create `.migration/.gitignore` file (if not already present) with exact content:
@@ -81,8 +98,10 @@ Glob for: `**/*.tf`, `**/*.tfvars`, `**/*.tfstate`, `**/.terraform.lock.hcl`
 **1b. Check for source code / dependency manifests:**
 Glob for: `**/*.py`, `**/*.js`, `**/*.ts`, `**/*.jsx`, `**/*.tsx`, `**/*.go`, `**/*.java`, `**/*.scala`, `**/*.kt`, `**/*.rs`, `**/requirements.txt`, `**/setup.py`, `**/pyproject.toml`, `**/Pipfile`, `**/package.json`, `**/go.mod`, `**/pom.xml`, `**/build.gradle`
 
-- If found → Load `references/phases/discover/discover-app-code.md`
-- If not found → Skip. Log: "No source code found — skipping app code discovery."
+- If found → Load `references/phases/discover/discover-app-graviton.md` first (GCP-owned Graviton `graviton_profile` with `source: "app_code"`; runs for every source-containing run regardless of `AI_CANDIDATE`).
+- If found AND preflight returned `AI_CANDIDATE: true` → then load `references/phases/discover/discover-app-code.md` (the BMA delegation shim).
+- If found AND `AI_CANDIDATE: false` → Do not load the shim. Log: "No AI evidence — skipping BMA app-code discovery (Graviton profile still recorded)."
+- If not found → Skip both. Log: "No source code found — skipping app code discovery."
 
 **1c. Check for billing data:**
 Glob for: `**/*billing*.csv`, `**/*billing*.json`, `**/*cost*.csv`, `**/*cost*.json`, `**/*usage*.csv`, `**/*usage*.json`
@@ -269,7 +288,8 @@ After all loaded sub-discoveries complete, check what artifacts were produced in
 2. **If NO artifacts were produced** (sub-discoveries ran but produced no output): STOP and output: "Discovery ran but produced no artifacts. Check that your input files contain valid GCP resources and try again."
 3. **Route output gate (fail closed):** For each triggered sub-discovery route, require the expected artifact(s) before completion:
    - If `discover-iac.md` ran -> require `gcp-resource-inventory.json` and `gcp-resource-clusters.json`
-   - If `discover-app-code.md` ran:
+   - If `discover-app-graviton.md` ran (source or manifests found) -> require `graviton_profile` (possibly empty) in GCP discovery metadata with every entry `source: "app_code"`; this holds whether or not the BMA shim ran.
+   - If `discover-app-code.md` ran (`AI_CANDIDATE: true` only):
      - If its Step 4 exit gate applied (overall AI confidence **below** 70%) **and** no `ai-workload-profile.json` exists -> **allow completion** (app-code route may produce no AI profile).
      - If Step 4 exit applied with confidence below 70% **but** `ai-workload-profile.json` exists with `metadata.profile_source` = `"iac_vertex"` -> **allow completion** (IaC-inferred profile retained).
      - If execution continued to Steps 5–8 (confidence **≥** 70%) -> **require** `ai-workload-profile.json`.

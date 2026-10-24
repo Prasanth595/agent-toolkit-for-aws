@@ -1,0 +1,1 @@
+{"scenario_id":"anthropic-capture-outcomes","mode":"direct","cases":[{"consent":"declined"},{"consent":"accepted","captures":"all_failed","retry_pending":false},{"consent":"accepted","captures":"all_failed","retry_pending":true}],"question":"For each case, state requests, profile outcome, next action, and cost knownness."}

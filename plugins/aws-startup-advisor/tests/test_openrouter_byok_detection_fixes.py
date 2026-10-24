@@ -53,7 +53,7 @@ def _normalize(text: str) -> str:
 OPENROUTER_DISCOVER_FILES = [
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"

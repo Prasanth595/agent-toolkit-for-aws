@@ -1,3 +1,11 @@
+[tasks."lint:runtime-copy-parity"]
+description = "Check BMA classifier, patterns, and GCP bootstrap copies"
+run = "python3 tools/sync-runtime-copies.py --check"
+
+[tasks."lint:bma-closure"]
+description = "Check the exact standalone BMA runtime closure"
+run = "python3 tools/build-bma-closure.py --check"
+
 [tasks."lint:artifacts"]
 description = "Validate aws-startup-advisor fixture artifacts against their published schema contracts"
 run = "python3 scripts/validate-artifacts.py --fixtures"
@@ -16,7 +24,7 @@ run = "python3 scripts/consent-disclosure-audit.py"
 
 [tasks.ci]
 description = "Run startup advisor CI checks"
-depends = ["lint:md", "lint:model-id", "lint:model-staleness", "lint:startup-model-pricing", "lint:artifacts", "lint:vendored-parity", "lint:skill-refs", "lint:consent-disclosure", "test", "test:heroku-source-review"]
+depends = ["lint:md", "lint:model-id", "lint:model-staleness", "lint:startup-model-pricing", "lint:artifacts", "lint:vendored-parity", "lint:runtime-copy-parity", "lint:bma-closure", "lint:skill-refs", "lint:consent-disclosure", "test", "test:heroku-source-review"]
 
 [tasks."lint:md"]
 description = "Lint startup advisor markdown using the shared rules"
@@ -32,7 +40,7 @@ run = "uv run --no-project python scripts/model-id-lint.py"
 
 [tasks.test]
 description = "Run plugin contract tests"
-run = "uv run --no-project --with pytest python -m pytest tests -q"
+run = "uv run --no-project --with pytest --with jsonschema==4.25.1 python -m pytest tests -q"
 
 [tasks."test:heroku-source-review"]
 description = "Run Heroku application-source contract and validator tests"

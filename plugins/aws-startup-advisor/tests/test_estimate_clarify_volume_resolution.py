@@ -57,7 +57,7 @@ AZURE_ESTIMATE_AI = (
 GCP_ESTIMATE_AI = (
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "estimate"
@@ -75,7 +75,7 @@ AZURE_CLARIFY_AI_ONLY = (
 GCP_DISCOVER_ANTHROPIC = (
     PLUGIN_ROOT
     / "skills"
-    / "gcp-to-aws"
+    / "bedrock-migration-assessment"
     / "references"
     / "phases"
     / "discover"
@@ -163,8 +163,10 @@ def test_discover_merge_stamps_partial_window_and_cost_status_onto_current_costs
     for path in (GCP_DISCOVER_ANTHROPIC, AZURE_DISCOVER_ANTHROPIC, AZURE_DISCOVER_OPENAI):
         text = path.read_text(encoding="utf-8")
         step4_idx = text.index("## Step 4: Merge into the AI Workload Profile")
-        # Scope the search to the current_costs merge sub-section only.
-        current_costs_idx = text.index("current_costs", step4_idx)
+        # Scope the search to the cost merge sub-section only. BMA's GCP copy keeps the
+        # stamping under the sidecar's observed_costs key (#415 migration); Azure keeps current_costs.
+        cost_key = "observed_costs" if path == GCP_DISCOVER_ANTHROPIC else "current_costs"
+        current_costs_idx = text.index(cost_key, step4_idx)
         section = text[current_costs_idx : current_costs_idx + 2500]
         assert '"partial_window":' in section, (
             f"{path.name}: current_costs merge does not stamp partial_window onto the "

@@ -62,6 +62,10 @@ _forbids_files:
 
 # Phase 2: Clarify Requirements
 
+## BMA delegation boundary
+
+The outer Discover preflight must already have validated the exact BMA sibling. AI-only Clarify delegates to BMA as the sole neutral writer. Combined Clarify consumes exactly one validated, non-writing `BMA_AI_CLARIFY_RESULT`; `clarify-assemble.md` remains the sole combined `preferences.json` writer and the sole checkpoint owner. Pass the existing `$MIGRATION_DIR`; never create a second run or advance the phase twice.
+
 ## Telemetry boundary
 
 Load `references/vendored/telemetry/PROTOCOL.md` from the GCP skill root, including

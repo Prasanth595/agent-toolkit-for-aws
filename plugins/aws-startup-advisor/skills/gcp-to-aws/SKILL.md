@@ -5,6 +5,14 @@ description: "Migrate workloads from Google Cloud Platform to AWS — plus AI an
 
 # GCP-to-AWS Migration Skill
 
+## Route-sensitive Bedrock migration assessment dependency
+
+Before creating, reconstructing, retiring, checkpointing, or mutating any migration run, inspect existing `.migration/` runs and obtain the Resume/Fresh/Cancel selection read-only. Hold the answer in invocation memory. Run the read-only first-pass classifier from this GCP skill with the project root, explicit provider intent, and the exact selected resume directory for Resume; pass no resume directory for Fresh. Both classifier passes use the same selected resume argument. Only after candidate closure PASS may the selected run be resumed or mutated. The checked-in outer bootstrap-manifest SHA-256 is `254c8335cce2faab25aa055b438ef24abd59c85db87822e435683cd12aa295b5`.
+
+If the bootstrap check returns `ok: false`, stop before any state, telemetry, or artifact write. Report the exact `reason` value returned by the classifier, and do not fall back to a different route. The likely cause is line-ending normalization (for example, Git `core.autocrlf=true` on Windows) or a stale checkout. Fix it with a fresh checkout that uses LF line endings, or by reinstalling the plugin.
+
+A noncandidate continues GCP-only and must not stat or resolve BMA. Only `AI_CANDIDATE: true` may resolve the exact sibling `<GCP_BASE>/../bedrock-migration-assessment` and rerun the same classifier with `--bma-base` before the first write. A missing or invalid sibling stops with `BEDROCK_MIGRATION_ASSESSMENT_SIBLING_MISSING` or `BMA_STANDALONE_CLOSURE_INVALID` and leaves project, run, telemetry, GCP, and BMA trees unchanged. `AI_CANDIDATE` requires AI evidence: an `ai_signals` match in source or manifest files (provider SDK import or dependency, AI endpoint host, provider env var name, or model identifier), explicit provider intent, Vertex-strong IaC, or a durable AI route. Candidate input preflights and scans through BMA once even if confidence later remains below 70%. `SOURCE_CONTAINING` is informational only: source files without AI evidence stay GCP-only with zero BMA operations, and pure source-free infrastructure performs zero BMA operations. Delegated BMA receives the existing `$MIGRATION_DIR`; GCP remains the only outer state, telemetry, combined Clarify, and combined report owner.
+
 ## Optional usage telemetry
 
 Before starting or resuming, load `references/vendored/telemetry/PROTOCOL.md` and

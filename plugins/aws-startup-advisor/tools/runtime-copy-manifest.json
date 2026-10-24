@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "selected_base": "9ab50636d12510dc351ff02fd7966efa4dba4341",
+  "copies": [
+    {
+      "logical_id": "bma-route-classifier",
+      "canonical": "skills/shared/migration/bma-route-classifier.py",
+      "destinations": ["skills/gcp-to-aws/scripts/bma-route-classifier.py", "skills/bedrock-migration-assessment/scripts/bma-route-classifier.py"],
+      "mode": "0755"
+    },
+    {
+      "logical_id": "bma-input-patterns",
+      "canonical": "skills/shared/migration/bma-input-patterns.json",
+      "destinations": ["skills/gcp-to-aws/references/runtime/bma-input-patterns.json", "skills/bedrock-migration-assessment/references/runtime/bma-input-patterns.json"],
+      "mode": "0644"
+    },
+    {
+      "logical_id": "bma-bootstrap-manifest",
+      "canonical": "skills/shared/migration/bma-bootstrap-manifest.json",
+      "destinations": ["skills/gcp-to-aws/references/runtime/bma-bootstrap-manifest.json"],
+      "mode": "0644"
+    }
+  ]
+}

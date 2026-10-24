@@ -22,18 +22,18 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 GCP_GENERATE_ARTIFACTS_AI_MD = (
-    PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-artifacts-ai.md"
+    PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-artifacts-ai.md"
 )
 AZURE_GENERATE_ARTIFACTS_AI_MD = (
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "generate" / "generate-artifacts-ai.md"
 )
 GENERATE_ARTIFACTS_AI_FILES = [GCP_GENERATE_ARTIFACTS_AI_MD, AZURE_GENERATE_ARTIFACTS_AI_MD]
 
-GCP_DESIGN_AI_MD = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "design" / "design-ai.md"
+GCP_DESIGN_AI_MD = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "design" / "design-ai.md"
 AZURE_DESIGN_AI_MD = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "design" / "design-ai.md"
 DESIGN_AI_FILES = [GCP_DESIGN_AI_MD, AZURE_DESIGN_AI_MD]
 
-GCP_GENERATE_AI_MD = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "generate" / "generate-ai.md"
+GCP_GENERATE_AI_MD = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "generate" / "generate-ai.md"
 
 SCHEMA_DESIGN_AWS_AI = (
     PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "shared" / "schema-design-aws-ai.md"

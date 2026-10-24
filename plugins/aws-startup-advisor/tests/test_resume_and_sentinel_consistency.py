@@ -22,7 +22,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 GCP_DISCOVER = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "discover" / "discover.md"
 AZURE_DISCOVER = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "discover" / "discover.md"
-GCP_ANTHROPIC = PLUGIN_ROOT / "skills" / "gcp-to-aws" / "references" / "phases" / "discover" / "discover-anthropic-api.md"
+GCP_ANTHROPIC = PLUGIN_ROOT / "skills" / "bedrock-migration-assessment" / "references" / "phases" / "discover" / "discover-anthropic-api.md"
 AZURE_ANTHROPIC = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "discover" / "discover-anthropic-api.md"
 AZURE_OPENAI = PLUGIN_ROOT / "skills" / "azure-to-aws" / "references" / "phases" / "discover" / "discover-openai-api.md"
 

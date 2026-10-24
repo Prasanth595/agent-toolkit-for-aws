@@ -11,7 +11,7 @@ Ask it things like:
 - "Which runtime should this agent use?"
 - "Our API started returning 502s after the last deploy."
 
-The twelve skills below are the catalog. Install them together.
+The thirteen skills below are the catalog. Install them together.
 
 ## Agent Skills
 
@@ -29,6 +29,7 @@ The twelve skills below are the catalog. Install them together.
 | 10 | `knowledge-base-for-startups` | AWS Activate FAQ, credits guide, programs, partner offers, sample architectures, and AWS-curated learn articles | [SKILL.md](skills/knowledge-base-for-startups/SKILL.md) |
 | 11 | `prompt-library-for-startups` | AWS-curated copy-paste prompts for AI coding agents, plus downloadable installable agents | [SKILL.md](skills/prompt-library-for-startups/SKILL.md) |
 | 12 | `contextual-offers-for-startups` | Appends at most one relevant AWS Activate partner offer as optional context after another skill's output is final | [SKILL.md](skills/contextual-offers-for-startups/SKILL.md) |
+| 13 | `bedrock-migration-assessment` | Canonical source-neutral AI workload discovery, requirements clarification, Bedrock target design, cost estimation, and optional migration-support artifact generation. It assesses and plans; `llm-to-bedrock` performs application source rewrites and behavioral evaluation | [SKILL.md](skills/bedrock-migration-assessment/SKILL.md) |
 
 `contextual-offers-for-startups` is consulted by the other skills rather than invoked directly: it runs only after a recommendation, plan, or build is already final, and it never influences the technical advice.
 
@@ -68,7 +69,7 @@ For standalone skill installs — Kiro, fx, and other hosts that consume skills 
 npx skills add aws/agent-toolkit-for-aws/plugins/aws-startup-advisor/skills --skill '*'
 ```
 
-Install all 12 skills together rather than a subset: `agent-advisor` delegates to `gcp-to-aws`, and the migration skills share vendored fragments. A standalone install covers the skills only — it does not configure the `aws-mcp` server declared in `.mcp.json`, which the host needs separately.
+Install all 13 skills together rather than a subset: `agent-advisor` delegates to `gcp-to-aws`, AI-capable GCP routes delegate to `bedrock-migration-assessment`, and the migration skills share vendored fragments. A standalone install covers the skills only — it does not configure the `aws-mcp` server declared in `.mcp.json`, which the host needs separately.
 
 ## Development checks
 
@@ -156,7 +157,7 @@ The `llm-to-bedrock` skill is a focused model and SDK rewrite. It assesses the c
 **A full migration requires `gcp-to-aws` or `azure-to-aws` installed alongside it.** Assess runs whichever sibling is present's discover, clarify, design, and estimate phases in the same session (`gcp-to-aws` preferred when both are installed), and installing `llm-to-bedrock` on its own stops there. Access-only mode does not need either sibling: it checks the models you name, walks the access step for each, and stops, with no rewrite and no branch. Install the pair for a migration:
 
 ```bash
-npx skills add aws/agent-toolkit-for-aws/plugins/aws-startup-advisor/skills --skill llm-to-bedrock --skill gcp-to-aws
+npx skills add aws/agent-toolkit-for-aws/plugins/aws-startup-advisor/skills --skill llm-to-bedrock --skill gcp-to-aws --skill bedrock-migration-assessment
 ```
 
 (Substitute `azure-to-aws` if your source infra runs on Azure.)
