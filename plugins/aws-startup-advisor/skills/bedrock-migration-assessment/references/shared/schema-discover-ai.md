@@ -2,10 +2,10 @@
 
 **Mode boundary:** Direct BMA records actual provider/source-service/gateway provenance and never invents GCP billing, `live_gcloud`, or infrastructure evidence. GCP examples below apply only when source evidence is actually GCP/Vertex or execution is delegated from GCP.
 
-BMA has one AI input contract: the **#415 AI workload profile**, `ai-workload-profile.json`. Its vendored schema is `references/contracts/ai-workload-profile.schema.json` (byte-identical to the canonical file). Every AI phase that reads the profile runs this gate first:
+BMA has one AI input contract: the **#415 AI workload profile**, `ai-workload-profile.json`. Its vendored schema is `references/contracts/ai-workload-profile.schema.json` (byte-identical to the canonical file). `<AI_PROFILE>` is `<run>/ai-workload-profile.json` in direct mode and `<run>/bma-input/ai-workload-profile.json` in delegated mode. The GCP public `ai-workload-profile.json` is the legacy GCP shape and is never BMA input. Every AI phase that reads the profile runs this gate first:
 
 ```
-python3 <skill root>/scripts/bma-runtime.py validate-profile --profile <run>/ai-workload-profile.json [--sidecar <run>/ai-workload-sidecar.json]
+python3 <skill root>/scripts/bma-runtime.py validate-profile --profile <AI_PROFILE> [--sidecar <run>/ai-workload-sidecar.json]
 ```
 
 Exit 0 means the input is valid and the phase may continue. Exit 1 means stop. A legacy-shaped document fails with `BmaLegacyProfileRejected`, which names the first legacy field. BMA has no fallback for legacy input. Do not reshape a legacy profile by hand. Direct discovery writes #415 directly, and delegated runs receive a #415 document from the GCP boundary adapter.

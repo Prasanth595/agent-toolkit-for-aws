@@ -1,6 +1,6 @@
 # Discover Phase: Anthropic Usage API Discovery
 
-> Self-contained Anthropic usage discovery sub-file. Captures real cost and
+> Self-contained Anthropic usage discovery sub-file. Captures real cost and `$AI_PROFILE` is `$MIGRATION_DIR/ai-workload-profile.json` in direct mode and `$MIGRATION_DIR/bma-input/ai-workload-profile.json` in delegated mode (the GCP adapter writes the delegated input there; the public GCP file keeps its legacy content).
 > token-usage data directly from the Anthropic Admin API — read-only,
 > consent-gated — as an alternative to the user exporting billing CSVs by
 > hand. Produces `anthropic-usage-profile.json` and, when
@@ -418,7 +418,7 @@ of `costs_by_description[].monthly_cost_usd` (± rounding).
 
 ## Step 4: Merge into the AI Workload Profile (if it exists), Then Clean Up
 
-If `$MIGRATION_DIR/ai-workload-profile.json` exists (from app-code or IaC discovery), update it. The API data is authoritative for Anthropic spend and volume:
+If `$AI_PROFILE` exists (from app-code or IaC discovery), update it. The API data is authoritative for Anthropic spend and volume:
 
 1. **Observed cost → sidecar `observed_costs`.** Write to `$MIGRATION_DIR/ai-workload-sidecar.json`, creating it with `schema_version: 1`, `kind: "BMA_GCP_AI_SIDECAR"`, and `workloads: []` if absent. The merge rules are those in `schema-discover-ai.md` § Usage-API merge, with the Anthropic-specific stamping below:
    - **No existing `observed_costs`** → `{ "monthly_ai_spend": <summary.monthly_cost_usd>, "services_detected": ["Anthropic Claude API"], "source": "anthropic_usage_api", "partial_window": <this profile's metadata.partial_window>, "cost_status": <this profile's metadata.cost_status> }`. Stamp both fields even in the single-provider case, so Clarify's Q3 (`clarify-ai-only.md`) can check them without re-opening the usage-profile file.

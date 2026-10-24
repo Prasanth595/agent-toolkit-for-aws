@@ -57,6 +57,8 @@ WRITERS = {
         ".gate-failures.json": GCP_OWNER,
         "migration-preview.json": GCP_OWNER,
         "ai-workload-profile.json": BMA_OWNER,
+        # Delegated BMA input: the GCP adapter converts the legacy profile into this #415 file.
+        "bma-input/ai-workload-profile.json": GCP_OWNER,
         "ai-workload-sidecar.json": GCP_OWNER,
         "openai-usage-profile.json": BMA_OWNER,
         "anthropic-usage-profile.json": BMA_OWNER,

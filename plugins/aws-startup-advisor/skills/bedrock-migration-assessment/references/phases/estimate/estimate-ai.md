@@ -1,7 +1,7 @@
 # Estimate Phase: AI Workload Cost Analysis
 
 > Loaded by estimate.md when aws-design-ai.json exists.
-> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $MIGRATION_DIR/ai-workload-profile.json --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
+> **Input gate:** before reading any AI profile field, run `bma-runtime.py validate-profile --profile $AI_PROFILE --sidecar $MIGRATION_DIR/ai-workload-sidecar.json` (the sidecar is required when present). `$AI_PROFILE` is `$MIGRATION_DIR/ai-workload-profile.json` in direct mode and `$MIGRATION_DIR/bma-input/ai-workload-profile.json` in delegated mode. Exit 1 stops this phase. Legacy-shaped input is rejected by name (`BmaLegacyProfileRejected`).
 
 **Execute ALL steps in order. Do not skip or optimize.**
 
