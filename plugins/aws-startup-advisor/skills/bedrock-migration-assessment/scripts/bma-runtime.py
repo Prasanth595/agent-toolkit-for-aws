@@ -36,6 +36,7 @@ WRITERS = {
         ".gate-failures.json": BMA_OWNER,
         "migration-preview.json": BMA_OWNER,
         "ai-workload-profile.json": BMA_OWNER,
+        "ai-workload-sidecar.json": BMA_OWNER,
         "openai-usage-profile.json": BMA_OWNER,
         "anthropic-usage-profile.json": BMA_OWNER,
         "openrouter-usage-profile.json": BMA_OWNER,
@@ -56,6 +57,7 @@ WRITERS = {
         ".gate-failures.json": GCP_OWNER,
         "migration-preview.json": GCP_OWNER,
         "ai-workload-profile.json": BMA_OWNER,
+        "ai-workload-sidecar.json": GCP_OWNER,
         "openai-usage-profile.json": BMA_OWNER,
         "anthropic-usage-profile.json": BMA_OWNER,
         "openrouter-usage-profile.json": BMA_OWNER,
@@ -74,7 +76,7 @@ WRITERS = {
 }
 MUTABLE_OUTPUTS = {
     ".phase-status.json", ".gate-failures.json", "migration-preview.json",
-    "ai-workload-profile.json", "openai-usage-profile.json",
+    "ai-workload-profile.json", "ai-workload-sidecar.json", "openai-usage-profile.json",
     "anthropic-usage-profile.json", "openrouter-usage-profile.json",
     "preferences-draft.json",
 }
@@ -220,6 +222,134 @@ MODEL_TARGETS = {
     "gpt-4o": ("openai.gpt-5.6-terra", "direct_api", 2.2, 13.2),
     "gemini-2.5-pro": ("amazon.nova-pro-v1:0", "google_genai_sdk", 0.8, 3.2),
 }
+# Retired source models have no Bedrock target price. The trace marks them retired and leaves
+# pricing unavailable instead of pricing or generating code for them.
+RETIRED_MODELS = frozenset({"gemini-1.5-pro"})
+
+# #415 is the only AI profile contract BMA accepts. Its vendored copy sits beside this runtime.
+AI_PROFILE_SCHEMA_RELATIVE = "references/contracts/ai-workload-profile.schema.json"
+# Legacy top-level keys from the pre-#415 GCP-shaped profile, checked in this order.
+LEGACY_PROFILE_KEYS = (
+    "metadata", "summary", "models", "integration", "infrastructure", "current_costs",
+    "detection_signals", "workloads", "agentic_profile", "tool_manifest",
+)
+LEGACY_SOURCE_KEYS = ("service", "detected_via", "evidence", "model_id", "capabilities_used", "usage_context")
+# Temporary sidecar: workloads, agentic_profile, tool_manifest, observed costs, and integration context have no #415 slot yet.
+# Its folding into #415 under a new schema version is a follow-up.
+AI_SIDECAR_KEYS = {
+    "schema_version", "kind", "workloads", "agentic_profile", "tool_manifest",
+    "observed_costs", "integration_context",
+}
+AI_SIDECAR_KIND = "BMA_GCP_AI_SIDECAR"
+
+
+class BmaLegacyProfileRejected(ValueError):
+    """Named rejection for legacy-shaped AI profile input. BMA has no legacy path."""
+
+
+_JSON_TYPES = {"object": dict, "array": list, "string": str}
+
+
+def _schema_errors(schema: dict[str, Any], value: Any, root: dict[str, Any], path: str = "$") -> list[str]:
+    """Stdlib subset of Draft-07 covering the keywords used by #415 (no third-party dependency)."""
+    if "$ref" in schema:
+        return _schema_errors(root["definitions"][schema["$ref"].split("/")[-1]], value, root, path)
+    errors: list[str] = []
+    if "type" in schema and not isinstance(value, _JSON_TYPES[schema["type"]]):
+        return [f"{path}: type"]
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{path}: const")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path}: enum")
+    if isinstance(value, str):
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            errors.append(f"{path}: pattern")
+        if len(value) < schema.get("minLength", 0):
+            errors.append(f"{path}: minLength")
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        errors += [f"{path}: missing {key}" for key in schema.get("required", []) if key not in value]
+        if schema.get("additionalProperties") is False:
+            errors += [f"{path}.{key}: additional" for key in value if key not in properties]
+        for key, sub in properties.items():
+            if key in value:
+                errors += _schema_errors(sub, value[key], root, f"{path}.{key}")
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            errors.append(f"{path}: minItems")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            errors.append(f"{path}: maxItems")
+        if schema.get("uniqueItems"):
+            canon = [json.dumps(item, sort_keys=True) for item in value]
+            if len(set(canon)) != len(canon):
+                errors.append(f"{path}: uniqueItems")
+        for index, item in enumerate(value):
+            if "items" in schema:
+                errors += _schema_errors(schema["items"], item, root, f"{path}[{index}]")
+    if "oneOf" in schema:
+        matches = [branch for branch in schema["oneOf"] if not _schema_errors(branch, value, root, path)]
+        if len(matches) != 1:
+            errors.append(f"{path}: oneOf")
+    return errors
+
+
+def _legacy_profile_field(value: dict[str, Any]) -> str | None:
+    for key in LEGACY_PROFILE_KEYS:
+        if key in value:
+            return key
+    for index, source in enumerate(value.get("ai_sources", []) if isinstance(value.get("ai_sources"), list) else []):
+        if isinstance(source, dict):
+            for key in LEGACY_SOURCE_KEYS:
+                if key in source:
+                    return f"ai_sources[{index}].{key}"
+    return None
+
+
+def validate_ai_workload_profile(value: Any, bma_root: Path) -> dict[str, Any]:
+    """Accept only a #415 ai-workload-profile document; reject legacy shape by name."""
+    if not isinstance(value, dict):
+        raise ValueError("ai_profile_invalid: json object required")
+    legacy = _legacy_profile_field(value)
+    if legacy is not None:
+        raise BmaLegacyProfileRejected(
+            f"BmaLegacyProfileRejected: legacy field '{legacy}' found. BMA input must be the #415 "
+            "ai-workload-profile format (schema_version \"1.0\", ai_sources, gateways)."
+        )
+    schema = json.loads((bma_root / AI_PROFILE_SCHEMA_RELATIVE).read_text(encoding="utf-8"))
+    errors = _schema_errors(schema, value, schema)
+    if errors:
+        raise ValueError(f"ai_profile_schema_invalid: {errors[0]}")
+    keys: set[tuple[str, str]] = set()
+    for source in value["ai_sources"]:
+        key = (source["provider"], source["source_service"])
+        if key in keys:
+            raise ValueError("ai_profile_source_duplicate")
+        keys.add(key)
+        observed = [item["normalized_model"] for item in source["model_observations"]]
+        if sorted(observed) != sorted(source["models"]) or any(
+            item["model_family"] not in source["model_families"] for item in source["model_observations"]
+        ):
+            raise ValueError("ai_profile_observation_mismatch")
+    return {"ok": True, "ai_sources": len(value["ai_sources"]), "gateways": len(value["gateways"])}
+
+
+def validate_ai_sidecar(value: Any) -> dict[str, Any]:
+    """Closed check for the temporary sidecar that carries non-#415 AI context."""
+    if not isinstance(value, dict) or set(value) - AI_SIDECAR_KEYS:
+        raise ValueError("ai_sidecar_invalid")
+    if value.get("schema_version") != 1 or value.get("kind") != AI_SIDECAR_KIND:
+        raise ValueError("ai_sidecar_invalid")
+    if not isinstance(value.get("workloads"), list):
+        raise ValueError("ai_sidecar_invalid")
+    for optional, expected in (
+        ("agentic_profile", dict), ("tool_manifest", list),
+        ("observed_costs", dict), ("integration_context", dict),
+    ):
+        if optional in value and not isinstance(value[optional], expected):
+            raise ValueError("ai_sidecar_invalid")
+    return value
+
+
 GENERATED_FILES = {
     "anthropic_sdk": ["ai-migration/anthropic-adapter.ts"],
     "direct_api": ["ai-migration/bedrock-client.py"],
@@ -288,7 +418,7 @@ def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("trace_request_invalid")
     associations = []
     mappings = []
-    source_models = []
+    source_keys: set[tuple[str, str, str | None, str]] = set()
     source_costs = []
     target_costs = []
     migration_paths = []
@@ -323,19 +453,28 @@ def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
         if any(value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0) for value in token_values):
             raise ValueError("trace_source_invalid")
         for model in models:
-            if not isinstance(model, str) or model not in MODEL_TARGETS or model in source_models:
+            source_key = (row["provider"], row["source_service"], row["gateway"], model)
+            if (not isinstance(model, str) or model not in MODEL_TARGETS and model not in RETIRED_MODELS
+                    or source_key in source_keys):
                 raise ValueError("trace_source_invalid")
-            source_models.append(model)
-            target, migration_path, input_rate, output_rate = MODEL_TARGETS[model]
-            if row["gateway"] == "openrouter":
-                migration_path = "openrouter_byok"
-            elif row["source_service"] == "vertex_ai":
-                migration_path = "vertex_adapter"
+            source_keys.add(source_key)
             associations.append({
                 "source_order": source_order, "provider": row["provider"],
                 "source_service": row["source_service"], "gateway": row["gateway"],
                 "model": model, "call_sites": call_sites,
             })
+            if model in RETIRED_MODELS:
+                mappings.append({
+                    "source_model": model, "target_model": None,
+                    "migration_path": None, "retired": True,
+                })
+                target_costs.append(None)
+                continue
+            target, migration_path, input_rate, output_rate = MODEL_TARGETS[model]
+            if row["gateway"] == "openrouter":
+                migration_path = "openrouter_byok"
+            elif row["source_service"] == "vertex_ai":
+                migration_path = "vertex_adapter"
             mappings.append({
                 "source_model": model, "target_model": target,
                 "migration_path": migration_path,
@@ -363,11 +502,12 @@ def semantic_trace(request: dict[str, Any]) -> dict[str, Any]:
     generated_files: list[str] = []
     if route_result["ai_route_active"] and decisions["generate"]:
         unique_paths = list(dict.fromkeys(migration_paths))
-        generation_route = unique_paths[0] if len(unique_paths) == 1 else "combined"
-        for migration_path in unique_paths:
-            generated_files.extend(GENERATED_FILES[migration_path])
-        if decisions["include_rollback"]:
-            generated_files.append("ai-migration/rollback.md")
+        if unique_paths:
+            generation_route = unique_paths[0] if len(unique_paths) == 1 else "combined"
+            for migration_path in unique_paths:
+                generated_files.extend(GENERATED_FILES[migration_path])
+            if decisions["include_rollback"]:
+                generated_files.append("ai-migration/rollback.md")
     report_targets = REPORT_SCOPES[decisions["report_scope"]]
     captures = request["capture_observations"]
     if not isinstance(captures, list):
@@ -903,7 +1043,23 @@ def main() -> int:
     execute.add_argument("--request", required=True, help="JSON request path, or - for stdin")
     trace = commands.add_parser("trace")
     trace.add_argument("--request", required=True, help="Raw semantic-trace request path, or - for stdin")
+    validate = commands.add_parser("validate-profile", help="Gate every AI phase: #415 profile, optional sidecar")
+    validate.add_argument("--profile", type=Path, required=True)
+    validate.add_argument("--sidecar", type=Path)
     args = parser.parse_args()
+    if args.command == "validate-profile":
+        try:
+            output = validate_ai_workload_profile(
+                json.loads(args.profile.read_text(encoding="utf-8")), Path(__file__).resolve().parents[1]
+            )
+            if args.sidecar is not None:
+                validate_ai_sidecar(json.loads(args.sidecar.read_text(encoding="utf-8")))
+        except ValueError as exc:
+            error = "BmaLegacyProfileRejected" if isinstance(exc, BmaLegacyProfileRejected) else "ValueError"
+            print(json.dumps({"error": error, "message": str(exc)}, sort_keys=True), file=sys.stderr)
+            return 1
+        print(json.dumps(output, sort_keys=True))
+        return 0
     if args.command == "resolve-region":
         output = resolve_region(args.compliance.split(","), [x for x in args.regions.split(",") if x], args.cross_cloud, args.delegated_region)
     elif args.command == "preflight":
