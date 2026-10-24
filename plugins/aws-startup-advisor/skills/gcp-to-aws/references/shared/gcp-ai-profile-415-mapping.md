@@ -20,10 +20,10 @@ The mapping is deterministic. The same legacy input always produces the same #41
 | `models[]` with `service` `openrouter_api` | `gateways[]` with `product: openrouter`, `type: llm_router` | Present only when at least one such model exists. `integration.gateway_type` must be `llm_router`, otherwise the conversion fails. | `LEGACY_GATEWAY_UNREPRESENTABLE` |
 | `openrouter_api` model ids of the form `<prefix>/<model>` | `gateways[].upstreams[]` | `anthropic/` gives `anthropic` / `anthropic_api`. `openai/` gives `openai` / `openai_api`. `google/` gives `google` / `vertex_ai`, matching the merged #415 fixture. Grouped by provider, source_service, then family. | none for resolved ids |
 | Any `openrouter_api` model id without a known `<prefix>/` | `gateways[].upstream_evidence: unresolved`, `upstreams: []` | The whole gateway is unresolved when any upstream prefix is missing or unknown. No upstream is invented. | none |
-| `integration.pattern`, `sdk_version`, `frameworks`, `languages`, `capabilities_summary`, `primary_sdk` | none | Not representable in #415. These go to the GCP-owned sidecar, not the profile. The sidecar is not emitted by this adapter yet (see Open items). | none |
+| `integration.pattern`, `primary_sdk`, `frameworks`, `languages`, `capabilities_summary` | `ai-workload-sidecar.json` → `integration_context` (same keys) | Not representable in #415. Copied verbatim into the GCP-owned sidecar when `integration` has any of these keys. `sdk_version` and `gateway_type` are not carried. `gateway_type` is validated against the gateway rows instead. | none |
 | `models[].capabilities_used`, `models[].usage_context` | none | Not representable in #415. | none |
 | `infrastructure[]` | none | Not representable in #415. | none |
-| `current_costs` | none | Not representable in #415. It goes to the GCP-owned sidecar as observed cost, not the profile. | none |
+| `current_costs` | `ai-workload-sidecar.json` → `observed_costs` | Not representable in #415. Copied verbatim into the GCP-owned sidecar. Must be an object, otherwise `LEGACY_SHAPE_UNEXPECTED`. | `LEGACY_SHAPE_UNEXPECTED` |
 | `metadata.*`, `detection_signals` as a whole | none | Provenance only, beyond the rows above. | none |
 | Any non-object `models[]` entry, or `summary`, `integration`, `detection_signals` of the wrong type | none | Input shape check. | `LEGACY_SHAPE_UNEXPECTED` |
 | Converted document fails the vendored #415 schema | none | Final gate before any write. The error reports the first failing field path. | `SCHEMA_415_INVALID` |
@@ -36,9 +36,9 @@ The mapping is deterministic. The same legacy input always produces the same #41
 
 ## Open items
 
-- The GCP sidecar (observed cost and integration context) is not written by this adapter. It needs a separate step.
-- Where the converted document is written, and whether BMA reads it from the run directory or from the public `ai-workload-profile.json` name, is not decided here. See `adapter-mapping.md` in the task artifacts.
+- `infrastructure[]`, `models[].capabilities_used`, `models[].usage_context`, and `metadata` are not carried yet. Their handling (fail closed or carry through the sidecar) is pending a product decision, so the table above still lists them as not representable.
+- The converted document is written to `bma-input/ai-workload-profile.json`. The public GCP `ai-workload-profile.json` keeps its legacy content.
 
 ## Error codes
 
-Each code is raised as `GcpProfileNotRepresentable` with the legacy field path. The CLI prints the code, field path, and message to stderr and exits 1. It writes no output file.
+`LEGACY_SIDECAR_INVALID` is raised when an existing run-level `ai-workload-sidecar.json` is not a `BMA_GCP_AI_SIDECAR` v1 document. Each code is raised as `GcpProfileNotRepresentable` with the legacy field path. The CLI prints the code, field path, and message to stderr and exits 1. It writes no output file.

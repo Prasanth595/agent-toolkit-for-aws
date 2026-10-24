@@ -1,25 +1,21 @@
-"""GCP boundary adapter: legacy GCP AI profile -> #415, with named fail-closed errors."""
+"""GCP boundary adapter: legacy GCP AI profile -> #415, with named fail-closed errors and the GCP sidecar."""
 from __future__ import annotations
-
 import copy
 import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
-
 import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
 GCP = ROOT / "skills/gcp-to-aws"
 ADAPTER_PATH = GCP / "scripts/gcp-ai-profile-adapter.py"
+BMA_RUNTIME = ROOT / "skills/bedrock-migration-assessment/scripts/bma-runtime.py"
 VENDORED_SCHEMA = GCP / "references/contracts/ai-workload-profile.schema.json"
 CANONICAL_SCHEMA = ROOT / "scripts/contracts/ai-workload-profile.schema.json"
-
 _spec = importlib.util.spec_from_file_location("gcp_ai_profile_adapter", ADAPTER_PATH)
 adapter = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(adapter)
-
 # Legacy GCP-shaped sample: direct Anthropic and OpenAI models found in application code.
 LEGACY_SAMPLE = {
     "current_costs": {"monthly_ai_spend": 100, "services_detected": ["Anthropic API"], "source": "anthropic_usage_api"},
@@ -41,7 +37,6 @@ LEGACY_SAMPLE = {
     ],
     "summary": {"ai_source": "both", "confidence_level": "very_high", "inferred_from_iac": False, "overall_confidence": 0.95},
 }
-
 EXPECTED_SAMPLE_415 = {
     "schema_version": "1.0",
     "ai_sources": [
@@ -65,37 +60,32 @@ EXPECTED_SAMPLE_415 = {
     ],
     "gateways": [],
 }
-
-
+SIDECAR_EXPECTED = {
+    "schema_version": 1,
+    "kind": "BMA_GCP_AI_SIDECAR",
+    "workloads": [],
+    "observed_costs": LEGACY_SAMPLE["current_costs"],
+    "integration_context": {"pattern": "direct_sdk", "primary_sdk": "anthropic", "languages": ["python"]},
+}
 def _legacy(mutate=None) -> dict:
     doc = copy.deepcopy(LEGACY_SAMPLE)
     if mutate is not None:
         mutate(doc)
     return doc
-
-
 def _validate_jsonschema(document: dict) -> list[str]:
     jsonschema = pytest.importorskip("jsonschema")
     schema = json.loads(VENDORED_SCHEMA.read_text(encoding="utf-8"))
     validator = jsonschema.Draft7Validator(schema)
     return [error.message for error in validator.iter_errors(document)]
-
-
 def test_vendored_schema_is_byte_identical_to_canonical():
     assert VENDORED_SCHEMA.read_bytes() == CANONICAL_SCHEMA.read_bytes()
-
-
 def test_sample_converts_to_expected_415_document():
     assert adapter.convert_legacy_profile(_legacy()) == EXPECTED_SAMPLE_415
     assert _validate_jsonschema(EXPECTED_SAMPLE_415) == []
-
-
 def test_conversion_is_deterministic():
     first = json.dumps(adapter.convert_legacy_profile(_legacy()), sort_keys=True)
     second = json.dumps(adapter.convert_legacy_profile(_legacy()), sort_keys=True)
     assert first == second
-
-
 def test_mixed_direct_and_azure_keeps_both_services():
     def add_azure(doc):
         doc["models"].append({
@@ -103,15 +93,12 @@ def test_mixed_direct_and_azure_keeps_both_services():
             "evidence": [{"file": "azure.tf", "resource": "azurerm_cognitive_deployment.gpt4o", "source": "terraform"}],
         })
         doc["detection_signals"].append({"confidence": 0.8, "method": "terraform", "pattern": "azure", "evidence": "azure.tf"})
-
     document = adapter.convert_legacy_profile(_legacy(add_azure))
     openai = [source for source in document["ai_sources"] if source["provider"] == "openai"]
     assert [source["source_service"] for source in openai] == ["azure_openai", "openai_api"]
     azure = openai[0]["model_observations"][0]
     assert azure["evidence"] == [{"provenance": "iac", "confidence": "medium", "detail": "azurerm_cognitive_deployment.gpt4o"}]
     assert _validate_jsonschema(document) == []
-
-
 def test_openrouter_upstreams_form_observed_gateway():
     def add_openrouter(doc):
         doc["integration"]["gateway_type"] = "llm_router"
@@ -123,7 +110,6 @@ def test_openrouter_upstreams_form_observed_gateway():
             "detected_via": ["code"], "model_id": "google/gemini-1.5-pro", "service": "openrouter_api",
             "evidence": [{"file": "src/ai/router.py", "line": 5, "source": "code"}],
         })
-
     document = adapter.convert_legacy_profile(_legacy(add_openrouter))
     gateway = document["gateways"][0]
     assert gateway["product"] == "openrouter" and gateway["type"] == "llm_router"
@@ -136,8 +122,6 @@ def test_openrouter_upstreams_form_observed_gateway():
     ]
     assert all(source["provider"] != "openrouter" for source in document["ai_sources"])
     assert _validate_jsonschema(document) == []
-
-
 def test_openrouter_without_prefix_is_unresolved_with_no_upstreams():
     def add_unprefixed(doc):
         doc["integration"]["gateway_type"] = "llm_router"
@@ -145,33 +129,25 @@ def test_openrouter_without_prefix_is_unresolved_with_no_upstreams():
             "detected_via": ["code"], "model_id": "claude-3-haiku-20240307", "service": "openrouter_api",
             "evidence": [{"file": "src/ai/router.py", "line": 9, "source": "code"}],
         })
-
     document = adapter.convert_legacy_profile(_legacy(add_unprefixed))
     assert document["gateways"] == [{"product": "openrouter", "type": "llm_router", "upstream_evidence": "unresolved", "upstreams": []}]
     assert _validate_jsonschema(document) == []
-
-
 def test_iac_only_declared_family_stays_not_observed():
     def iac_only(doc):
         doc["models"] = []
         doc["metadata"]["profile_source"] = "iac_vertex"
         doc["summary"]["ai_source"] = "gemini"
         doc["summary"]["inferred_from_iac"] = True
-
     document = adapter.convert_legacy_profile(_legacy(iac_only))
     assert document["ai_sources"] == [{
         "provider": "google", "source_service": "vertex_ai", "model_families": ["gemini"],
         "model_evidence": "not_observed", "models": [], "model_observations": [],
     }]
     assert _validate_jsonschema(document) == []
-
-
 def test_legacy_shape_check_rejects_an_already_415_document():
     with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
         adapter.convert_legacy_profile(EXPECTED_SAMPLE_415)
     assert (info.value.code, info.value.field_path) == ("LEGACY_SHAPE_UNEXPECTED", "$")
-
-
 def _set(path, value):
     def mutate(doc):
         target = doc
@@ -181,8 +157,6 @@ def _set(path, value):
         last = keys[-1]
         target[int(last) if last.isdigit() else last] = value
     return mutate
-
-
 NAMED_ERROR_CASES = [
     ("service unmapped", _set("models.0.service", "bedrock_api"), "LEGACY_SERVICE_UNMAPPED", "$.models[0].service"),
     ("ai_source disagrees with models", _set("summary.ai_source", "gemini"), "LEGACY_AI_SOURCE_UNREPRESENTABLE", "$.summary.ai_source"),
@@ -199,8 +173,6 @@ NAMED_ERROR_CASES = [
     ("both with no models", lambda doc: (doc.update(models=[]), doc["summary"].update(ai_source="both")), "LEGACY_AI_SOURCE_UNREPRESENTABLE", "$.summary.ai_source"),
     ("absent family with no models", lambda doc: (doc.update(models=[]), doc["summary"].pop("ai_source")), "LEGACY_IAC_FAMILY_UNKNOWN", "$.summary.ai_source"),
 ]
-
-
 @pytest.mark.parametrize(("name", "mutate", "code", "field_path"), NAMED_ERROR_CASES, ids=[case[0] for case in NAMED_ERROR_CASES])
 def test_unrepresentable_legacy_fails_closed_with_named_error(name, mutate, code, field_path):
     with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
@@ -208,8 +180,6 @@ def test_unrepresentable_legacy_fails_closed_with_named_error(name, mutate, code
     assert info.value.code == code
     assert info.value.field_path == field_path
     assert str(info.value).startswith(f"GcpProfileNotRepresentable: {code} at {field_path}:")
-
-
 def test_schema_gate_fails_closed_when_the_converted_document_is_invalid(monkeypatch, tmp_path):
     schema = json.loads(VENDORED_SCHEMA.read_text(encoding="utf-8"))
     schema["properties"]["schema_version"] = {"const": "2.0"}
@@ -220,28 +190,90 @@ def test_schema_gate_fails_closed_when_the_converted_document_is_invalid(monkeyp
         adapter.convert_legacy_profile(_legacy())
     assert info.value.code == "SCHEMA_415_INVALID"
     assert info.value.field_path == "$.schema_version"
-
-
+def test_sidecar_carries_gcp_observed_costs_and_integration_context():
+    assert adapter.convert_legacy_sidecar(_legacy()) == SIDECAR_EXPECTED
+def test_sidecar_is_not_written_when_there_is_nothing_to_carry():
+    def bare(doc):
+        doc.pop("current_costs")
+        doc.pop("integration")
+    assert adapter.convert_legacy_sidecar(_legacy(bare)) is None
+def test_sidecar_keeps_existing_app_code_workloads_and_replaces_only_gcp_keys():
+    existing = {
+        "schema_version": 1, "kind": "BMA_GCP_AI_SIDECAR",
+        "workloads": [{"capability": "text_generation"}], "observed_costs": {"monthly_ai_spend": 1},
+    }
+    sidecar = adapter.convert_legacy_sidecar(_legacy(), existing)
+    assert sidecar["workloads"] == [{"capability": "text_generation"}]
+    assert sidecar["observed_costs"] == LEGACY_SAMPLE["current_costs"]
+    assert existing["observed_costs"] == {"monthly_ai_spend": 1}
+def test_existing_sidecar_of_another_kind_fails_closed():
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_sidecar(_legacy(), {"schema_version": 1, "kind": "OTHER", "workloads": []})
+    assert info.value.code == "LEGACY_SIDECAR_INVALID"
+def test_non_object_current_costs_fails_closed():
+    with pytest.raises(adapter.GcpProfileNotRepresentable) as info:
+        adapter.convert_legacy_sidecar(_legacy(_set("current_costs", 100)))
+    assert (info.value.code, info.value.field_path) == ("LEGACY_SHAPE_UNEXPECTED", "$.current_costs")
+def test_sidecar_passes_bma_validate_profile_next_to_the_415_document(tmp_path):
+    legacy_path = tmp_path / "legacy.json"
+    out_path = tmp_path / "bma-input" / "ai-workload-profile.json"
+    sidecar_path = tmp_path / "ai-workload-sidecar.json"
+    legacy_path.write_text(json.dumps(_legacy()), encoding="utf-8")
+    converted = subprocess.run(
+        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(legacy_path), "--out", str(out_path), "--sidecar", str(sidecar_path)],
+        capture_output=True, text=True,
+    )
+    assert converted.returncode == 0, converted.stderr
+    validated = subprocess.run(
+        [sys.executable, str(BMA_RUNTIME), "validate-profile", "--profile", str(out_path), "--sidecar", str(sidecar_path)],
+        capture_output=True, text=True,
+    )
+    assert validated.returncode == 0, validated.stderr
+def _schema_keywords(node: object, parent_key: str = "") -> set[str]:
+    """Keywords used by a JSON Schema node. Keys directly under properties/definitions are names, not keywords."""
+    if isinstance(node, list):
+        return set().union(*(_schema_keywords(item) for item in node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    found: set[str] = set()
+    for key, value in node.items():
+        if parent_key in ("properties", "definitions"):
+            found |= _schema_keywords(value)
+        else:
+            found.add(key)
+            found |= _schema_keywords(value, key)
+    return found
+# Keywords the stdlib subset validator in gcp-ai-profile-adapter.py evaluates. Annotations are ignored.
+ADAPTER_SUBSET_KEYWORDS = {
+    "$ref", "$schema", "$id", "definitions", "properties", "items", "required", "additionalProperties",
+    "type", "const", "enum", "pattern", "minLength", "minItems", "maxItems", "uniqueItems", "oneOf",
+    "title", "description", "default", "examples",
+}
+def test_adapter_schema_subset_covers_every_keyword_in_the_vendored_schema():
+    assert _schema_keywords(json.loads(VENDORED_SCHEMA.read_text(encoding="utf-8"))) <= ADAPTER_SUBSET_KEYWORDS
 def test_cli_writes_valid_document_and_nothing_on_failure(tmp_path):
     legacy_path = tmp_path / "legacy.json"
     out_path = tmp_path / "bma-input" / "ai-workload-profile.json"
+    sidecar_path = tmp_path / "ai-workload-sidecar.json"
     legacy_path.write_text(json.dumps(_legacy()), encoding="utf-8")
     ok = subprocess.run(
-        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(legacy_path), "--out", str(out_path)],
+        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(legacy_path), "--out", str(out_path), "--sidecar", str(sidecar_path)],
         capture_output=True, text=True,
     )
     assert ok.returncode == 0, ok.stderr
     assert json.loads(out_path.read_text(encoding="utf-8")) == EXPECTED_SAMPLE_415
-
+    assert json.loads(sidecar_path.read_text(encoding="utf-8")) == SIDECAR_EXPECTED
     bad_path = tmp_path / "bad-legacy.json"
     bad_out = tmp_path / "bad-out.json"
+    bad_sidecar = tmp_path / "bad-sidecar.json"
     bad_path.write_text(json.dumps(_legacy(_set("models.0.service", "bedrock_api"))), encoding="utf-8")
     failed = subprocess.run(
-        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(bad_path), "--out", str(bad_out)],
+        [sys.executable, str(ADAPTER_PATH), "convert", "--legacy", str(bad_path), "--out", str(bad_out), "--sidecar", str(bad_sidecar)],
         capture_output=True, text=True,
     )
     assert failed.returncode == 1
     assert not bad_out.exists()
+    assert not bad_sidecar.exists()
     error = json.loads(failed.stderr)
     assert error["error"] == "GcpProfileNotRepresentable"
     assert error["code"] == "LEGACY_SERVICE_UNMAPPED"

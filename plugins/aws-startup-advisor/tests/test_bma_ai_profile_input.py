@@ -172,6 +172,35 @@ def test_sidecar_is_closed_and_temporary_shape() -> None:
         runtime.validate_ai_sidecar({**valid, "observed_costs": []})
 
 
+def _schema_keywords(node: object, parent_key: str = "") -> set[str]:
+    """Keywords used by a JSON Schema node. Keys directly under properties/definitions are names, not keywords."""
+    if isinstance(node, list):
+        return set().union(*(_schema_keywords(item) for item in node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    found: set[str] = set()
+    for key, value in node.items():
+        if parent_key in ("properties", "definitions"):
+            found |= _schema_keywords(value)
+        else:
+            found.add(key)
+            found |= _schema_keywords(value, key)
+    return found
+
+
+# Keywords the stdlib subset validator in bma-runtime.py evaluates. Annotations are ignored.
+RUNTIME_SUBSET_KEYWORDS = {
+    "$ref", "$schema", "$id", "definitions", "properties", "items", "required", "additionalProperties",
+    "type", "const", "enum", "pattern", "minLength", "minItems", "maxItems", "uniqueItems", "oneOf",
+    "title", "description", "default", "examples",
+}
+
+
+def test_runtime_schema_subset_covers_every_keyword_in_the_vendored_schema() -> None:
+    schema = json.loads((BMA_ROOT / "references/contracts/ai-workload-profile.schema.json").read_text(encoding="utf-8"))
+    assert _schema_keywords(schema) <= RUNTIME_SUBSET_KEYWORDS
+
+
 def test_bma_never_imports_or_invokes_gcp_to_aws() -> None:
     """BMA is the target-side contract: no code or path under it may reach into the GCP shim."""
     forbidden = ("gcp-to-aws/scripts", "gcp_ai_profile_adapter", "from gcp", "import gcp")

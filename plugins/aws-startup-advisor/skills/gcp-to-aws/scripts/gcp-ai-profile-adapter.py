@@ -9,6 +9,7 @@ imports or invokes this module.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -35,6 +36,9 @@ UPSTREAM_PREFIX = {
 FAMILY_PREFIXES = (("claude", "claude"), ("gemini", "gemini"), ("gpt", "gpt"), ("o1", "gpt"), ("o3", "gpt"))
 PROVENANCE = {"code": "code", "terraform": "iac", "live_gcloud": "live_api", "user_confirmed": "user_confirmed", "user": "user_confirmed"}
 NORMALIZED_MODEL = re.compile(r"^(?!(?:both|unknown)$)[a-z0-9][a-z0-9._:/-]*$")
+SIDECAR_KIND = "BMA_GCP_AI_SIDECAR"
+# Legacy integration keys carried into the sidecar integration_context. Other keys are not carried.
+SIDECAR_INTEGRATION_KEYS = ("pattern", "primary_sdk", "frameworks", "languages", "capabilities_summary")
 
 
 class GcpProfileNotRepresentable(ValueError):
@@ -294,16 +298,48 @@ def convert_legacy_profile(legacy: Any) -> dict[str, Any]:
     return document
 
 
+def convert_legacy_sidecar(legacy: dict[str, Any], existing: Any = None) -> dict[str, Any] | None:
+    """Build the GCP-owned temporary sidecar that carries observed spend and integration context.
+
+    Returns None when there is nothing to carry and no sidecar exists. An existing sidecar (for
+    example one holding app-code workloads) is kept, and only observed_costs and integration_context
+    are replaced by the legacy values.
+    """
+    if existing is not None and (
+        not isinstance(existing, dict) or existing.get("schema_version") != 1
+        or existing.get("kind") != SIDECAR_KIND or not isinstance(existing.get("workloads"), list)
+    ):
+        raise _fail("LEGACY_SIDECAR_INVALID", "$", "existing ai-workload-sidecar.json is not a BMA_GCP_AI_SIDECAR v1 document")
+    carried: dict[str, Any] = {}
+    costs = legacy.get("current_costs")
+    if costs is not None:
+        if not isinstance(costs, dict):
+            raise _fail("LEGACY_SHAPE_UNEXPECTED", "$.current_costs", "current_costs must be an object")
+        carried["observed_costs"] = costs
+    integration = legacy.get("integration") if legacy.get("integration") is not None else {}
+    context = {key: integration[key] for key in SIDECAR_INTEGRATION_KEYS if key in integration}
+    if context:
+        carried["integration_context"] = context
+    if not carried and existing is None:
+        return None
+    sidecar = copy.deepcopy(existing) if existing is not None else {"schema_version": 1, "kind": SIDECAR_KIND, "workloads": []}
+    sidecar.update(carried)
+    return sidecar
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    convert = commands.add_parser("convert", help="Convert a legacy profile to a #415 document")
+    convert = commands.add_parser("convert", help="Convert a legacy profile to a #415 document and its GCP sidecar")
     convert.add_argument("--legacy", type=Path, required=True)
     convert.add_argument("--out", type=Path, required=True)
+    convert.add_argument("--sidecar", type=Path, required=True, help="Run-level ai-workload-sidecar.json (read if present, then written)")
     args = parser.parse_args(argv)
     try:
         legacy = json.loads(args.legacy.read_text(encoding="utf-8"))
         document = convert_legacy_profile(legacy)
+        existing = json.loads(args.sidecar.read_text(encoding="utf-8")) if args.sidecar.exists() else None
+        sidecar = convert_legacy_sidecar(legacy, existing)
     except GcpProfileNotRepresentable as exc:
         print(json.dumps({
             "error": "GcpProfileNotRepresentable", "code": exc.code,
@@ -312,7 +348,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"ok": True, "ai_sources": len(document["ai_sources"]), "gateways": len(document["gateways"])}, sort_keys=True))
+    if sidecar is not None:
+        args.sidecar.parent.mkdir(parents=True, exist_ok=True)
+        args.sidecar.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps({
+        "ok": True, "ai_sources": len(document["ai_sources"]), "gateways": len(document["gateways"]),
+        "sidecar": sidecar is not None,
+    }, sort_keys=True))
     return 0
 
 
